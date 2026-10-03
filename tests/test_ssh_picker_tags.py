@@ -1,9 +1,11 @@
 """Exercise tag filtering with OpenSSH's real configuration evaluator; no logins."""
 from contextlib import ExitStack
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -38,7 +40,15 @@ class Screen:
         return next(self.keys)
 
 
-@unittest.skipUnless(shutil.which('ssh'), 'OpenSSH is required')
+def supports_ssh_tag():
+    if not shutil.which('ssh'):
+        return False
+    result = subprocess.run(['ssh', '-G', '-F', os.devnull, '-o', 'Tag=dalftui', '--', 'localhost'],
+                            capture_output=True, text=True, timeout=10)
+    return result.returncode == 0
+
+
+@unittest.skipUnless(supports_ssh_tag(), 'OpenSSH 9.4+ is required for desktop picker tests')
 class TagTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='dalftui-tag-tests-')

@@ -2,6 +2,7 @@
 from contextlib import redirect_stdout
 import io
 import importlib.util
+from importlib.machinery import SourceFileLoader
 import json
 import os
 from pathlib import Path
@@ -157,11 +158,13 @@ class InstallationTests(DisposableSetup):
 
 
 @unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
-class TmuxTests(DisposableSetup):
+class TmuxFixture(DisposableSetup):
     """Exercise the actual loader and reload against a private tmux server."""
+    profile = 'desktop'
+
     def setUp(self):
         super().setUp()
-        self.install()
+        self.install(profile=self.profile)
         self.socket = self.directory / 'tmux.socket'
         self.env = dict(os.environ)
         self.env.pop('TMUX', None)
@@ -187,6 +190,7 @@ class TmuxTests(DisposableSetup):
         with redirect_stdout(io.StringIO()):
             setup.reload_config(self.paths, socket=self.socket)
 
+class TmuxTests(TmuxFixture):
     def test_runtime_reload_keeps_sessions_status_and_capability_counts(self):
         self.start()
         self.tmux('set-option', '-g', '@cctab_window_strip', '🔵')
@@ -224,6 +228,146 @@ class TmuxTests(DisposableSetup):
     def test_reload_does_not_start_a_tmux_server(self):
         self.do_reload()
         self.assertFalse(self.socket.exists())
+
+
+class ServerInstallationTests(DisposableSetup):
+    def test_server_install_never_reads_or_changes_existing_alacritty_files(self):
+        self.paths.alacritty.parent.mkdir(parents=True)
+        self.paths.alacritty.write_text('invalid TOML: keep this file')
+        local = self.paths.config_dir / 'alacritty/local.toml'
+        local.write_text('another invalid TOML file')
+        files = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+                 for path in (self.paths.alacritty, local)}
+        with patch.object(setup, 'load', side_effect=AssertionError('Alacritty was read')):
+            self.install(profile='tmux-only')
+        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertEqual(files, {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files})
+
+    def test_server_mode_and_overrides_survive_install_without_flags(self):
+        self.install(profile='tmux-only')
+        local = self.paths.config_dir / 'tmux/local.conf'
+        local.write_text('set -g history-limit 5678\n')
+        before = {path: path.stat().st_mtime_ns for path in (local, self.paths.tmux)}
+        self.assertIsNone(self.install())
+        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertEqual(before, {path: path.stat().st_mtime_ns for path in before})
+        self.assertFalse(self.paths.alacritty.parent.exists())
+
+    def test_old_desktop_loader_is_migrated_with_a_backup(self):
+        previous = setup.loaders(self.paths, legacy=True)[1]
+        self.paths.tmux.write_bytes(previous)
+        self.assertEqual(setup.installed_profile(self.paths), 'desktop')
+        backup = self.install()
+        records = json.loads((backup / 'manifest.json').read_text())
+        item = next(item for item in records if item['original'] == str(self.paths.tmux))
+        self.assertEqual((backup / item['backup']).read_bytes(), previous)
+        self.assertEqual(setup.installed_profile(self.paths), 'desktop')
+
+    def test_edited_loader_is_preserved_when_switching_mode(self):
+        self.install()
+        self.paths.tmux.write_text(self.paths.tmux.read_text() + 'set -g status off\n')
+        before = self.paths.tmux.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'Managed loader was edited'):
+            self.install(profile='tmux-only')
+        self.assertEqual(self.paths.tmux.read_bytes(), before)
+
+    def test_cli_installs_and_repeats_with_no_alacritty_or_ssh_in_path(self):
+        server_bin = self.directory / 'server-bin'
+        server_bin.mkdir()
+        for command in ('tmux', 'git', 'less'):
+            executable = shutil.which(command)
+            if not executable:
+                self.skipTest(f'{command} is required for this CLI test')
+            (server_bin / command).symlink_to(executable)
+        loader = SourceFileLoader('installer_entry', str(ROOT / 'install'))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with patch.dict(os.environ, {'PATH': str(server_bin)}):
+            self.assertIsNone(shutil.which('alacritty'))
+            self.assertIsNone(shutil.which('ssh'))
+            with patch.object(setup.Paths, 'current', return_value=self.paths):
+                for flags in [['--tmux-only'], []]:
+                    with patch.object(sys, 'argv', ['install', *flags]):
+                        with redirect_stdout(io.StringIO()):
+                            self.assertEqual(installer.main(), 0)
+        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertFalse(self.paths.alacritty.parent.exists())
+
+    def test_server_dry_run_does_not_offer_alacritty_changes(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            setup.install(self.paths, self.repo, profile='tmux-only', dry_run=True)
+        self.assertNotIn('alacritty', output.getvalue().lower())
+        self.assertFalse(self.paths.config_dir.exists())
+
+    def test_server_guide_uses_tmux_keys_without_reading_alacritty(self):
+        spec = importlib.util.spec_from_file_location('server_guide', ROOT / 'shortcuts.py')
+        guide = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guide)
+        live = subprocess.CompletedProcess(['tmux'], 0, stdout='bind-key -T prefix F1 display-popup help\n')
+        with patch.object(guide, 'load', side_effect=AssertionError('Alacritty was read')):
+            with patch.object(guide.subprocess, 'run', return_value=live):
+                content = guide.render(tmux_only=True)
+        self.assertIn('Ctrl+B → c', content)
+        self.assertIn('Live tmux bindings'.upper(), content)
+        self.assertNotIn('ALACRITTY CUSTOM BINDINGS', content)
+        self.assertNotIn('Ctrl+B → F2', content)
+        self.assertNotIn('Cannot read Alacritty', content)
+
+
+class ServerTmuxTests(TmuxFixture):
+    profile = 'tmux-only'
+
+    def prefix_bindings(self):
+        return {shlex.split(line)[3]: line
+                for line in self.tmux('list-keys', '-T', 'prefix').splitlines()}
+
+    def test_server_reload_preserves_panes_claude_status_and_adapts_popups(self):
+        self.start()
+        before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
+        self.tmux('set-option', '-g', '@cctab_window_strip', '🟣')
+        with patch.object(setup, 'load', side_effect=AssertionError('Alacritty was read')):
+            self.do_reload()
+            self.do_reload()
+        self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
+        self.assertIn('#[fg=#8e24aa]⬤', self.tmux('display-message', '-p', '#{E:@claude_tab_active_strip}'))
+        self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'tmux-only')
+        bindings = self.prefix_bindings()
+        self.assertNotIn('F2', bindings)
+        self.assertIn('shortcuts.py --tmux-only', bindings['F1'])
+        self.assertFalse(self.paths.alacritty.parent.exists())
+        env = dict(self.env, TMUX=f'{self.socket},{self.tmux("display-message", "-p", "#{pid}")},0')
+        result = subprocess.run([sys.executable, str(self.repo / 'shortcuts.py'), '--tmux-only', '--print'],
+                                capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('LIVE TMUX BINDINGS', result.stdout)
+        self.assertNotIn('Cannot read', result.stdout)
+
+    def test_switching_modes_removes_and_restores_the_desktop_picker(self):
+        self.start()
+        self.do_reload()
+        self.assertNotIn('F2', self.prefix_bindings())
+        self.install(profile='desktop')
+        self.do_reload()
+        self.assertIn('ssh-picker.py', self.prefix_bindings()['F2'])
+        self.install(profile='tmux-only')
+        self.do_reload()
+        self.assertNotIn('F2', self.prefix_bindings())
+        self.assertIn('--tmux-only', self.prefix_bindings()['F1'])
+
+    def test_server_git_update_and_local_override_need_only_reload(self):
+        self.start()
+        self.do_reload()
+        config = self.repo / 'config/tmux.conf'
+        config.write_text(config.read_text().replace('history-limit 100000', 'history-limit 87654'))
+        self.do_reload()
+        self.assertEqual(self.tmux('show-options', '-gv', 'history-limit'), '87654')
+        local = self.paths.config_dir / 'tmux/local.conf'
+        local.write_text('set -g history-limit 8765\n')
+        self.do_reload()
+        self.assertEqual(self.tmux('show-options', '-gv', 'history-limit'), '8765')
+        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """A readable shortcut guide, followed by the current Alacritty/tmux bindings."""
+import argparse
 import os
 import shlex
 import shutil
@@ -17,7 +18,7 @@ TEXT = "\033[38;2;229;231;235m"
 MUTED = "\033[38;2;166;173;200m"
 
 
-def render():
+def render(tmux_only=False):
     width = max(24, shutil.get_terminal_size((100, 30)).columns - 4)
     lines = []
 
@@ -39,7 +40,9 @@ def render():
                          for part in textwrap.wrap(description, width - 2))
 
     heading("Keyboard shortcuts")
-    paragraph("Ctrl+B then F1 opens this guide. Win means the Windows/Super key.", MUTED)
+    intro = ("Ctrl+B then F1 opens this guide. These tmux keys work over SSH." if tmux_only
+             else "Ctrl+B then F1 opens this guide. Win means the Windows/Super key.")
+    paragraph(intro, MUTED)
     paragraph("↑/↓ or Page Up/Down: scroll   /: find a shortcut   q: close", MUTED)
     paragraph("Ctrl+B → key means release Ctrl+B, then press the next key.", MUTED)
 
@@ -85,34 +88,68 @@ def render():
             ("Ctrl+B → d", "Detach; reopen Alacritty to reattach to session 0"),
         ],
     }
+    if tmux_only:
+        groups["Tabs / tmux windows"] = [
+            ("Ctrl+B → c", "New window"),
+            ("Ctrl+B → p / n", "Previous / next window"),
+            ("Ctrl+B → ,", "Rename window"),
+            ("Ctrl+B → &", "Close window (asks for confirmation)"),
+        ]
+        groups["Panes"] = [
+            ("Ctrl+B → %", "Split into side-by-side panes"),
+            ('Ctrl+B → "', "Split into top and bottom panes"),
+            ("Ctrl+B → arrow", "Move to the pane in that direction"),
+            ("Ctrl+B → Ctrl+arrow", "Resize the pane"),
+            ("Ctrl+B → z", "Zoom pane / restore layout"),
+            ("Ctrl+B → x", "Close pane (asks for confirmation)"),
+        ]
+        groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
+        del groups["Clipboard / terminal"]
+        del groups["SSH / servers"]
+        groups["Session / help"] = [
+            ("Ctrl+B → F1", "Open this guide"),
+            ("Ctrl+B → ?", "Open tmux's native key reference"),
+            ("Ctrl+B → d", "Detach from tmux; leave the session running"),
+        ]
+        groups["From your dalftui Alacritty client"] = [
+            ("Ctrl+Shift+T", "New remote tmux window"),
+            ("Ctrl+Page Up / Page Down", "Previous / next remote window"),
+            ("Ctrl+Shift+D / Ctrl+Shift+E", "Split side by side / top and bottom"),
+            ("Ctrl+Alt+arrow", "Move to the pane in that direction"),
+            ("Ctrl+Alt+Shift+arrow", "Resize the pane by five cells"),
+            ("Shift+drag / Ctrl+Shift+V", "Copy selection / paste using your local terminal"),
+        ]
     for title, bindings in groups.items():
         heading(title)
+        if title == "From your dalftui Alacritty client":
+            paragraph("These shortcuts are supplied by Alacritty on your computer.", MUTED)
         for keys, description in bindings:
             row(keys, description)
 
-    heading("Alacritty custom bindings (live)")
-    paragraph("Read from alacritty.toml and its imports each time this guide opens. Terminal defaults are listed above.", MUTED)
-    config = config_path()
-    try:
-        bindings = load(config)["keyboard"]["bindings"]
-        for binding in bindings:
-            mods = binding.get("mods", "").replace("Control", "Ctrl").replace("Super", "Win").replace("|", "+")
-            key = binding.get("key", "?")
-            label = (mods + "+" if mods else "") + key
-            if "action" in binding:
-                description = binding["action"]
-            elif "command" in binding:
-                description = "Run " + str(binding["command"])
-            else:
-                chars = binding.get("chars", "")
-                if chars.startswith("\x02"):
-                    tail = chars[1:]
-                    description = "tmux: Ctrl+B → " + ("F1" if tail == "\x1bOP" else tail)
+    if not tmux_only:
+        heading("Alacritty custom bindings (live)")
+        paragraph("Read from alacritty.toml and its imports each time this guide opens. Terminal defaults are listed above.", MUTED)
+        config = config_path()
+        try:
+            bindings = load(config)["keyboard"]["bindings"]
+            for binding in bindings:
+                mods = binding.get("mods", "").replace("Control", "Ctrl").replace("Super", "Win").replace("|", "+")
+                key = binding.get("key", "?")
+                label = (mods + "+" if mods else "") + key
+                if "action" in binding:
+                    description = binding["action"]
+                elif "command" in binding:
+                    description = "Run " + str(binding["command"])
                 else:
-                    description = "Send " + ascii(chars)
-            row(label, description)
-    except (OSError, ValueError, KeyError) as error:
-        paragraph("Cannot read Alacritty bindings: " + str(error), MUTED)
+                    chars = binding.get("chars", "")
+                    if chars.startswith("\x02"):
+                        tail = chars[1:]
+                        description = "tmux: Ctrl+B → " + ("F1" if tail == "\x1bOP" else tail)
+                    else:
+                        description = "Send " + ascii(chars)
+                row(label, description)
+        except (OSError, ValueError, KeyError) as error:
+            paragraph("Cannot read Alacritty bindings: " + str(error), MUTED)
 
     try:
         result = subprocess.run(["tmux", "list-keys"], capture_output=True, text=True,
@@ -146,8 +183,12 @@ def render():
 
 
 if __name__ == "__main__":
-    content = render()
-    if "--print" in sys.argv:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--tmux-only', action='store_true', help='Show the server guide')
+    parser.add_argument('--print', action='store_true', help='Print without opening the pager')
+    args = parser.parse_args()
+    content = render(tmux_only=args.tmux_only)
+    if args.print:
         print(content)
     else:
         env = dict(os.environ, LESS="", LESSCHARSET="utf-8")

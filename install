@@ -5,21 +5,28 @@ import sys
 import subprocess
 
 sys.dont_write_bytecode = True
-from dalftui_setup import dependencies, install
+from dalftui_setup import dependencies, install, installed_profile
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--tmux-only', dest='profile', action='store_const', const='tmux-only',
+                      help='Configure tmux for a server without requiring Alacritty or an SSH picker')
+    mode.add_argument('--desktop', dest='profile', action='store_const', const='desktop',
+                      help='Configure Alacritty and tmux (the default for a new installation)')
     args = parser.parse_args()
     try:
-        dependencies()
-        install(dry_run=args.dry_run)
+        profile = args.profile or installed_profile()
+        dependencies(profile)
+        install(dry_run=args.dry_run, profile=profile)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'Install failed: {error}', file=sys.stderr)
         return 1
     if not args.dry_run:
-        print('Run ./reload to apply the configuration to running Alacritty and tmux.')
+        target = 'tmux' if profile == 'tmux-only' else 'Alacritty and tmux'
+        print(f'Run ./reload to apply the configuration to running {target}.')
     return 0
 
 

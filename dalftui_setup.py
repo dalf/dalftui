@@ -14,6 +14,8 @@ import time
 from alacritty_config import config_directory, load
 
 MARKER = '# Managed by dalftui.'
+PROFILE_MARKER = '# dalftui-profile: '
+PROFILES = ('desktop', 'tmux-only')
 REPO = Path(__file__).resolve().parent
 
 
@@ -86,29 +88,54 @@ def tmux_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$') + '"'
 
 
-def loaders(paths):
+def installed_profile(paths=None):
+    """The private tmux loader records the mode; old installations are desktops."""
+    paths = paths or Paths.current()
+    if not paths.tmux.exists():
+        return 'desktop'
+    content = paths.tmux.read_text()
+    if not content.startswith(MARKER):
+        return 'desktop'
+    for line in content.splitlines():
+        if line.startswith(PROFILE_MARKER):
+            profile = line[len(PROFILE_MARKER):]
+            if profile not in PROFILES:
+                raise ValueError(f'Unknown installation mode in {paths.tmux}: {profile}')
+            return profile
+    return 'desktop'
+
+
+def loaders(paths, profile='desktop', *, legacy=False):
     imports = [str(paths.root / 'config/alacritty.toml'),
                str(paths.config_dir / 'alacritty/local.toml')]
     alacritty = (f'{MARKER} Edit local.toml for personal settings.\n'
                  '[general]\n'
                  f'import = {json.dumps(imports, ensure_ascii=False)}\n'
                  'live_config_reload = true\n')
-    tmux = (f'{MARKER} Edit the local.conf below for personal settings.\n'
-            f'source-file {tmux_quote(paths.root / "config/tmux.conf")}\n'
+    tmux = f'{MARKER} Edit the local.conf below for personal settings.\n'
+    if not legacy:
+        tmux += f'{PROFILE_MARKER}{profile}\nset -g @dalftui_profile {profile}\n'
+    tmux += (f'source-file {tmux_quote(paths.root / "config/tmux.conf")}\n'
             f'source-file -q {tmux_quote(paths.config_dir / "tmux/local.conf")}\n')
     return alacritty.encode(), tmux.encode()
 
 
-def dependencies():
+def dependencies(profile='desktop'):
+    if profile not in PROFILES:
+        raise ValueError(f'Unknown installation mode: {profile}')
     if not sys.platform.startswith('linux'):
         raise RuntimeError('This installer currently targets Linux.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
-    missing = [name for name in ('alacritty', 'tmux', 'ssh', 'less', 'git') if not shutil.which(name)]
+    programs = ('tmux', 'less', 'git')
+    if profile == 'desktop':
+        programs += ('alacritty', 'ssh')
+    missing = [name for name in programs if not shutil.which(name)]
     if missing:
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing))
-    specifications = [('alacritty', '--version', (0, 14)),
-                      ('tmux', '-V', (3, 4)), ('ssh', '-V', (9, 4))]
+    specifications = [('tmux', '-V', (3, 4))]
+    if profile == 'desktop':
+        specifications += [('alacritty', '--version', (0, 14)), ('ssh', '-V', (9, 4))]
     for name, flag, minimum in specifications:
         result = subprocess.run([name, flag], capture_output=True, text=True, timeout=10)
         match = re.search(r'(\d+)\.(\d+)', result.stdout + result.stderr)
@@ -116,30 +143,36 @@ def dependencies():
             raise RuntimeError(f'{name} {minimum[0]}.{minimum[1]} or newer is required.')
 
 
-def install(paths=None, repo=None, *, dry_run=False):
+def install(paths=None, repo=None, *, dry_run=False, profile=None):
     paths = paths or Paths.current()
+    profile = profile or installed_profile(paths)
+    if profile not in PROFILES:
+        raise ValueError(f'Unknown installation mode: {profile}')
     repo = Path(repo or REPO).resolve()
     for path in (paths.home_dir, paths.config_dir, paths.state_dir, repo):
         if not path.is_absolute() or any(ord(char) < 32 for char in str(path)):
             raise ValueError('Configuration paths must be absolute and contain no control characters.')
     if paths.root == repo:
         raise ValueError('Keep the checkout outside the managed ~/.config/dalftui link.')
-    load(repo / 'config/alacritty.toml', home_dir=paths.home_dir)
-    alacritty, tmux = loaders(paths)
+    if profile == 'desktop':
+        load(repo / 'config/alacritty.toml', home_dir=paths.home_dir)
+    alacritty, tmux = loaders(paths, profile)
     desired = [
         (paths.root, Snapshot('link', str(repo))),
-        (paths.alacritty, Snapshot('file', alacritty)),
         (paths.tmux, Snapshot('file', tmux)),
         (paths.config_dir / 'tmux/shortcuts.py',
          Snapshot('link', str(paths.root / 'shortcuts.py'))),
     ]
+    if profile == 'desktop':
+        desired.append((paths.alacritty, Snapshot('file', alacritty)))
     local_alacritty = paths.config_dir / 'alacritty/local.toml'
     local_tmux = paths.config_dir / 'tmux/local.conf'
-    for path, content in (
-        (local_alacritty, '# Personal Alacritty settings. This file stays outside the repository.\n'
-                          '# Example:\n# [font]\n# size = 11.0\n'),
-        (local_tmux, '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'),
-    ):
+    local_files = [(local_tmux, '# Personal tmux settings. Loaded after the shared dalftui configuration.\n')]
+    if profile == 'desktop':
+        local_files.append((local_alacritty,
+                            '# Personal Alacritty settings. This file stays outside the repository.\n'
+                            '# Example:\n# [font]\n# size = 11.0\n'))
+    for path, content in local_files:
         existing = snapshot(path)
         if existing is None:
             desired.append((path, Snapshot('file', content.encode())))
@@ -155,7 +188,10 @@ def install(paths=None, repo=None, *, dry_run=False):
             continue
         if (path in (paths.alacritty, paths.tmux) and previous and previous.kind == 'file'
                 and previous.value.startswith(MARKER.encode())):
-            raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
+            known_tmux = {loaders(paths, mode)[1] for mode in PROFILES}
+            known_tmux.add(loaders(paths, legacy=True)[1])
+            if path != paths.tmux or previous.value not in known_tmux:
+                raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
         changes.append((path, previous, wanted))
     if not changes:
         print('Already installed; personal overrides preserved.')
@@ -184,7 +220,8 @@ def install(paths=None, repo=None, *, dry_run=False):
         for path, previous, wanted in changes:
             write(path, wanted)
             written.append((path, previous))
-        load(paths.alacritty, home_dir=paths.home_dir)
+        if profile == 'desktop':
+            load(paths.alacritty, home_dir=paths.home_dir)
     except BaseException:
         for path, previous in reversed(written):
             if previous is None:
@@ -192,10 +229,13 @@ def install(paths=None, repo=None, *, dry_run=False):
             else:
                 write(path, previous)
         raise
-    print(f'Installed: {paths.root} -> {repo}')
+    print(f'Installed ({profile}): {paths.root} -> {repo}')
     if backup:
         print(f'Original configurations backed up in {backup}')
-    print('Personal settings: ' + str(local_alacritty) + ' and ' + str(local_tmux))
+    personal = [str(local_tmux)]
+    if profile == 'desktop':
+        personal.insert(0, str(local_alacritty))
+    print('Personal settings: ' + ' and '.join(personal))
     return backup
 
 
@@ -203,18 +243,22 @@ def reload_config(paths=None, *, socket=None):
     paths = paths or Paths.current()
     if not paths.root.is_symlink() or not paths.root.exists():
         raise RuntimeError('The dalftui link is missing or broken. Run ./install from your checkout.')
-    content = paths.alacritty.read_bytes()
-    if not content.startswith(MARKER.encode()) or not paths.tmux.read_bytes().startswith(MARKER.encode()):
+    if not paths.tmux.read_bytes().startswith(MARKER.encode()):
         raise RuntimeError('Configuration loaders are missing. Run ./install first.')
-    load(paths.alacritty, home_dir=paths.home_dir)
+    profile = installed_profile(paths)
+    if profile == 'desktop':
+        content = paths.alacritty.read_bytes()
+        if not content.startswith(MARKER.encode()):
+            raise RuntimeError('The Alacritty loader is missing. Run ./install first.')
+        load(paths.alacritty, home_dir=paths.home_dir)
 
-    # Write the same bytes in place: Alacritty's watcher can miss rename events
-    # produced by Git or an editor. A data modification on its main file is reliable.
-    with paths.alacritty.open('r+b') as stream:
-        stream.write(content)
-        stream.flush()
-        os.fsync(stream.fileno())
-    print('Alacritty configuration reload requested; startup settings apply to new windows.')
+        # Write the same bytes in place: Alacritty's watcher can miss rename events
+        # produced by Git or an editor. A data modification on its main file is reliable.
+        with paths.alacritty.open('r+b') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        print('Alacritty configuration reload requested; startup settings apply to new windows.')
 
     command = ['tmux', '-N']
     if socket:
@@ -228,7 +272,8 @@ def reload_config(paths=None, *, socket=None):
             print('tmux is not running; the next server will load the updated configuration.')
             return
         raise RuntimeError(message or 'Could not contact the tmux server.')
-    result = subprocess.run([*command, 'source-file', str(paths.tmux)],
+    result = subprocess.run([*command, 'set-option', '-g', '@dalftui_profile', profile,
+                             ';', 'source-file', str(paths.tmux)],
                             capture_output=True, text=True, timeout=20)
     if result.returncode or result.stderr.strip():
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'tmux reload failed.')

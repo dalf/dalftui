@@ -8,7 +8,8 @@ light pill uses dark status circles, and inactive dark pills use light circles.
 ## Install once
 
 Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.4+, OpenSSH 9.4+, Git,
-and `less`. The installer configures software that is already installed. It
+and `less` for the desktop mode. The server mode below needs Python 3.11+,
+tmux 3.4+, Git, and `less`. The installer configures software that is already installed. It
 uses no package manager, downloads, root access, or Python packages.
 
 Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
@@ -26,7 +27,7 @@ The installer creates these connections:
 | Installed path | Purpose |
 | --- | --- |
 | `~/.config/dalftui` | Symlink to this checkout |
-| `~/.config/alacritty/alacritty.toml` | Imports shared Alacritty settings, then personal overrides |
+| `~/.config/alacritty/alacritty.toml` | Desktop mode: imports shared Alacritty settings, then personal overrides |
 | `~/.tmux.conf` | Sources shared tmux settings, then personal overrides |
 | `~/.config/tmux/shortcuts.py` | Compatibility link to the shortcut guide |
 
@@ -34,9 +35,51 @@ The installer creates these connections:
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
 
 Running `./install` again preserves personal overrides and leaves an existing
-installation untouched. It can also reconnect the configuration link if you
+installation in its current mode. It can also reconnect the configuration link if you
 move the checkout. Keep the checkout outside the managed `~/.config/dalftui`
 path; the installer refuses to replace an existing directory there.
+
+## Install on an SSH server
+
+Clone this repository to a stable directory on the server, then run:
+
+```sh
+cd ~/code/dalftui
+./install --tmux-only --dry-run
+./install --tmux-only
+./reload
+```
+
+Server requirements are **Python 3.11+, tmux 3.4+, Git, and `less`**. Alacritty
+and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
+server installer manages the shared configuration link, tmux loader, shortcut
+guide link, and `~/.config/tmux/local.conf`. It preserves existing Alacritty files.
+
+The server uses the same rounded tabs, Claude status styling, pane bindings,
+and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys
+and reminders for shortcuts supplied by your local Alacritty. The guide reads
+live tmux bindings and does not try to read Alacritty settings on the server.
+**Ctrl+B, then F2** is disabled in server mode because its picker launches a
+local Alacritty window.
+
+Your local terminal renders the fonts and rounded glyphs. Use the desktop SSH
+picker to open a direct remote tmux session; the Alacritty shortcuts then reach
+remote tmux. An SSH connection started inside a local tmux pane creates nested
+sessions, where the local tmux may handle those shortcuts first.
+
+The installation mode is recorded in the private `~/.tmux.conf` loader and
+survives Git updates. Both `./reload` and a repeated `./install` recognize it,
+so you do not need to repeat the flag after installation. Use `./install --desktop`
+or `./install --tmux-only` to explicitly switch modes. Mode changes back up the
+previous loader and preserve personal overrides. Older desktop loaders are
+recognized and safely migrated on the next installation.
+
+To receive later configuration updates on the server:
+
+```sh
+git pull --ff-only
+./reload
+```
 
 ## Update without reinstalling
 
@@ -50,7 +93,7 @@ git pull --ff-only
 
 The symlink makes new repository files available immediately. The helper
 scripts read their configuration whenever you open them. `./reload` requests
-an Alacritty refresh and sources tmux's configuration again without ending
+an Alacritty refresh in desktop mode and sources tmux's configuration again without ending
 sessions or restarting running programs. It rewrites the Alacritty loader in
 place because file replacements from Git or an editor may not trigger a reload.
 
@@ -71,6 +114,8 @@ These files stay outside the repository and are preserved across installs:
 
 - `~/.config/alacritty/local.toml`
 - `~/.config/tmux/local.conf`
+
+Server mode uses only the tmux override file.
 
 For example, put this in `local.toml` to override the font size:
 
@@ -98,7 +143,7 @@ private. Backups and Python caches are excluded from Git.
 ## Shortcuts
 
 - **Ctrl+B, then F1:** open the keyboard shortcut guide.
-- **Ctrl+B, then F2:** choose an SSH host and open a separate Alacritty window.
+- **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
 - **Ctrl+Shift+T:** new tmux window.
 - **Ctrl+Page Up / Page Down:** previous / next window.
 - **Ctrl+Shift+D / Ctrl+Shift+E:** split side by side / top and bottom.
@@ -148,6 +193,7 @@ the SSH window while leaving its session running. Connection errors stay visible
 until Enter is pressed. Ordinary Alacritty windows create or reattach to local
 session `0`; SSH windows override that startup and connect directly to the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
+Install `--tmux-only` on each server where you want the shared configuration.
 
 ## Theme and Claude integration
 
@@ -160,11 +206,13 @@ separate project. Existing installations continue to supply repository/branch
 labels and status through pane titles and `@cctab_window_strip`. dalftui preserves
 that integration and does not change Claude hooks. Without it, ordinary tmux
 window names are displayed.
+Install claude-tabstatus separately on the server too if you want its status
+indicators for Claude running there.
 
 ## Repository
 
 On a new machine, clone your repository to a stable path and run `./install`
-and `./reload`. For a local checkout without a remote, create an empty remote
+and `./reload`, adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
 repository and connect it once:
 
 ```sh
@@ -184,5 +232,7 @@ python3 ssh-picker.py --list
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions.
 They cover backups, rollback, repeated installation, updates through the link,
-personal overrides, the shortcut guide, tag filtering, and reloads that preserve
-pane processes and Claude status.
+personal overrides, both shortcut guides, tag filtering, mode switching, and
+reloads that preserve pane processes and Claude status. The CLI is also tested
+with Alacritty and SSH absent from PATH. Desktop picker tests are skipped when
+OpenSSH's Tag directive is unavailable; it is not required by server mode.
