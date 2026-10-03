@@ -1,0 +1,63 @@
+# Dark, high-contrast defaults. Personal overrides belong in local.toml.
+# The font family follows your system's monospace setting.
+
+[font]
+size = 10.5
+
+[window]
+opacity = 1.0
+
+[colors.primary]
+background = "#000000"
+foreground = "#ffffff"
+
+[colors.normal]
+black = "#808080"
+red = "#ff6b6b"
+green = "#a8e16b"
+yellow = "#ffd866"
+blue = "#82aaff"
+magenta = "#c792ea"
+cyan = "#89ddff"
+white = "#e6e6e6"
+
+[colors.bright]
+black = "#a0a0a0"
+red = "#ff8f8f"
+green = "#c3f584"
+yellow = "#ffe699"
+blue = "#a6c8ff"
+magenta = "#e0b3ff"
+cyan = "#b3f4ff"
+white = "#ffffff"
+
+# Create tmux session 0 or attach to it, including when launched from tmux.
+[terminal.shell]
+program = "env"
+args = ["-u", "TMUX", "tmux", "new-session", "-A", "-s", "0"]
+
+# Copy mouse and keyboard selections to the system clipboard automatically.
+[selection]
+save_to_clipboard = true
+
+# Browser-style shortcuts for tmux windows.
+[keyboard]
+bindings = [
+    # Shortcut guide: Ctrl+B then F1 in tmux, or Win+Shift+H here.
+    { key = "H", mods = "Super|Shift", chars = "\u0002\u001bOP" },
+    # Send Shift+Page Up to tmux instead of Alacritty scrollback.
+    { key = "PageUp", mods = "Shift", mode = "~Vi|~Search", chars = "\u001b[5;2~" },
+    { key = "T", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002c" },
+    { key = "PageUp", mods = "Control", mode = "~Vi|~Search", chars = "\u0002p" },
+    { key = "PageDown", mods = "Control", mode = "~Vi|~Search", chars = "\u0002n" },
+    { key = "D", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002%" },
+    { key = "E", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\"" },
+    { key = "ArrowLeft", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7D" },
+    { key = "ArrowRight", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7C" },
+    { key = "ArrowUp", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7A" },
+    { key = "ArrowDown", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7B" },
+    { key = "ArrowLeft", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8D" },
+    { key = "ArrowRight", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8C" },
+    { key = "ArrowUp", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8A" },
+    { key = "ArrowDown", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8B" },
+]

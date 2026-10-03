@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Install dalftui configuration links and loaders; existing files are backed up."""
+import argparse
+import sys
+import subprocess
+
+sys.dont_write_bytecode = True
+from dalftui_setup import dependencies, install
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
+    args = parser.parse_args()
+    try:
+        dependencies()
+        install(dry_run=args.dry_run)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f'Install failed: {error}', file=sys.stderr)
+        return 1
+    if not args.dry_run:
+        print('Run ./reload to apply the configuration to running Alacritty and tmux.')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

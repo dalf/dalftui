@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Reload installed Alacritty/tmux settings without ending tmux sessions."""
+import argparse
+import sys
+import subprocess
+
+sys.dont_write_bytecode = True
+from dalftui_setup import reload_config
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--socket', metavar='PATH', help='Reload a specific tmux server socket')
+    args = parser.parse_args()
+    try:
+        reload_config(socket=args.socket)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f'Reload failed: {error}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
