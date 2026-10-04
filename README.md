@@ -1,4 +1,4 @@
-# dalftui
+# My terminal setup
 
 A Linux Alacritty/tmux configuration with a black, high-contrast terminal,
 rounded tabs, pane shortcuts, a searchable shortcut guide, and an SSH picker.
@@ -218,9 +218,12 @@ extension. VS Code uses the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
 VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
 
-Update dalftui and run `./reload` on both machines. Reopen older SSH windows
-with the picker to enable F3. The picker creates a private Unix socket bridge
-through that window's SSH connection, and removes it when the connection ends.
+Update dalftui and run `./reload` on both machines. Reconnect older SSH windows
+through the dalftui launcher (the picker or `--connect HOST`): attachments without
+credentials cannot use F3, even if their old Unix socket is still reachable.
+Local folder opening continues to work without bridge credentials.
+The picker creates an authenticated Unix socket bridge through that window's
+SSH connection, and removes it when the connection ends.
 No desktop VS Code installation is needed on the server; Remote - SSH manages
 its own server component when you first connect.
 
@@ -230,6 +233,36 @@ forwarding (`AllowStreamLocalForwarding`). A plain `ssh host` connection lacks
 the bridge; reconnect with the picker, or run
 `python3 ~/code/dalftui/ssh-picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
+
+Both Unix and TCP bridges require a fresh, random 32-byte token for every SSH
+window. The token travels over SSH stdin, never in SSH command arguments or
+terminal titles. Before requesting forwarding, a separate SSH setup connection
+creates an unpredictable remote directory with mode 0700 and an exclusive
+mode-0600 credential file. Attachment reads and removes the file, then passes
+the endpoint and token in the triggering tmux client's environment. Several
+clients on one tmux session keep their own credentials and fixed SSH destinations.
+Setup now uses an additional SSH authentication step on Linux too, so password
+authentication may prompt twice. SSH keys and an agent avoid repeated prompts.
+The remote setup uses `sh` and Linux `stat`, independent of the login shell.
+
+The remote Unix socket is created inside that private directory. Application
+authentication remains mandatory even if socket permissions allow other users
+to connect. OpenSSH's server-side
+[`StreamLocalBindMask`](https://man.openbsd.org/sshd_config#StreamLocalBindMask)
+defaults to 0177; a permissive server setting must not grant editor access.
+The bridge protects against other server accounts reaching the forwarded socket.
+It does not protect against a compromised login account or the remote
+administrator, who can access that account's credentials. Requests can open
+folders only on the bridge's fixed remote host.
+
+Remote exit and signal traps remove only that bridge's credential, socket, and
+ownership marker, then remove the empty directory. Setup refuses existing paths
+and symlinks; attachment and fallback cleanup validate ownership and permissions.
+After failed setup, cancellation, disconnect, or normal exit, the desktop bridge
+stops first and the launcher also attempts bounded SSH cleanup in batch mode,
+without another password prompt. If the server is unreachable or batch
+authentication is unavailable, remote cleanup is best effort: private, inactive
+resources may remain until removed on the server.
 
 Each bridge retains at most eight queued or active requests, handled by eight
 workers; additional connections are closed immediately. A complete request must
@@ -441,6 +474,13 @@ personal overrides, both shortcut guides, tag filtering, mode switching, and
 reloads that preserve pane processes and Claude status. The CLI is also tested
 with Alacritty and SSH absent from PATH. Desktop picker tests are skipped when
 OpenSSH's Tag directive is unavailable; it is not required by server mode.
+Unix authentication tests include a deliberately mode-0666 socket in a
+mode-0755 directory: they prove that reaching the endpoint does not authorize
+editor launches. This is a same-account local test, not a cross-user or remote
+sshd test. Remote credential scripts run locally with fake tmux clients to
+check private/exclusive creation, consumption, failed setup, signal cleanup,
+and resource isolation. Real tmux tests route separate clients' endpoints and
+tokens even with deliberately stale server environment values.
 
 The Windows-compatible launcher tests run separately without tmux or curses:
 

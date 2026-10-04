@@ -89,6 +89,7 @@ def render(tmux_only=False):
         ],
         "Editor": [
             ("Ctrl+Shift+F3", "Open the current pane's folder in a new VS Code window"),
+            ("Remote VS Code", "Reconnect through the dalftui SSH launcher after updating; each client needs credentials"),
         ],
     }
     if tmux_only:

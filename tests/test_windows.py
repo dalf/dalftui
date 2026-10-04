@@ -1,5 +1,7 @@
 """Windows-compatible connection tests; no curses, tmux, or desktop GUI required."""
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,8 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -325,7 +329,7 @@ class WindowsTests(unittest.TestCase):
         result = subprocess.CompletedProcess(['ssh'], 0)
         with vscode.EditorBridge('vm-alias', transport='tcp') as bridge:
             with patch.object(picker.subprocess, 'run', return_value=result) as run:
-                picker.prepare_tcp_token('vm-alias', 'alice', bridge, {})
+                picker.prepare_editor_credentials('vm-alias', 'alice', bridge, {})
             self.assertEqual(run.call_args.kwargs['input'], (bridge.token + '\n').encode('ascii'))
             self.assertFalse(run.call_args.kwargs.get('text', False))
             self.assertIn('-T', run.call_args.args[0])
@@ -336,6 +340,116 @@ class WindowsTests(unittest.TestCase):
             self.assertEqual(command[command.index('-R') + 1], bridge.forward_spec)
             self.assertIn(bridge.remote_token_file, command[-1])
             self.assertIn('ExitOnForwardFailure=yes', command)
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows cleanup timeout test')
+    def test_native_cleanup_times_out_while_proxy_child_keeps_output_handles_open(self):
+        # Model ProxyCommand's inherited stderr with real native subprocesses.
+        # Releasing the child in finally also bounds a failing pre-fix test.
+        helper = self.root / 'ssh cleanup helper.py'
+        ready = self.root / 'child-ready'
+        released = self.root / 'release-child'
+        exited = self.root / 'child-exited'
+        helper.write_text('''import subprocess, sys, time
+from pathlib import Path
+
+directory = Path(sys.argv[2])
+if sys.argv[1] == 'ssh':
+    subprocess.Popen([sys.executable, __file__, 'holder', str(directory)],
+                     stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr)
+    time.sleep(60)
+else:
+    (directory / 'child-ready').touch()
+    deadline = time.monotonic() + 30
+    while not (directory / 'release-child').exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    (directory / 'child-exited').touch()
+''', encoding='utf-8')
+        real_run = subprocess.run
+        timed_out = threading.Event()
+        finished = threading.Event()
+        errors = []
+
+        def observe_timeout(*args, **kwargs):
+            try:
+                return real_run(*args, **kwargs)
+            except subprocess.TimeoutExpired:
+                timed_out.set()
+                raise
+
+        def cleanup():
+            try:
+                bridge = vscode.EditorBridge('vm-alias', transport='tcp')
+                picker.cleanup_editor_bridge('vm-alias', None, bridge, dict(os.environ))
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                finished.set()
+
+        with (patch.object(picker, 'ssh_base',
+                           return_value=[sys.executable, str(helper), 'ssh', str(self.root)]),
+              patch.object(picker.subprocess, 'run', side_effect=observe_timeout)):
+            worker = threading.Thread(target=cleanup, daemon=True)
+            worker.start()
+            try:
+                deadline = time.monotonic() + 15
+                while not ready.exists():
+                    self.assertFalse(finished.wait(0.02),
+                                     f'Cleanup finished before the output-holding child started: {errors}')
+                    self.assertLess(time.monotonic(), deadline, 'Child did not start')
+                self.assertTrue(finished.wait(12),
+                                'Cleanup waited for inherited output handles after its ten-second timeout')
+                self.assertEqual(errors, [])
+                self.assertTrue(timed_out.is_set(), 'Cleanup must reach its real subprocess timeout')
+                self.assertFalse(exited.exists(), 'Output-holding child must still be running')
+            finally:
+                released.touch()
+                worker.join(5)
+                deadline = time.monotonic() + 5
+                while ready.exists() and not exited.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+            self.assertFalse(worker.is_alive(), 'Cleanup worker did not stop')
+            self.assertTrue(exited.exists(), 'Output-holding child did not stop')
+
+    def test_connect_cleans_up_setup_failures_cancellation_disconnect_and_normal_exit(self):
+        for stage, status in (('setup-failure', 1), ('setup-cancel', 130),
+                              ('attach-cancel', 130), ('forward-failure', 255),
+                              ('normal-exit', 0)):
+            with self.subTest(stage=stage):
+                bridge = vscode.EditorBridge('vm-alias', transport='tcp')
+                prepare_error = (RuntimeError('setup failed') if stage == 'setup-failure'
+                                 else KeyboardInterrupt() if stage == 'setup-cancel' else None)
+                def cleanup_after_stop(*args):
+                    self.assertTrue(bridge.stopped.is_set())
+                    self.assertEqual(bridge.listener.fileno(), -1)
+                output = io.StringIO()
+                with (patch.object(picker, 'configured_login', return_value='alice'),
+                      patch.object(picker, 'EditorBridge', return_value=bridge),
+                      patch.object(picker, 'prepare_editor_credentials', side_effect=prepare_error) as prepare,
+                      patch.object(picker, 'cleanup_editor_bridge', side_effect=cleanup_after_stop) as cleanup,
+                      patch.object(picker.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess(['ssh'], status),
+                                   side_effect=KeyboardInterrupt() if stage == 'attach-cancel' else None) as run,
+                      patch('builtins.input', return_value=''),
+                      patch.dict(os.environ, {vscode.SOCKET_ENV: 'stale-endpoint',
+                                              vscode.TOKEN_ENV: 'stale-token'}),
+                      redirect_stdout(output), redirect_stderr(output)):
+                    self.assertEqual(picker.connect('vm-alias', 'tcp'), status)
+                prepare.assert_called_once()
+                cleanup.assert_called_once()
+                self.assertIs(cleanup.call_args.args[2], bridge)
+                self.assertNotIn(vscode.SOCKET_ENV, prepare.call_args.args[3])
+                self.assertNotIn(vscode.TOKEN_ENV, prepare.call_args.args[3])
+                if stage.startswith('setup-'):
+                    run.assert_not_called()
+                else:
+                    self.assertEqual(run.call_args.args[0][run.call_args.args[0].index('-R') + 1],
+                                     bridge.forward_spec)
+                    self.assertIn('ExitOnForwardFailure=yes', run.call_args.args[0])
+                    self.assertNotIn(bridge.token, ' '.join(run.call_args.args[0]))
+                self.assertNotIn(bridge.token, output.getvalue())
+                self.assertTrue(bridge.stopped.is_set())
+                self.assertEqual(bridge.listener.fileno(), -1)
+                self.assertTrue(all(not worker.is_alive() for worker in bridge.workers))
 
     def test_configured_username_and_unset_username_use_real_ssh_config(self):
         if not shutil.which(picker.ssh_executable()):

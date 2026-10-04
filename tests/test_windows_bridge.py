@@ -507,7 +507,7 @@ class BridgeTests(unittest.TestCase):
         connection = self.connect(bridge)
         # A rejected folder must not prevent the next Unix request from succeeding.
         self.launch.side_effect = ValueError('Invalid folder')
-        vscode.send_message(connection, {'folder': 'relative'})
+        vscode.send_message(connection, {'folder': 'relative', 'token': bridge.token})
         self.assertIn('error', vscode.read_message(connection))
         self.launch.side_effect = None
         self.recover(bridge)

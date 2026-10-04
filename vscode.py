@@ -138,13 +138,16 @@ class EditorBridge:
         self.transport = transport or ('tcp' if WINDOWS else 'unix')
         if self.transport not in ('unix', 'tcp'):
             raise ValueError('Unknown editor bridge transport.')
-        self.token = secrets.token_hex(32) if self.transport == 'tcp' else None
+        self.token = secrets.token_hex(32)
+        self.remote_directory = '/tmp/dalftui-editor-' + secrets.token_hex(16)
+        self.remote_token_file = self.remote_directory + '/token'
+        # A separate, non-secret claim lets cleanup refuse a pre-existing directory.
+        self.remote_owner_file = self.remote_directory + '/' + secrets.token_hex(16) + '.owner'
         if self.transport == 'tcp':
             self.remote_port = 49152 + secrets.randbelow(16384)
             self.remote_socket = f'tcp:127.0.0.1:{self.remote_port}'
-            self.remote_token_file = '/tmp/dalftui-editor-' + secrets.token_hex(16) + '.token'
         else:
-            self.remote_socket = '/tmp/dalftui-editor-' + secrets.token_hex(16) + '.sock'
+            self.remote_socket = self.remote_directory + '/editor.sock'
 
     @property
     def forward_spec(self):
@@ -223,11 +226,11 @@ class EditorBridge:
     def handle(self, connection, deadline):
         try:
             message = read_message(connection, deadline=deadline)
-            if self.token:
-                supplied = message.get('token')
-                if (not isinstance(supplied, str)
-                        or not secrets.compare_digest(supplied.encode(), self.token.encode())):
-                    raise ValueError('Invalid editor request authentication.')
+            supplied = message.get('token')
+            if (not valid_token(supplied)
+                    or not secrets.compare_digest(supplied, self.token)):
+                raise ValueError('Invalid editor bridge credentials. '
+                                 'Reconnect using the dalftui SSH launcher.')
             if self.stopped.is_set():
                 return
             launch(message.get('folder'), self.destination, self.env, runner=self.run_editor)
@@ -303,6 +306,10 @@ class EditorBridge:
             self.directory.cleanup()
 
 
+def valid_token(token):
+    return isinstance(token, str) and re.fullmatch(r'[0-9a-f]{64}', token) is not None
+
+
 def request(socket_path, folder, token=None):
     validate_folder(folder)
     tcp = socket_path.startswith('tcp:')
@@ -310,16 +317,14 @@ def request(socket_path, folder, token=None):
         match = re.fullmatch(r'tcp:127\.0\.0\.1:([0-9]+)', socket_path)
         if not match or not 0 < int(match[1]) < 65536:
             raise ValueError('Invalid loopback editor endpoint.')
-        if not token:
-            raise RuntimeError('Missing editor bridge token. Reconnect using the dalftui SSH launcher.')
+    if not valid_token(token):
+        raise RuntimeError('Missing or invalid editor bridge credentials. '
+                           'Reconnect using the dalftui SSH launcher.')
     try:
         with socket.socket(socket.AF_INET if tcp else socket.AF_UNIX) as connection:
             connection.settimeout(CLIENT_TIMEOUT)
             connection.connect(('127.0.0.1', int(match[1])) if tcp else socket_path)
-            message = {'folder': folder}
-            if tcp:
-                message['token'] = token
-            send_message(connection, message)
+            send_message(connection, {'folder': folder, 'token': token})
             response = read_message(connection, deadline=time.monotonic() + CLIENT_TIMEOUT)
     except OSError as error:
         forwarding = 'TCP forwarding' if tcp else 'Unix socket forwarding'

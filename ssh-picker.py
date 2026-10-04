@@ -277,26 +277,70 @@ def ssh_base(host, login=None):
     return args
 
 
-def prepare_tcp_token(host, login, bridge, env):
+def editor_resources(bridge):
+    """Shell helpers for this bridge's private remote resources (Linux server)."""
+    socket_file = bridge.remote_socket if bridge.transport == 'unix' else ''
+    return (f'editor_directory={shlex.quote(bridge.remote_directory)}\n'
+            f'editor_owner={shlex.quote(bridge.remote_owner_file)}\n'
+            f'editor_token={shlex.quote(bridge.remote_token_file)}\n'
+            f'editor_socket={shlex.quote(socket_file)}\n' + """
+editor_directory_valid() {
+    [ ! -L "$editor_directory" ] && [ -d "$editor_directory" ] &&
+    [ "$(stat -c '%u:%a' -- "$editor_directory")" = "$(id -u):700" ]
+}
+editor_file_valid() {
+    [ ! -L "$1" ] && [ -f "$1" ] &&
+    [ "$(stat -c '%u:%a' -- "$1")" = "$(id -u):600" ]
+}
+editor_owned() {
+    editor_directory_valid && editor_file_valid "$editor_owner"
+}
+cleanup_editor_resources() {
+    if editor_owned; then
+        rm -f -- "$editor_token"
+        if [ -n "$editor_socket" ]; then rm -f -- "$editor_socket"; fi
+        rm -f -- "$editor_owner"
+        rmdir -- "$editor_directory" 2>/dev/null
+    fi
+}
+""")
+
+
+def prepare_editor_credentials(host, login, bridge, env):
     # stdin is carried by SSH; putting the secret in sh -c arguments would expose
     # it through the VM's process list. The private file is consumed on attach.
-    script = 'umask 077\nset -C\ncat > ' + shlex.quote(bridge.remote_token_file)
+    # mkdir refuses existing paths, including symlinks. The claim is separate
+    # from the token so cleanup still recognizes the directory after consumption.
+    # Create it before -R: sshd binds a Unix forward before the attach command.
+    script = editor_resources(bridge) + """
+umask 077
+set -C
+mkdir -m 700 -- "$editor_directory" || exit 1
+trap 'rm -f -- "$editor_token" "$editor_owner"; rmdir -- "$editor_directory" 2>/dev/null' EXIT
+trap 'exit 1' HUP INT TERM
+editor_directory_valid || exit 1
+: > "$editor_owner" || exit 1
+cat > "$editor_token" || exit 1
+trap - EXIT HUP INT TERM
+"""
     result = subprocess.run([*ssh_base(host, login), '-T', '-o', 'ClearAllForwardings=yes',
                              '--', host, 'sh -c ' + shlex.quote(script)],
                             input=(bridge.token + '\n').encode('ascii'), env=env)
     if result.returncode:
-        raise RuntimeError('Could not prepare the Windows VS Code bridge on the SSH server.')
+        raise RuntimeError('Could not prepare the VS Code bridge credentials on the SSH server.')
 
 
-def cleanup_tcp_token(host, login, bridge, env):
-    # Normal attachment consumes the file. If attachment fails, avoid asking for
-    # another password just to remove an inactive token left by the setup step.
-    script = 'rm -f -- ' + shlex.quote(bridge.remote_token_file)
+def cleanup_editor_bridge(host, login, bridge, env):
+    # The remote trap handles normal exit. Also try after failed setup, cancelled
+    # attach, or disconnect, without asking for another password just for cleanup.
+    # Output is unused. On Windows, inherited pipes can outlive ssh.exe and make
+    # subprocess.run's timeout recovery wait for a surviving ProxyCommand child.
+    script = editor_resources(bridge) + '\ncleanup_editor_resources\n'
     try:
         subprocess.run([*ssh_base(host, login), '-T', '-n', '-o', 'ClearAllForwardings=yes',
                         '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
                         '--', host, 'sh -c ' + shlex.quote(script)], env=env,
-                       capture_output=True, timeout=10)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
     except (OSError, subprocess.SubprocessError):
         pass
 
@@ -308,19 +352,25 @@ def ssh_command(host, login=None, bridge=None):
         # Keep the forwarding and its local bridge owned by this SSH window.
         if sys.platform != 'win32':
             args += ['-S', 'none']
-        forward = getattr(bridge, 'forward_spec', f'{bridge.remote_socket}:{bridge.local_socket}')
-        args += ['-R', forward]
-        editor_setup = (f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
-                        f'export {SOCKET_ENV}\n')
-        if getattr(bridge, 'token', None):
-            # Refuse an occupied remote TCP port instead of attaching with a broken bridge.
-            args += ['-o', 'ExitOnForwardFailure=yes']
-            token_file = shlex.quote(bridge.remote_token_file)
-            editor_setup += (f'{TOKEN_ENV}=$(cat -- {token_file}) || exit 1\n'
-                             f'export {TOKEN_ENV}\n'
-                             f'rm -f -- {token_file}\n')
-        else:
-            editor_setup += f'trap \'rm -f -- "${SOCKET_ENV}"\' EXIT\n'
+        # Both transports must refuse an occupied or disallowed forward.
+        args += ['-R', bridge.forward_spec, '-o', 'ExitOnForwardFailure=yes']
+        editor_setup = editor_resources(bridge) + """
+editor_credentials_error() {
+    printf '%s\\n' 'Missing or invalid editor bridge credentials. Reconnect using the dalftui SSH launcher.' >&2
+    exit 1
+}
+editor_owned || editor_credentials_error
+trap cleanup_editor_resources EXIT
+trap 'exit 1' HUP TERM
+trap 'exit 130' INT
+editor_file_valid "$editor_token" || editor_credentials_error
+"""
+        editor_setup += (f'{TOKEN_ENV}=$(cat -- "$editor_token") || editor_credentials_error\n'
+                         'rm -f -- "$editor_token" || editor_credentials_error\n'
+                         f'[ "${{{TOKEN_ENV}}}" ] && [ "${{#{TOKEN_ENV}}}" -eq 64 ] || editor_credentials_error\n'
+                         f'case "${{{TOKEN_ENV}}}" in *[!0-9a-f]*) editor_credentials_error ;; esac\n'
+                         f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
+                         f'export {SOCKET_ENV} {TOKEN_ENV}\n')
     return [*args, '--', host,
             'sh -c ' + shlex.quote(REMOTE_SCRIPT.replace('{editor_setup}', editor_setup))]
 
@@ -329,6 +379,8 @@ def connect(host, transport=None):
     env = dict(os.environ, TERM='xterm-256color')
     env.pop('TMUX', None)
     env.pop('TMUX_PANE', None)
+    env.pop(SOCKET_ENV, None)
+    env.pop(TOKEN_ENV, None)
     try:
         login = None
         if configured_login(host) is None:
@@ -340,15 +392,15 @@ def connect(host, transport=None):
                     print('Enter a username, such as alice.')
         print(f'Connecting to {host} …', flush=True)
         destination = f'{login}@{host}' if login else host
-        with EditorBridge(destination, env, transport) as bridge:
-            status = 1
-            try:
-                if bridge.token:
-                    prepare_tcp_token(host, login, bridge, env)
+        bridge = EditorBridge(destination, env, transport)
+        status = 1
+        try:
+            with bridge:
+                prepare_editor_credentials(host, login, bridge, env)
                 status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
-            finally:
-                if bridge.token and status:
-                    cleanup_tcp_token(host, login, bridge, env)
+        finally:
+            # Stop accepting/launching before any potentially slow cleanup SSH.
+            cleanup_editor_bridge(host, login, bridge, env)
     except KeyboardInterrupt:
         return 130
     except (OSError, RuntimeError, subprocess.TimeoutExpired, EOFError, ValueError) as error:
