@@ -31,9 +31,9 @@ jobs:
       - name: Verify setup and PowerShell profile integration
         run: .\tests\test_windows_setup.ps1
       - name: Set up the real fzf package in an isolated profile
-        run: .\setup-windows.ps1 -PackageManager choco -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1"
-      - name: Verify Windows SSH and editor launcher
+        run: .\setup-windows.ps1 -PackageManager choco -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal
+      - name: Verify Windows SSH, editor launcher, and Terminal settings
         run: |
           # Package setup refreshes only its process; refresh this step's PATH too.
           $env:PATH += ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')
-          python -m unittest discover -s tests -p test_windows.py -v
+          python -m unittest discover -s tests -p 'test_windows*.py' -v

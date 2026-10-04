@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Install the Windows dssh command and its fzf host picker.
+Install dssh, its fzf host picker, and the Windows Terminal new-tab shortcut.
 .EXAMPLE
 .\setup-windows.ps1
 .EXAMPLE
@@ -13,7 +13,9 @@ Install the Windows dssh command and its fzf host picker.
 param(
     [ValidateSet('auto', 'winget', 'choco')][string]$PackageManager = 'auto',
     [switch]$SkipFzf,
-    [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost
+    [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost,
+    [switch]$SkipTerminal,
+    [string[]]$TerminalSettingsPath
 )
 
 function Find-DalftuiApplication([string]$Name) {
@@ -124,10 +126,25 @@ function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
     Write-Host "PowerShell profile configured: $Path"
 }
 
+function Set-DalftuiTerminalShortcut {
+    param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
+          [string[]]$SettingsPaths)
+    # Use the same PowerShell version as setup, without loading personal profiles.
+    $shellName = 'powershell.exe'
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
+    $shellPath = Join-Path $PSHOME $shellName
+    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'windows-terminal.py'), '--shell', $shellPath)
+    foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
+    & $Python @arguments | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal shortcut setup failed; see the message above. dssh is already configured in PowerShell.' }
+}
+
 function Invoke-DalftuiWindowsSetup {
     [CmdletBinding()]
     param([string]$Preference = 'auto', [switch]$Skip, [string]$TargetProfile,
-          [string]$Checkout = $PSScriptRoot)
+          [string]$Checkout = $PSScriptRoot, [switch]$NoTerminal,
+          [string[]]$SettingsPaths)
     $ErrorActionPreference = 'Stop'
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'This setup script targets Windows. On Linux, use ./install.'
@@ -149,6 +166,10 @@ function Invoke-DalftuiWindowsSetup {
     $pickerReady = Install-DalftuiFzf -Preference $Preference -Skip:$Skip
     Write-DalftuiProfile -Path $TargetProfile -Checkout $Checkout
     . (Join-Path $Checkout 'windows.ps1')
+    if (-not $NoTerminal) {
+        Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+            -Checkout $Checkout -SettingsPaths $SettingsPaths
+    }
     if (-not (Find-DalftuiApplication 'code')) {
         Write-Warning 'For Ctrl+B, F3, install VS Code with its code command on PATH and the Remote - SSH extension.'
     }
@@ -160,7 +181,8 @@ function Invoke-DalftuiWindowsSetup {
 if ($MyInvocation.InvocationName -ne '.') {
     try {
         Invoke-DalftuiWindowsSetup -Preference $PackageManager -Skip:$SkipFzf `
-            -TargetProfile $ProfilePath -Checkout $PSScriptRoot
+            -TargetProfile $ProfilePath -Checkout $PSScriptRoot `
+            -NoTerminal:$SkipTerminal -SettingsPaths $TerminalSettingsPath
     } catch {
         Write-Error ("Setup failed: " + $_.Exception.Message) -ErrorAction Continue
         exit 1

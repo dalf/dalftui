@@ -16,7 +16,7 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
     Assert-True $thrown $Message
 }
 try {
-    foreach ($file in @('setup-windows.ps1', 'windows.ps1')) {
+    foreach ($file in @('setup-windows.ps1', 'windows.ps1', 'windows-terminal.ps1')) {
         $parseErrors = $null
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file),
             [ref]$null, [ref]$parseErrors) | Out-Null
@@ -135,6 +135,31 @@ try {
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
+    # Exercise the real new-tab launcher without a GUI or SSH connection.
+    foreach ($file in @('windows-terminal.py', 'windows-terminal.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $checkout
+    }
+    $settingsPath = Join-Path $root 'terminal-settings.json'
+    [IO.File]::WriteAllText($settingsPath, '{"actions":[],"keybindings":[]}')
+    $python = Find-DalftuiApplication 'py'
+    $pythonArguments = @('-3')
+    if (-not $python) {
+        $python = Find-DalftuiApplication 'python'
+        $pythonArguments = @()
+    }
+    Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+        -Checkout $checkout -SettingsPaths @($settingsPath)
+    $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
+    Assert-True ($settings.keybindings[0].keys -eq 'ctrl+shift+f2') 'Setup must install Ctrl+Shift+F2'
+    Assert-True ($settings.actions[0].command.action -eq 'newTab') 'Shortcut must open a new tab'
+    $shellName = 'powershell.exe'
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
+    $terminalShell = Join-Path $PSHOME $shellName
+    $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'windows-terminal.ps1')
+    $arguments = ConvertFrom-Json -InputObject $argumentJson
+    Assert-True (($arguments -join ' ') -eq '--pick') 'A fresh tab must run dssh without a personal PowerShell profile'
+    Assert-True ($LASTEXITCODE -eq 17) 'New-tab launcher must preserve SSH/picker exit status'
     Write-Host "Passed $checks Windows setup assertions."
     # The exit-status test above deliberately ran a failing native command.
     $global:LASTEXITCODE = 0

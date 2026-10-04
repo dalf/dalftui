@@ -261,6 +261,28 @@ settings, and loads `windows.ps1` from this checkout. Repeated setup keeps one
 managed block; rerun it if you move the checkout or use another PowerShell host
 or version. Setup makes `dssh` available immediately and in new sessions.
 
+In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
+tab, pick a host, and connect to its tmux session. The shortcut works while the
+current tab is in SSH, tmux, or another program. It uses Terminal's
+[new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
+and keeps your default profile and appearance. **Ctrl+B, then F3** remains the
+remote VS Code shortcut.
+
+Setup finds existing Stable, Preview, Canary, and unpackaged Terminal settings.
+It backs up each changed `settings.json`, preserves comments and other settings,
+and adds no duplicates on repeated runs. An existing Ctrl+Shift+F2 binding is
+preserved; setup reports the conflict so you can remove that binding and rerun.
+If no settings are found, open Windows Terminal once and rerun setup. For a
+portable installation, pass its settings path explicitly:
+
+```powershell
+.\setup-windows.ps1 -TerminalSettingsPath 'C:\Tools\Terminal\settings\settings.json'
+```
+
+Use `-SkipTerminal` to configure only PowerShell and fzf. The tab launcher reads
+this checkout each time, so later Git updates apply to new tabs. Rerun setup
+after moving the checkout or replacing the PowerShell installation used by setup.
+
 If PowerShell reports that scripts are disabled, enable local scripts for your
 user, then rerun setup:
 
