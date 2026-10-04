@@ -825,6 +825,12 @@ diagnostics without reports or scores; any enabled diagnostic fails the task.
 Both CI workflows run this same check before functionality tests. Use
 `mise run pylint` or `mise run lint` to run it separately.
 
+On Windows, the task exempts only the exact Unix API names listed in
+`windows_lint_members` in [mise.toml](mise.toml) from member inference. Those APIs
+are used by Linux code or guarded tests and are unavailable to Windows Python.
+Linux lint checks them normally; other missing-member checks remain enabled on
+both platforms.
+
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions.
 They cover backups, rollback, repeated installation, updates through the link,
