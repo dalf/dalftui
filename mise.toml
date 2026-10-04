@@ -1,0 +1,63 @@
+min_version = "2026.7.5"
+
+# Use existing Python and uv installations, including CI's Python version matrix.
+[vars]
+powershell = "{{ env.DALFTUI_POWERSHELL | default(value='powershell') }}"
+
+[tasks.check]
+description = "Run spelling, then all tests for the current platform"
+alias = "default"
+depends = ["spellcheck"]
+run = [{ task = "test" }]
+
+[tasks.spellcheck]
+description = "Check spelling with the pinned codespell version"
+run = "uvx codespell==2.4.3"
+
+[tasks.test]
+description = "Run all tests for the current platform"
+run = [{ task = "test:linux" }]
+run_windows = [{ task = "test:windows" }, { task = "test:powershell" }]
+
+[tasks."test:linux"]
+description = "Run full Python discovery, including Linux integration tests"
+raw_args = true
+run = "python3 -m unittest discover -s tests -v"
+
+[tasks."test:windows"]
+description = "Run Windows launcher/Terminal and shared bridge Python suites"
+run = [
+    'python -m unittest discover -s tests -p "test_windows*.py" -v',
+    { task = "test:bridge" },
+]
+
+[tasks."test:bridge"]
+description = "Run shared bridge lifecycle and historical compatibility tests"
+raw_args = true
+run = 'python3 -m unittest discover -s tests -p "test_bridge*.py" -v'
+run_windows = 'python -m unittest discover -s tests -p "test_bridge*.py" -v'
+
+[tasks."test:powershell"]
+description = "Verify Windows setup and profile integration in PowerShell"
+run = "{{ vars.powershell }} -NoProfile -File ./tests/test_windows_setup.ps1"
+
+[tasks."install:linux"]
+description = "Install Linux configuration (accepts --dry-run and --tmux-only)"
+raw_args = true
+run = "./install"
+
+[tasks."install:windows"]
+description = "Set up Windows PowerShell, fzf, and Terminal integration"
+raw_args = true
+run = "{{ vars.powershell }} -NoProfile -File ./setup-windows.ps1"
+
+[tasks."reload:linux"]
+description = "Reload Linux configuration (accepts --socket PATH)"
+raw_args = true
+run = "./reload"
+
+[tasks."ssh:list"]
+description = "List SSH picker hosts without opening a connection"
+raw_args = true
+run = "python3 ssh-picker.py --list"
+run_windows = "python ssh-picker.py --list"

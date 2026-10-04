@@ -18,6 +18,8 @@ jobs:
       matrix:
         python: ['3.11', '3.14']
         shell: [powershell, pwsh]
+    env:
+      DALFTUI_POWERSHELL: ${{ matrix.shell }}
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -32,16 +34,19 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           enable-cache: false
+      - uses: jdx/mise-action@v4
+        with:
+          version: '2026.7.5'
+          install: false
+          cache: false
       - name: Check spelling
-        run: uvx codespell==2.4.3
+        run: mise run spellcheck
       - name: Verify setup and PowerShell profile integration
-        run: .\tests\test_windows_setup.ps1
+        run: mise run test:powershell
       - name: Set up the real fzf package in an isolated profile
-        run: .\setup-windows.ps1 -PackageManager choco -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal
-      - name: Verify Windows SSH, editor launcher, and Terminal settings
+        run: mise run install:windows -- -PackageManager choco -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal
+      - name: Verify Windows launcher, Terminal settings, and shared bridge suites
         run: |
           # Package setup refreshes only its process; refresh this step's PATH too.
           $env:PATH += ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')
-          python -m unittest discover -s tests -p 'test_windows*.py' -v
-      - name: Verify editor bridge lifecycle and historical protocol compatibility
-        run: python -m unittest discover -s tests -p 'test_bridge*.py' -v
+          mise run test:windows

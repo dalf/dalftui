@@ -84,21 +84,26 @@ declaration; it is not a forwarding wrapper. Do not remove or rename these paths
 
 ## Verification
 
-Use uv to run the pinned spelling check from the repository root before the
-functionality suites:
+Commands are centralized in [mise.toml](mise.toml). Use `mise tasks` to list them.
+Tasks use the existing Python and uv installations and run from the repository
+root. `mise run check` runs spelling before the current platform's functionality
+suites; `mise run` defaults to the same check.
+
+Run the pinned spelling check before the functionality suites:
 
 ```sh
-uvx codespell==2.4.3
+mise run spellcheck
 ```
 
-Both Linux and Windows CI run this check using `.codespellrc`. Vendored code,
-frozen historical fixtures, and local artifacts are excluded. The same command
-works on Windows; uv manages the tool's isolated environment automatically.
+This invokes `uvx codespell==2.4.3`. Both Linux and Windows CI run this task using
+`.codespellrc`. Vendored code, frozen historical fixtures, and local artifacts
+are excluded. The same task works on Windows; uv manages the tool's isolated
+environment automatically.
 
 Full Linux discovery:
 
 ```sh
-python3 -m unittest discover -s tests -v
+mise run test:linux
 ```
 
 Native Windows CI's Python coverage is the union of the Windows-compatible
@@ -106,18 +111,27 @@ launcher/Terminal selection and shared bridge lifecycle/historical compatibility
 selection, preserving platform and dependency skips:
 
 ```sh
-python -m unittest discover -s tests -p "test_windows*.py" -v
-python -m unittest discover -s tests -p "test_bridge*.py" -v
+mise run test:windows
 ```
 
-Those patterns select `test_windows_launcher.py` and `test_windows_terminal.py`,
+This runs `test_windows*.py` and `test_bridge*.py` discovery. Those patterns select
+`test_windows_launcher.py` and `test_windows_terminal.py`,
 then `test_bridge_lifecycle.py` and `test_bridge_protocol.py`, respectively.
 Linux-targeted bootstrap/startup tests are in `tests/test_remote_bootstrap.py`.
 Run PowerShell setup/profile verification separately when the shell is available:
 
 ```powershell
-.\tests\test_windows_setup.ps1
+mise run test:powershell
 ```
+
+The PowerShell task defaults to Windows PowerShell 5.1; set
+`DALFTUI_POWERSHELL=pwsh` to use PowerShell 7. CI sets this variable from its shell
+matrix. `mise run test` selects full Linux discovery on Linux, or the Windows
+Python and PowerShell suites on Windows. Direct commands remain available when
+mise is absent: `python3 -m unittest discover -s tests -v` on Linux,
+`python -m unittest discover -s tests -p "test_windows*.py" -v` and
+`python -m unittest discover -s tests -p "test_bridge*.py" -v` on Windows, and
+`.\tests\test_windows_setup.ps1` in PowerShell.
 
 Check discovered IDs and selected-suite membership when renaming tests; a
 successful discovery command can still match zero tests. See [README.md](README.md#verification)

@@ -21,6 +21,9 @@ cd ~/code/dalftui
 ./reload
 ```
 
+Optional [mise tasks](#repository-tasks) provide named shortcuts for installation,
+reloads, spelling, and tests.
+
 Existing configuration files and symlinks are backed up before replacement.
 The installer creates these connections:
 
@@ -602,6 +605,7 @@ needed. Representative layout:
 │       ├── profile.ps1
 │       └── ssh-tab.ps1
 ├── bridge_protocol.py
+├── mise.toml
 ├── install
 ├── reload
 ├── shortcuts.py
@@ -712,21 +716,68 @@ The frozen installation probe in
 older desktops against the current installed layout, while current bootstrap
 tests check supported historical root layouts before delivering credentials.
 
+## Repository tasks
+
+[mise](https://mise.jdx.dev/getting-started.html) 2026.7.5+ runs the commands
+defined in [mise.toml](mise.toml). It uses your existing Python and uv installations;
+tasks run from the repository root even when invoked from a subdirectory.
+After installing mise, trust the checkout and list its tasks:
+
+```sh
+mise trust
+mise tasks
+```
+
+| Task | Purpose |
+| --- | --- |
+| `mise run check` | Spelling first, then all tests for the current platform |
+| `mise run spellcheck` | Pinned codespell check through uv |
+| `mise run test` | Full Linux discovery, or Windows Python and PowerShell suites |
+| `mise run test:linux` | Full Python discovery, including Linux integration tests |
+| `mise run test:windows` | Windows launcher/Terminal and shared bridge Python suites |
+| `mise run test:bridge` | Shared bridge lifecycle and historical compatibility tests |
+| `mise run test:powershell` | Windows setup and profile integration |
+| `mise run install:linux` | Linux installation through `./install` |
+| `mise run install:windows` | Windows installation through `setup-windows.ps1` |
+| `mise run reload:linux` | Reload Linux settings through `./reload` |
+| `mise run ssh:list` | List SSH picker hosts without opening a connection |
+
+`mise run` defaults to `check`. Use installation and reload tasks on their target
+platform. They accept the existing scripts' options after `--`:
+
+```sh
+mise run install:linux -- --dry-run
+mise run install:linux -- --tmux-only --dry-run
+mise run reload:linux -- --socket /path/to/socket
+```
+
+Windows tasks use Windows PowerShell 5.1 by default. To install or test using
+PowerShell 7 instead, set `DALFTUI_POWERSHELL` to `pwsh`:
+
+```powershell
+$env:DALFTUI_POWERSHELL = 'pwsh'
+mise run test:powershell
+mise run install:windows -- -PackageManager choco -VSCodePath 'C:\Tools\VS Code Portable'
+```
+
+Setup updates the profile for the selected PowerShell host. The root scripts
+remain available for direct use. GitHub Actions uses these same tasks while
+selecting Python and PowerShell versions through its existing matrix.
+
 ## Verification
 
 Run spelling and functionality checks from the repository root with
 [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
 
 ```sh
-uvx codespell==2.4.3
-python3 -m unittest discover -s tests -v
-python3 ssh-picker.py --list
+mise run check
+mise run ssh:list
 ```
 
 Codespell checks documentation, source, tests, configuration, and hidden files
 such as CI workflows using [.codespellrc](.codespellrc). Vendored code, frozen
 historical fixtures, and local artifacts are excluded. The pinned version in the
-`uvx` command keeps local and CI checks consistent. uv manages the tool's isolated
+`spellcheck` task keeps local and CI checks consistent. uv manages the tool's isolated
 environment automatically.
 
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
@@ -754,21 +805,23 @@ The Windows-compatible launcher and Terminal suites run separately without tmux
 or curses. In PowerShell, run the same spelling check before the Python suites:
 
 ```powershell
-uvx codespell==2.4.3
+mise run spellcheck
 ```
 
-Run the launcher and Terminal suites:
+Run the launcher, Terminal, and shared bridge suites:
 
 ```sh
-python -m unittest discover -s tests -p "test_windows*.py" -v
+mise run test:windows
 ```
 
-This selects [tests/test_windows_launcher.py](tests/test_windows_launcher.py)
-and [tests/test_windows_terminal.py](tests/test_windows_terminal.py).
+This runs `test_windows*.py` discovery, selecting
+[tests/test_windows_launcher.py](tests/test_windows_launcher.py)
+and [tests/test_windows_terminal.py](tests/test_windows_terminal.py), followed by
+`test_bridge*.py` discovery.
 Run the shared bridge lifecycle and historical compatibility suites separately:
 
 ```sh
-python -m unittest discover -s tests -p "test_bridge*.py" -v
+mise run test:bridge
 ```
 
 This selects [tests/test_bridge_lifecycle.py](tests/test_bridge_lifecycle.py)
@@ -782,7 +835,7 @@ full Linux discovery.
 Check the PowerShell setup and profile integration separately:
 
 ```powershell
-.\tests\test_windows_setup.ps1
+mise run test:powershell
 ```
 
 GitHub Actions runs the full Linux suite on Ubuntu with Python 3.11 and 3.14,
