@@ -194,7 +194,10 @@ login. A destination such as `user@host` already provides its username.
 
 ## Remote tmux
 
-Local Alacritty windows and SSH windows use the same tmux session policy:
+SSH windows use tmux when it is installed on the remote host. Otherwise they
+silently open a plain login shell. No remote dalftui installation is required
+for either case. Local Alacritty windows and SSH windows with tmux use the same
+session policy:
 
 - No sessions: create session `0`.
 - One detached session: attach to it, whatever its name.
@@ -202,22 +205,23 @@ Local Alacritty windows and SSH windows use the same tmux session policy:
 - Multiple sessions: list their IDs, names, and client counts. Enter a session ID to
   attach, `n` or Enter for a new session, `s` for a plain login shell, or `q` to cancel.
 
-The remote host must have tmux installed. **Ctrl+B, then d** detaches and closes
-the SSH window while leaving its session running. Connection errors stay visible
-until Enter is pressed. A plain shell is intentionally an explicit choice because
-tmux shortcuts, persistence, and the remote **Ctrl+Shift+F3** integration are not
-available outside tmux. SSH windows override Alacritty's local startup and apply
-the policy directly on the server.
+With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window while
+leaving its session running. Connection errors stay visible
+until Enter is pressed. A plain shell has no tmux shortcuts, persistence, or
+remote **Ctrl+Shift+F3** integration. SSH windows override Alacritty's local
+startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--tmux-only` on each server where you want the shared configuration.
+Without it, remote tmux uses the server's existing configuration and bindings.
 
 ## Open the current folder in VS Code
 
 Press **Ctrl+Shift+F3** in an Alacritty pane to open its directory in a new local
 VS Code window. Install VS Code's `code` command on your desktop.
 
-In an SSH window opened through **Ctrl+Shift+F2**, the same shortcut opens
-the remote pane's directory in local VS Code using Microsoft's **Remote - SSH**
+In an SSH window opened through **Ctrl+Shift+F2** to a server with dalftui
+installed, the same shortcut opens the remote pane's directory in local VS Code
+using Microsoft's **Remote - SSH**
 extension. VS Code uses the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
 VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
@@ -226,8 +230,11 @@ Update dalftui and run `./reload` on both machines. Reconnect older SSH windows
 through the dalftui launcher (the picker or `--connect HOST`): attachments without
 credentials cannot use F3, even if their old Unix socket is still reachable.
 Local folder opening continues to work without bridge credentials.
-The picker creates an authenticated Unix socket bridge through that window's
-SSH connection, and removes it when the connection ends.
+The picker checks for tmux and the installed dalftui files under
+`~/.config/dalftui` (or `$XDG_CONFIG_HOME/dalftui` when the remote configuration
+directory is absolute). Only those servers receive bridge credentials and an
+authenticated socket bridge through that
+window's SSH connection. The bridge is removed when the connection ends.
 No desktop VS Code installation is needed on the server; Remote - SSH manages
 its own server component when you first connect.
 
@@ -332,8 +339,9 @@ managed block; rerun it if you move the checkout or use another PowerShell host
 or version. Setup makes `dssh` available immediately and in new sessions.
 
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
-tab, pick a host, and connect to its tmux session. The shortcut works while the
-current tab is in SSH, tmux, or another program. It uses Terminal's
+tab, pick a host, and connect using remote tmux when available or a plain shell.
+The shortcut works while the current tab is in SSH, tmux, or another program.
+It uses Terminal's
 [new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
 and keeps your default profile and appearance.
 
@@ -394,7 +402,8 @@ Host my-vm
 Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
 to cancel. Selection connects in the current terminal window. SSH uses the
 configured username; if none is configured, the launcher asks for one. It
-creates or reattaches tmux using the usual session policy. Once attached,
+creates or reattaches tmux using the usual session policy when tmux is installed,
+or silently opens a plain login shell otherwise. With remote dalftui installed,
 **Ctrl+Shift+F3** opens the active pane's remote folder in Windows VS Code.
 **Ctrl+B, then F3** remains available as a tmux fallback.
 
@@ -408,8 +417,9 @@ py -3 "$HOME\code\dalftui\ssh-picker.py" --connect my-vm
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
 
-Windows uses a token-authenticated TCP bridge forwarded through SSH. dalftui
-binds the **desktop listener** to `127.0.0.1`. It explicitly requests a
+Windows connections to servers with dalftui installed use a token-authenticated
+TCP bridge forwarded through SSH. dalftui binds the **desktop listener** to
+`127.0.0.1`. It explicitly requests a
 **remote SSH listener** with
 `-R 127.0.0.1:REMOTE_PORT:127.0.0.1:LOCAL_PORT`, but that listener's effective
 bind address also depends on the SSH server's policy. The Linux VM must permit
@@ -554,8 +564,11 @@ mode-0755 directory: they prove that reaching the endpoint does not authorize
 editor launches. This is a same-account local test, not a cross-user or remote
 sshd test. Remote credential scripts run locally with fake tmux clients to
 check private/exclusive creation, consumption, failed setup, signal cleanup,
-and resource isolation. Real tmux tests route separate clients' endpoints and
-tokens even with deliberately stale server environment values.
+and resource isolation. SSH startup tests cover silent shell fallback, native
+tmux without dalftui, installation detection with custom configuration paths,
+and connections that never start or forward a bridge. Real tmux tests route
+separate clients' endpoints and tokens even with deliberately stale server
+environment values.
 
 The Windows-compatible launcher tests run separately without tmux or curses:
 

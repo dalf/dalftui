@@ -419,12 +419,16 @@ else:
                 prepare_error = (RuntimeError('setup failed') if stage == 'setup-failure'
                                  else KeyboardInterrupt() if stage == 'setup-cancel' else None)
                 def cleanup_after_stop(*args):
-                    self.assertTrue(bridge.stopped.is_set())
-                    self.assertEqual(bridge.listener.fileno(), -1)
+                    if stage.startswith('setup-'):
+                        self.assertFalse(hasattr(bridge, 'listener'))
+                    else:
+                        self.assertTrue(bridge.stopped.is_set())
+                        self.assertEqual(bridge.listener.fileno(), -1)
                 output = io.StringIO()
                 with (patch.object(picker, 'configured_login', return_value='alice'),
                       patch.object(picker, 'EditorBridge', return_value=bridge),
-                      patch.object(picker, 'prepare_editor_credentials', side_effect=prepare_error) as prepare,
+                      patch.object(picker, 'prepare_editor_credentials', return_value=True,
+                                   side_effect=prepare_error) as prepare,
                       patch.object(picker, 'cleanup_editor_bridge', side_effect=cleanup_after_stop) as cleanup,
                       patch.object(picker.subprocess, 'run',
                                    return_value=subprocess.CompletedProcess(['ssh'], status),
@@ -435,6 +439,7 @@ else:
                       redirect_stdout(output), redirect_stderr(output)):
                     self.assertEqual(picker.connect('vm-alias', 'tcp'), status)
                 prepare.assert_called_once()
+                self.assertTrue(prepare.call_args.kwargs['check_installation'])
                 cleanup.assert_called_once()
                 self.assertIs(cleanup.call_args.args[2], bridge)
                 self.assertNotIn(vscode.SOCKET_ENV, prepare.call_args.args[3])
@@ -447,9 +452,38 @@ else:
                     self.assertIn('ExitOnForwardFailure=yes', run.call_args.args[0])
                     self.assertNotIn(bridge.token, ' '.join(run.call_args.args[0]))
                 self.assertNotIn(bridge.token, output.getvalue())
-                self.assertTrue(bridge.stopped.is_set())
-                self.assertEqual(bridge.listener.fileno(), -1)
-                self.assertTrue(all(not worker.is_alive() for worker in bridge.workers))
+                if stage.startswith('setup-'):
+                    self.assertFalse(hasattr(bridge, 'listener'))
+                else:
+                    self.assertTrue(bridge.stopped.is_set())
+                    self.assertEqual(bridge.listener.fileno(), -1)
+                    self.assertTrue(all(not worker.is_alive() for worker in bridge.workers))
+
+    def test_connect_without_remote_dalftui_never_starts_or_forwards_the_bridge(self):
+        output = io.StringIO()
+        with (patch.object(picker, 'configured_login', return_value='alice'),
+              patch.object(picker, 'EditorBridge') as bridge,
+              patch.object(picker, 'prepare_editor_credentials', return_value=False) as prepare,
+              patch.object(picker, 'cleanup_editor_bridge') as cleanup,
+              patch.object(picker.subprocess, 'run',
+                           return_value=subprocess.CompletedProcess(['ssh'], 0)) as run,
+              patch.dict(os.environ, {vscode.SOCKET_ENV: 'stale-endpoint',
+                                      vscode.TOKEN_ENV: 'stale-token',
+                                      'TMUX': 'local-session', 'TMUX_PANE': '%9'}),
+              redirect_stdout(output), redirect_stderr(output)):
+            self.assertEqual(picker.connect('vm-alias', 'tcp'), 0)
+        bridge.return_value.__enter__.assert_not_called()
+        cleanup.assert_not_called()
+        prepare.assert_called_once()
+        self.assertTrue(prepare.call_args.kwargs['check_installation'])
+        run.assert_called_once()
+        command = run.call_args.args[0]
+        self.assertEqual(command, picker.ssh_command('vm-alias'))
+        self.assertNotIn('-R', command)
+        self.assertNotIn('ExitOnForwardFailure=yes', command)
+        for name in (vscode.SOCKET_ENV, vscode.TOKEN_ENV, 'TMUX', 'TMUX_PANE'):
+            self.assertNotIn(name, run.call_args.kwargs['env'])
+        self.assertEqual(output.getvalue(), 'Connecting to vm-alias …\n')
 
     def test_configured_username_and_unset_username_use_real_ssh_config(self):
         if not shutil.which(picker.ssh_executable()):

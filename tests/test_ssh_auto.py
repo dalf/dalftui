@@ -1,0 +1,152 @@
+"""Run SSH startup scripts against isolated remote homes and executables."""
+import importlib.util
+from contextlib import redirect_stdout
+import io
+import os
+from pathlib import Path
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.dont_write_bytecode = True
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import dalftui_setup
+from vscode import EditorBridge
+
+spec = importlib.util.spec_from_file_location('auto_picker', ROOT / 'ssh-picker.py')
+picker = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(picker)
+
+
+@unittest.skipIf(sys.platform == 'win32', 'Remote startup runs in a POSIX shell')
+class SshAutoTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix='dalftui-ssh-auto-')
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+        self.home = self.directory / 'remote home'
+        self.home.mkdir()
+        self.bin = self.directory / 'bin'
+        self.bin.mkdir()
+        # An isolated PATH ensures the real machine's tmux cannot affect tests.
+        for command in ('sh', 'stat', 'id', 'mkdir', 'cat', 'rm', 'rmdir'):
+            (self.bin / command).symlink_to(shutil.which(command))
+        self.log = self.directory / 'command'
+        self.editor_env = self.directory / 'editor-env'
+        self.tmux = self.bin / 'tmux'
+        self.tmux.write_text('#!/bin/sh\n'
+                             'if [ "$1" = list-sessions ]; then exit 0; fi\n'
+                             'printf "%s\\n" "$@" > "$TEST_COMMAND_LOG"\n'
+                             'printf "%s\\n" "${DALFTUI_EDITOR_SOCKET-unset}" '
+                             '"${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"\n')
+        self.tmux.chmod(0o755)
+        self.shell = self.bin / 'login-shell'
+        self.shell.write_text('#!/bin/sh\n'
+                              'printf "shell\\n%s\\n" "$@" > "$TEST_COMMAND_LOG"\n'
+                              'printf "%s\\n" "${DALFTUI_EDITOR_SOCKET-unset}" '
+                              '"${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"\n'
+                              'exit "${TEST_SHELL_STATUS:-0}"\n')
+        self.shell.chmod(0o755)
+        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME='',
+                        PATH=str(self.bin), SHELL=str(self.shell),
+                        TEST_COMMAND_LOG=str(self.log), TEST_EDITOR_ENV=str(self.editor_env),
+                        DALFTUI_EDITOR_SOCKET='stale-endpoint', DALFTUI_EDITOR_TOKEN='stale-token')
+        self.real_run = subprocess.run
+
+    def install(self, config=None):
+        paths = dalftui_setup.Paths(self.home, config or self.home / '.config',
+                                   self.home / '.local/state')
+        with redirect_stdout(io.StringIO()):
+            dalftui_setup.install(paths, ROOT, profile='tmux-only')
+
+    def remote_command(self, **env):
+        return self.real_run(shlex.split(picker.ssh_command('server')[-1]),
+                             env=dict(self.env, **env), capture_output=True, text=True, timeout=5)
+
+    def prepare(self):
+        bridge = EditorBridge('server', transport='tcp')
+        bridge.remote_directory = str(self.directory / 'credentials')
+        bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
+        bridge.remote_token_file = bridge.remote_directory + '/token'
+
+        def local_ssh(command, **kwargs):
+            self.assertNotIn('-R', command)
+            return self.real_run(shlex.split(command[-1]), capture_output=True, timeout=5, **kwargs)
+
+        with patch.object(picker.subprocess, 'run', side_effect=local_ssh):
+            prepared = picker.prepare_editor_credentials('server', 'alice', bridge, self.env,
+                                                          check_installation=True)
+        self.assertFalse(hasattr(bridge, 'listener'))
+        return prepared, bridge
+
+    def test_missing_tmux_silently_starts_a_login_shell_and_preserves_its_status(self):
+        self.tmux.rename(self.bin / 'disabled-tmux')
+        for status in ('0', '23'):
+            with self.subTest(status=status):
+                result = self.remote_command(TEST_SHELL_STATUS=status)
+                self.assertEqual(result.returncode, int(status), result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(result.stderr, '')
+                self.assertEqual(self.log.read_text().splitlines(), ['shell', '-l'])
+                self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_native_tmux_works_without_dalftui_or_editor_credentials(self):
+        prepared, bridge = self.prepare()
+        self.assertFalse(prepared)
+        self.assertFalse(Path(bridge.remote_directory).exists())
+        result = self.remote_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_installed_dalftui_prepares_credentials_before_starting_a_listener(self):
+        self.install()
+        prepared, bridge = self.prepare()
+        self.assertTrue(prepared)
+        self.assertEqual(Path(bridge.remote_token_file).read_text(), bridge.token + '\n')
+
+    def test_custom_absolute_config_directory_is_detected(self):
+        config = self.directory / "custom config's directory"
+        self.env['XDG_CONFIG_HOME'] = str(config)
+        self.install(config)
+        prepared, bridge = self.prepare()
+        self.assertTrue(prepared)
+        self.assertTrue(Path(bridge.remote_token_file).is_file())
+
+    def test_relative_config_directory_uses_default_like_the_installer(self):
+        self.env['XDG_CONFIG_HOME'] = 'relative-config'
+        self.install()
+        prepared, _ = self.prepare()
+        self.assertTrue(prepared)
+
+    def test_missing_tmux_skips_bridge_even_with_dalftui_installed(self):
+        self.install()
+        self.tmux.rename(self.bin / 'disabled-tmux')
+        prepared, bridge = self.prepare()
+        self.assertFalse(prepared)
+        self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_broken_installation_skips_bridge(self):
+        config = self.home / '.config'
+        config.mkdir()
+        (config / 'dalftui').symlink_to(self.directory / 'missing-checkout')
+        prepared, bridge = self.prepare()
+        self.assertFalse(prepared)
+        self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_credential_setup_errors_remain_visible(self):
+        self.install()
+        (self.bin / 'mkdir').unlink()
+        with self.assertRaisesRegex(RuntimeError, 'Could not prepare'):
+            self.prepare()
+
+
+if __name__ == '__main__':
+    unittest.main()

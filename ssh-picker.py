@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pick an SSH host and attach remote tmux with a local VS Code bridge."""
+"""Pick an SSH host, using remote tmux and a VS Code bridge when installed."""
 import argparse
 try:
     import curses
@@ -21,12 +21,27 @@ from vscode import EditorBridge, SOCKET_ENV, TOKEN_ENV
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
 
-# Use the same policy for local and remote terminals. Execute with sh so the
-# remote launcher also works when the login shell is fish.
+# Use the same tmux policy for local and remote terminals, with a silent shell
+# fallback on remote hosts. Execute with sh even when the login shell is fish.
 TMUX_START_SCRIPT = Path(__file__).with_name('tmux-start.sh').read_text()
 REMOTE_SCRIPT = """unset TMUX TMUX_PANE DALFTUI_EDITOR_SOCKET DALFTUI_EDITOR_TOKEN
 {editor_setup}
+if ! command -v tmux >/dev/null 2>&1; then
+    "${SHELL:-/bin/sh}" -l
+    exit $?
+fi
 """ + TMUX_START_SCRIPT
+
+# The installer links the checkout here in both desktop and tmux-only modes.
+# Status 3 means there is no remote editor integration to prepare.
+REMOTE_EDITOR_CHECK = """command -v tmux >/dev/null 2>&1 || exit 3
+case ${XDG_CONFIG_HOME:-} in
+    /*) dalftui_config=$XDG_CONFIG_HOME ;;
+    *) dalftui_config=$HOME/.config ;;
+esac
+[ -r "$dalftui_config/dalftui/vscode.py" ] &&
+[ -r "$dalftui_config/dalftui/config/tmux.conf" ] || exit 3
+"""
 
 
 def valid_host(value):
@@ -172,7 +187,7 @@ def pick(screen, hosts):
                 style |= curses.A_REVERSE | curses.A_BOLD
             write(6 + index - start, 2, ('  ' + label).ljust(max(0, width - 5)), style)
         write(height - 3, 2, message, curses.color_pair(1))
-        write(height - 2, 2, 'Remote tmux: none → create · one → attach · several → choose', curses.color_pair(3))
+        write(height - 2, 2, 'Remote tmux when installed · otherwise a login shell', curses.color_pair(3))
         try:
             screen.move(min(4, height - 1), min(10 + len(query), max(0, width - 2)))
         except curses.error:
@@ -290,13 +305,14 @@ cleanup_editor_resources() {
 """)
 
 
-def prepare_editor_credentials(host, login, bridge, env):
+def prepare_editor_credentials(host, login, bridge, env, *, check_installation=False):
+    """Prepare private credentials, or return False when integration is absent."""
     # stdin is carried by SSH; putting the secret in sh -c arguments would expose
     # it through the VM's process list. The private file is consumed on attach.
     # mkdir refuses existing paths, including symlinks. The claim is separate
     # from the token so cleanup still recognizes the directory after consumption.
     # Create it before -R: sshd binds a Unix forward before the attach command.
-    script = editor_resources(bridge) + """
+    script = (REMOTE_EDITOR_CHECK if check_installation else '') + editor_resources(bridge) + """
 umask 077
 set -C
 mkdir -m 700 -- "$editor_directory" || exit 1
@@ -310,8 +326,11 @@ trap - EXIT HUP INT TERM
     result = subprocess.run([*ssh_base(host, login), '-T', '-o', 'ClearAllForwardings=yes',
                              '--', host, 'sh -c ' + shlex.quote(script)],
                             input=(bridge.token + '\n').encode('ascii'), env=env)
+    if check_installation and result.returncode == 3:
+        return False
     if result.returncode:
         raise RuntimeError('Could not prepare the VS Code bridge credentials on the SSH server.')
+    return True
 
 
 def cleanup_editor_bridge(host, login, bridge, env):
@@ -378,13 +397,18 @@ def connect(host, transport=None):
         destination = f'{login}@{host}' if login else host
         bridge = EditorBridge(destination, env, transport)
         status = 1
+        prepared = None
         try:
-            with bridge:
-                prepare_editor_credentials(host, login, bridge, env)
-                status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
+            prepared = prepare_editor_credentials(host, login, bridge, env, check_installation=True)
+            if prepared:
+                with bridge:
+                    status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
+            else:
+                status = subprocess.run(ssh_command(host, login), env=env).returncode
         finally:
             # Stop accepting/launching before any potentially slow cleanup SSH.
-            cleanup_editor_bridge(host, login, bridge, env)
+            if prepared is not False:
+                cleanup_editor_bridge(host, login, bridge, env)
     except KeyboardInterrupt:
         return 130
     except (OSError, RuntimeError, subprocess.TimeoutExpired, EOFError, ValueError) as error:
