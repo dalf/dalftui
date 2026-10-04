@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pick an SSH host, open another Alacritty window, and attach remote tmux."""
+"""Pick an SSH host and attach remote tmux with a local VS Code bridge."""
 import argparse
 try:
     import curses
@@ -105,6 +105,9 @@ def configured_tag(host):
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RuntimeError(f'Could not read the SSH tag for {host}: {error}') from error
     if result.returncode:
+        if 'bad configuration option: tag' in result.stderr.lower():
+            raise RuntimeError('The host picker requires OpenSSH 9.4+ for Tag dalftui. '
+                               'Update your OpenSSH client, then retry.')
         raise RuntimeError(result.stderr.strip() or f'Could not read SSH configuration for {host}')
     return next((line.split(None, 1)[1] for line in result.stdout.splitlines()
                  if line.startswith('tag ')), '')
@@ -113,6 +116,38 @@ def configured_tag(host):
 def target_hosts():
     return [host for host in configured_hosts(SSH_CONFIG)
             if configured_tag(host) == PICKER_TAG]
+
+
+def pick_fzf(hosts=None):
+    """Use the native Windows fzf picker, also available with --pick on Linux."""
+    executable = shutil.which('fzf')
+    if not executable:
+        raise RuntimeError('fzf was not found. Run setup-windows.ps1, or install fzf '
+                           'with winget or Chocolatey. Use --connect HOST to connect directly.')
+    hosts = target_hosts() if hosts is None else hosts
+    if not hosts:
+        raise RuntimeError(f'No hosts enabled in {SSH_CONFIG}. Add Tag dalftui '
+                           'to the SSH Host entries you want in the picker.')
+    env = dict(os.environ)
+    # Personal multi-select/print-query settings would change the returned host.
+    env.pop('FZF_DEFAULT_OPTS', None)
+    env.pop('FZF_DEFAULT_OPTS_FILE', None)
+    result = subprocess.run(
+        [executable, '--height=80%', '--layout=reverse', '--border=rounded',
+         '--no-multi', '--prompt=Host> ',
+         '--header=SSH hosts | Tag dalftui\nType to filter | Up/Down select | Enter connect | Esc cancel',
+         '--color=bg:-1,fg:#e5e7eb,bg+:#e5e7eb,fg+:#111827,hl:#89b4fa,hl+:#1565c0,'
+         'header:#a6adc8,prompt:#89b4fa,pointer:#89b4fa,border:#585b70'],
+        input='\n'.join(hosts) + '\n', stdout=subprocess.PIPE,
+        encoding='utf-8', env=env)
+    if result.returncode in (1, 130):
+        return None
+    if result.returncode:
+        raise RuntimeError(f'fzf exited with status {result.returncode}.')
+    selected = result.stdout.strip()
+    if selected not in hosts:
+        raise RuntimeError('fzf did not return a configured, tagged host.')
+    return selected
 
 
 def pick(screen, hosts):
@@ -352,10 +387,13 @@ def open_window(host):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--connect', metavar='HOST')
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument('--connect', metavar='HOST')
+    action.add_argument('--pick', action='store_true',
+                        help='Use fzf to choose a host and connect in this terminal (Windows default)')
+    action.add_argument('--list', action='store_true', help='Print the host list without connecting')
     parser.add_argument('--bridge', choices=('unix', 'tcp'),
                         help='Editor bridge transport (default: TCP on Windows, Unix socket on Linux)')
-    parser.add_argument('--list', action='store_true', help='Print the host list without connecting')
     args = parser.parse_args()
     if sys.version_info < (3, 11):
         parser.error('Python 3.11 or newer is required.')
@@ -364,6 +402,15 @@ def main():
     if args.list:
         print('\n'.join(target_hosts()))
         return 0
+    if sys.platform == 'win32' or args.pick:
+        try:
+            host = pick_fzf()
+            return connect(host, args.bridge) if host else 0
+        except KeyboardInterrupt:
+            return 130
+        except (OSError, RuntimeError, UnicodeError) as error:
+            print(f'Could not choose an SSH host: {error}', file=sys.stderr)
+            return 1
     if curses is None:
         parser.error('Use --connect HOST on Windows; the interactive host picker requires curses.')
     try:

@@ -41,6 +41,88 @@ class WindowsTests(unittest.TestCase):
                 self.assertEqual(module.main(), 0)
         connect.assert_called_once_with('vm-alias', None)
 
+    def test_windows_picker_connects_selected_host_without_curses_or_alacritty(self):
+        with patch.object(picker.sys, 'platform', 'win32'):
+            with patch.object(picker, 'pick_fzf', return_value='vm-alias') as choose:
+                with patch.object(picker, 'connect', return_value=17) as connect:
+                    with patch.object(picker, 'open_window') as window:
+                        with patch.object(sys, 'argv', ['ssh-picker.py']):
+                            self.assertEqual(picker.main(), 17)
+        choose.assert_called_once_with()
+        connect.assert_called_once_with('vm-alias', None)
+        window.assert_not_called()
+
+    def test_cancelled_picker_does_not_open_ssh(self):
+        with patch.object(picker, 'pick_fzf', return_value=None):
+            with patch.object(picker, 'connect') as connect:
+                with patch.object(sys, 'argv', ['ssh-picker.py', '--pick']):
+                    self.assertEqual(picker.main(), 0)
+        connect.assert_not_called()
+
+    def test_fzf_receives_only_tagged_hosts_and_ignores_personal_output_settings(self):
+        result = subprocess.CompletedProcess(['fzf'], 0, 'server-two\r\n')
+        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
+            with patch.object(picker, 'target_hosts', return_value=['server-one', 'server-two']):
+                with patch.dict(os.environ, {'FZF_DEFAULT_OPTS': '--multi --print-query',
+                                              'FZF_DEFAULT_OPTS_FILE': 'personal-options'}):
+                    with patch.object(picker.subprocess, 'run', return_value=result) as run:
+                        self.assertEqual(picker.pick_fzf(), 'server-two')
+        self.assertEqual(run.call_args.kwargs['input'], 'server-one\nserver-two\n')
+        self.assertNotIn('FZF_DEFAULT_OPTS', run.call_args.kwargs['env'])
+        self.assertNotIn('FZF_DEFAULT_OPTS_FILE', run.call_args.kwargs['env'])
+        self.assertFalse(run.call_args.kwargs.get('shell', False))
+
+    def test_fzf_cancel_no_match_and_unexpected_output(self):
+        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
+            for code in (1, 130):
+                with self.subTest(code=code):
+                    with patch.object(picker.subprocess, 'run',
+                                      return_value=subprocess.CompletedProcess(['fzf'], code, '')):
+                        self.assertIsNone(picker.pick_fzf(['server']))
+            for code, output in ((2, ''), (0, 'github.com\n'), (0, 'server\nother\n')):
+                with self.subTest(code=code, output=output):
+                    with patch.object(picker.subprocess, 'run',
+                                      return_value=subprocess.CompletedProcess(['fzf'], code, output)):
+                        with self.assertRaises(RuntimeError):
+                            picker.pick_fzf(['server'])
+
+    def test_missing_fzf_or_empty_host_list_has_actionable_error(self):
+        with patch.object(picker.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'setup-windows.ps1'):
+                picker.pick_fzf(['server'])
+        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
+            with self.assertRaisesRegex(RuntimeError, 'Tag dalftui'):
+                picker.pick_fzf([])
+
+    def test_picker_tag_evaluation_uses_real_windows_ssh_and_include_config(self):
+        if not shutil.which(picker.ssh_executable()):
+            self.skipTest('OpenSSH is not installed')
+        probe = subprocess.run([picker.ssh_executable(), '-G', '-F', os.devnull,
+                                '-o', 'Tag=dalftui', '--', 'localhost'],
+                               capture_output=True, text=True, timeout=10)
+        if probe.returncode:
+            self.skipTest('OpenSSH 9.4+ is required for SSH tags')
+        picker.secure_ssh_directory(self.root)
+        config = self.root / 'config'
+        included = self.root / 'servers included.conf'
+        included.write_text('Host vm-alias\n Tag dalftui\n User alice\n'
+                            'Host github.com gitlab.com\n User git\n')
+        config.write_text(f'Include "{included.as_posix()}"\n')
+        with patch.object(picker, 'SSH_CONFIG', config):
+            self.assertEqual(picker.target_hosts(), ['vm-alias'])
+            self.assertEqual(picker.configured_login('vm-alias'), 'alice')
+
+    def test_native_fzf_filters_unicode_hosts_using_picker_options(self):
+        if not shutil.which('fzf'):
+            self.skipTest('fzf is not installed')
+        real_run = subprocess.run
+
+        def noninteractive(command, **kwargs):
+            return real_run([*command, '--filter=prod'], **kwargs)
+
+        with patch.object(picker.subprocess, 'run', side_effect=noninteractive):
+            self.assertEqual(picker.pick_fzf(['dev-vm', 'prod-é']), 'prod-é')
+
     def test_windows_defaults_to_authenticated_tcp(self):
         with patch.object(vscode, 'WINDOWS', True):
             with vscode.EditorBridge('vm-alias') as bridge:

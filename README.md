@@ -229,60 +229,78 @@ If VS Code cannot open, tmux displays the error in its status line.
 
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python
 3.11+, Windows OpenSSH, and Windows VS Code with **Remote - SSH**. The `code`
-command must be on PATH. No local tmux, Alacritty, curses package, or Windows
-installation of the dalftui configuration is needed.
+command must be on PATH. The host picker also needs fzf and OpenSSH 9.4+ for
+`Tag dalftui`. No local tmux, Alacritty, or curses package is needed.
 
-Clone the repository once on Windows, then connect using an alias from
-`%USERPROFILE%\.ssh\config`:
+Clone the repository once on Windows, then run setup in PowerShell:
 
 ```powershell
 git clone https://github.com/dalf/dalftui.git "$HOME\code\dalftui"
 cd "$HOME\code\dalftui"
-py -3 .\ssh-picker.py --connect my-vm
+.\setup-windows.ps1
 ```
 
-For a shorter command in PowerShell, define `dssh`:
+Setup reuses fzf when it is already on PATH. Otherwise it installs fzf using
+WinGet if available, or Chocolatey. You can choose a package manager explicitly:
 
 ```powershell
-function dssh {
-    param([Parameter(Mandatory)][string]$HostName)
-    py -3 "$HOME\code\dalftui\ssh-picker.py" --connect $HostName
-}
-
-dssh my-vm
+.\setup-windows.ps1 -PackageManager winget
+.\setup-windows.ps1 -PackageManager choco
 ```
 
-The function works from any directory. Adjust the script path if you cloned the
-repository elsewhere. It connects through the same launcher, so remote tmux and
-**Ctrl+B, then F3** keep working. This function connects directly to the supplied
-host alias; it does not open a host picker.
+If neither package manager is available, setup prints the manual install
+commands and configures direct connections. Use `-SkipFzf` to configure `dssh`
+without installing fzf. The package commands are
+[documented by fzf](https://junegunn.github.io/fzf/installation/).
+Chocolatey installations may require an administrator PowerShell.
 
-To keep `dssh` available in new PowerShell sessions, create your
-[PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles)
-if needed, then open it:
+Setup adds a managed block to your current
+[PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles).
+It backs up an existing profile before changing it, preserves your personal
+settings, and loads `windows.ps1` from this checkout. Repeated setup keeps one
+managed block; rerun it if you move the checkout or use another PowerShell host
+or version. Setup makes `dssh` available immediately and in new sessions.
+
+If PowerShell reports that scripts are disabled, enable local scripts for your
+user, then rerun setup:
 
 ```powershell
-if (-not (Test-Path -LiteralPath $PROFILE)) {
-    New-Item -ItemType File -Path $PROFILE -Force | Out-Null
-}
-notepad $PROFILE
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-Add the `function dssh { ... }` definition above to the profile and save it.
-Reload the profile in your current PowerShell session:
+Connect from any directory:
 
 ```powershell
-. $PROFILE
-dssh my-vm
+dssh        # Pick a host
+dssh my-vm  # Connect directly
 ```
 
-A `git pull --ff-only` updates the launcher used by this function; you do not
-need to redefine it when the checkout stays at the same path.
+The picker reads `%USERPROFILE%\.ssh\config`, including `Include` files, and
+lists hosts tagged `dalftui`. Git service hosts remain out of the list when
+untagged. Mark your login servers, for example:
 
-SSH uses the configured username; if none is configured, the launcher asks for
-one. It creates or reattaches tmux using the usual session policy. Once attached,
+```sshconfig
+Host my-vm
+    HostName vm.example.org
+    User alice
+    Tag dalftui
+```
+
+Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
+to cancel. Selection connects in the current terminal window. SSH uses the
+configured username; if none is configured, the launcher asks for one. It
+creates or reattaches tmux using the usual session policy. Once attached,
 **Ctrl+B, then F3** opens the active pane's remote folder in Windows VS Code.
-The Windows launcher uses the current terminal window.
+
+Without PowerShell setup, including from Command Prompt, you can run the
+launcher directly:
+
+```powershell
+py -3 "$HOME\code\dalftui\ssh-picker.py" --pick
+py -3 "$HOME\code\dalftui\ssh-picker.py" --connect my-vm
+```
+
+In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
 
 Windows uses a loopback TCP bridge authenticated with a connection token,
 forwarded through SSH. The Linux VM must permit remote TCP forwarding
@@ -301,8 +319,10 @@ git pull --ff-only
 ./reload
 ```
 
-For later Windows updates, run `git pull --ff-only` in the Windows checkout and
-start a new connection. Linux connections keep using their private Unix socket
+For later Windows updates, run `git pull --ff-only` in the Windows checkout,
+reload your profile with `. $PROFILE` or open a new PowerShell session, and start
+a new connection. The profile follows the checkout; no reinstall is needed.
+Linux connections keep using their private Unix socket
 bridge by default. `--bridge tcp` also allows testing TCP connections on Linux.
 
 You can also open a remote folder directly from your **local** terminal:
@@ -359,6 +379,15 @@ The Windows-compatible launcher tests run separately without tmux or curses:
 python -m unittest discover -s tests -p test_windows.py -v
 ```
 
-GitHub Actions runs these tests on Windows with Python 3.11 and 3.14. They cover
-TCP authentication, native VS Code CLI arguments, SSH login resolution, and
-connection-token handling. GUI launches are mocked in the automated tests.
+Check the PowerShell setup and profile integration separately:
+
+```powershell
+.\tests\test_windows_setup.ps1
+```
+
+GitHub Actions runs the Windows tests with Python 3.11 and 3.14, in PowerShell
+5.1 and 7. They cover package manager selection and failures, profile backups
+and repeated setup, the `dssh` command, real fzf filtering, SSH tag and login
+resolution, TCP authentication, native VS Code CLI arguments, and connection
+token handling. CI also runs setup using Chocolatey with a disposable profile.
+GUI launches and interactive SSH connections are mocked in automated tests.
