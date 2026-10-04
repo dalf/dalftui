@@ -219,10 +219,10 @@ Without it, remote tmux uses the server's existing configuration and bindings.
 Press **Ctrl+Shift+F3** in an Alacritty pane to open its directory in a new local
 VS Code window. Install VS Code's `code` command on your desktop.
 
-In an SSH window opened through **Ctrl+Shift+F2** to a server with dalftui
-installed, the same shortcut opens the remote pane's directory in local VS Code
-using Microsoft's **Remote - SSH**
-extension. VS Code uses the same SSH host alias and login as the picker, so your
+In an SSH window opened through **Ctrl+Shift+F2** to a server with a compatible
+dalftui bridge installed, the same shortcut opens the remote pane's directory
+in local VS Code using Microsoft's **Remote - SSH** extension. VS Code uses
+the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
 VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
 
@@ -232,9 +232,10 @@ credentials cannot use F3, even if their old Unix socket is still reachable.
 Local folder opening continues to work without bridge credentials.
 The picker checks for tmux and the installed dalftui files under
 `~/.config/dalftui` (or `$XDG_CONFIG_HOME/dalftui` when the remote configuration
-directory is absolute). Only those servers receive bridge credentials and an
-authenticated socket bridge through that
-window's SSH connection. The bridge is removed when the connection ends.
+directory is absolute), then reads the bridge's declared protocol version.
+Only installations declaring a supported version receive bridge credentials
+and an authenticated socket bridge through that window's SSH connection.
+The bridge is removed when the connection ends.
 No desktop VS Code installation is needed on the server; Remote - SSH manages
 its own server component when you first connect.
 
@@ -284,6 +285,35 @@ Ending the SSH connection closes accepted sockets, cancels running editor CLI
 processes, and waits for the workers before removing the private socket directory.
 These bounds reduce slow-connection denial of service; they do not guarantee
 availability under sustained connection flooding.
+
+### Bridge version compatibility
+
+The desktop checks the remote protocol with
+`python3 ~/.config/dalftui/bridge_protocol.py --version` before creating
+credentials or starting forwarding. A supported protocol is sufficient; the
+desktop and server do not need identical Git revisions. Old installations
+without a readable protocol declaration, and installations declaring an
+unsupported version, keep normal tmux login but skip the VS Code bridge. The
+launcher suggests updating dalftui from [GitHub](https://github.com/dalf/dalftui)
+on that server. It does not download or deploy the desktop checkout. Servers
+without tmux or without dalftui still connect silently as described above.
+
+Update from the server's existing checkout, then reconnect:
+
+```sh
+git pull --ff-only
+./reload
+```
+
+This checks compatibility, not whether GitHub has a newer release. It makes no
+freshness request to GitHub on login. Protocol version 1 retains the historical
+authenticated wire format: older requests and responses without the optional
+`protocol_version` field are interpreted as v1. Current peers include that
+field when it fits the existing 16 KiB limit; v1 messages at that boundary omit
+the optional metadata to preserve previously valid payloads. Unsupported declared
+versions are rejected before launching VS Code.
+Recognizing an old wire message does not make an undeclared remote installation
+eligible for bridge setup.
 
 ### Connect from Windows
 
@@ -403,8 +433,9 @@ Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
 to cancel. Selection connects in the current terminal window. SSH uses the
 configured username; if none is configured, the launcher asks for one. It
 creates or reattaches tmux using the usual session policy when tmux is installed,
-or silently opens a plain login shell otherwise. With remote dalftui installed,
-**Ctrl+Shift+F3** opens the active pane's remote folder in Windows VS Code.
+or silently opens a plain login shell otherwise. With a compatible remote
+dalftui bridge installed, **Ctrl+Shift+F3** opens the active pane's remote folder
+in Windows VS Code.
 **Ctrl+B, then F3** remains available as a tmux fallback.
 
 Without PowerShell setup, including from Command Prompt, you can run the
@@ -417,8 +448,8 @@ py -3 "$HOME\code\dalftui\ssh-picker.py" --connect my-vm
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
 
-Windows connections to servers with dalftui installed use a token-authenticated
-TCP bridge forwarded through SSH. dalftui binds the **desktop listener** to
+Windows connections to servers with a compatible dalftui bridge installed use
+a token-authenticated TCP bridge forwarded through SSH. dalftui binds the **desktop listener** to
 `127.0.0.1`. It explicitly requests a
 **remote SSH listener** with
 `-R 127.0.0.1:REMOTE_PORT:127.0.0.1:LOCAL_PORT`, but that listener's effective
@@ -545,6 +576,26 @@ git push -u origin main
 
 Once the remote exists, the update commands above work on other installations.
 
+### Changing the editor bridge
+
+[bridge_protocol.py](bridge_protocol.py) owns the dependency-free wire contract,
+including message validation, UTF-8 newline-delimited JSON, the 16 KiB limit, token and
+endpoint formats, environment names, and the protocol declaration used during
+SSH setup. Read its versioning rules before changing that contract, credential
+delivery, or bootstrap behavior. A version bump is required when a previously
+supported remote/desktop pairing can no longer perform a valid operation
+correctly, even if the JSON field names are unchanged.
+
+Check both older remote clients with the current desktop bridge and current
+remote clients with supported older desktop bridges. The frozen historical peer
+in [tests/fixtures/bridge_protocol_v1.py](tests/fixtures/bridge_protocol_v1.py)
+and the tests in [tests/test_bridge_protocol.py](tests/test_bridge_protocol.py)
+capture those pairings. Keep historical fixtures unchanged; add fixtures for
+new versions. Refactoring and logging usually do not need a bump. An optional
+field avoids a bump only when old peers safely ignore it and new peers accept
+its absence. [AGENTS.md](AGENTS.md) requires agents to record that compatibility
+assessment and add a test for affected historical behavior.
+
 ## Verification
 
 ```sh
@@ -569,6 +620,9 @@ tmux without dalftui, installation detection with custom configuration paths,
 and connections that never start or forward a bridge. Real tmux tests route
 separate clients' endpoints and tokens even with deliberately stale server
 environment values.
+Bridge protocol tests exercise frozen v1 messages and historical peers in both
+directions, reject unsupported versions without editor launches, and check the
+remote declaration before credential setup.
 
 The Windows-compatible launcher tests run separately without tmux or curses:
 

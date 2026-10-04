@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import re
 import secrets
 import shutil
 import socket
@@ -15,9 +14,11 @@ import threading
 import time
 from urllib.parse import quote
 
-SOCKET_ENV = 'DALFTUI_EDITOR_SOCKET'
-TOKEN_ENV = 'DALFTUI_EDITOR_TOKEN'
-MAX_REQUEST = 16384
+from bridge_protocol import (
+    MAX_REQUEST, SOCKET_ENV, TOKEN_BYTES, TOKEN_ENV, error_message, parse_endpoint,
+    parse_request, parse_response, read_message, request_message, send_message,
+    success_message, valid_token, validate_folder,
+)
 REQUEST_TIMEOUT = 3
 RESPONSE_TIMEOUT = 3
 LAUNCH_TIMEOUT = 15
@@ -57,11 +58,6 @@ def windows_code_command(env):
     return [str(application), str(cli)]
 
 
-def validate_folder(folder):
-    if not isinstance(folder, str) or not folder.startswith('/') or '\0' in folder:
-        raise ValueError('The editor folder must be an absolute path.')
-
-
 def folder_uri(folder, destination=None):
     if destination:
         validate_folder(folder)
@@ -96,35 +92,6 @@ def launch(folder, destination=None, env=None, *, runner=None):
         raise RuntimeError(result.stderr.strip() or 'Could not start VS Code.')
 
 
-def read_message(connection, *, deadline=None):
-    """Read one bounded JSON line, optionally before an absolute monotonic deadline."""
-    data = bytearray()
-    while len(data) <= MAX_REQUEST:
-        if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError('Editor request deadline expired.')
-            connection.settimeout(remaining)
-        chunk = connection.recv(min(4096, MAX_REQUEST + 1 - len(data)))
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError('Editor request deadline expired.')
-        if not chunk:
-            break
-        data.extend(chunk)
-        if b'\n' in chunk:
-            break
-    if len(data) > MAX_REQUEST or not data.endswith(b'\n'):
-        raise ValueError('Invalid editor request.')
-    message = json.loads(data)
-    if not isinstance(message, dict):
-        raise ValueError('Invalid editor request.')
-    return message
-
-
-def send_message(connection, message):
-    connection.sendall(json.dumps(message).encode() + b'\n')
-
-
 class EditorBridge:
     """One private bridge and fixed destination per SSH window."""
     def __init__(self, destination, env=None, transport=None, *,
@@ -138,7 +105,7 @@ class EditorBridge:
         self.transport = transport or ('tcp' if WINDOWS else 'unix')
         if self.transport not in ('unix', 'tcp'):
             raise ValueError('Unknown editor bridge transport.')
-        self.token = secrets.token_hex(32)
+        self.token = secrets.token_hex(TOKEN_BYTES)
         self.remote_directory = '/tmp/dalftui-editor-' + secrets.token_hex(16)
         self.remote_token_file = self.remote_directory + '/token'
         # A separate, non-secret claim lets cleanup refuse a pre-existing directory.
@@ -231,18 +198,19 @@ class EditorBridge:
                     or not secrets.compare_digest(supplied, self.token)):
                 raise ValueError('Invalid editor bridge credentials. '
                                  'Reconnect using the dalftui SSH launcher.')
+            request = parse_request(message)
             if self.stopped.is_set():
                 return
-            launch(message.get('folder'), self.destination, self.env, runner=self.run_editor)
-            response = {'ok': True}
+            launch(request.folder, self.destination, self.env, runner=self.run_editor)
+            response = success_message()
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-            response = {'error': str(error)}
+            response = error_message(error)
         if not self.stopped.is_set():
             try:
                 # The request's remaining time must not become the response budget.
                 connection.settimeout(RESPONSE_TIMEOUT)
                 send_message(connection, response)
-            except OSError:
+            except (OSError, ValueError):
                 pass
 
     def run_editor(self, command, *, env, timeout, **kwargs):
@@ -306,32 +274,24 @@ class EditorBridge:
             self.directory.cleanup()
 
 
-def valid_token(token):
-    return isinstance(token, str) and re.fullmatch(r'[0-9a-f]{64}', token) is not None
-
-
 def request(socket_path, folder, token=None):
     validate_folder(folder)
-    tcp = socket_path.startswith('tcp:')
-    if tcp:
-        match = re.fullmatch(r'tcp:127\.0\.0\.1:([0-9]+)', socket_path)
-        if not match or not 0 < int(match[1]) < 65536:
-            raise ValueError('Invalid loopback editor endpoint.')
+    transport, address = parse_endpoint(socket_path)
+    tcp = transport == 'tcp'
     if not valid_token(token):
         raise RuntimeError('Missing or invalid editor bridge credentials. '
                            'Reconnect using the dalftui SSH launcher.')
     try:
         with socket.socket(socket.AF_INET if tcp else socket.AF_UNIX) as connection:
             connection.settimeout(CLIENT_TIMEOUT)
-            connection.connect(('127.0.0.1', int(match[1])) if tcp else socket_path)
-            send_message(connection, {'folder': folder, 'token': token})
+            connection.connect(address)
+            send_message(connection, request_message(folder, token))
             response = read_message(connection, deadline=time.monotonic() + CLIENT_TIMEOUT)
     except OSError as error:
         forwarding = 'TCP forwarding' if tcp else 'Unix socket forwarding'
         raise RuntimeError('Cannot reach local VS Code. Reconnect using the dalftui SSH launcher. '
                            f'The SSH server must allow {forwarding}.') from error
-    if response.get('ok') is not True:
-        raise RuntimeError(response.get('error') or 'The VS Code request failed.')
+    parse_response(response)
 
 
 def client_environment(pid):

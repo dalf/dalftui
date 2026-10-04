@@ -1,6 +1,6 @@
 """Run SSH startup scripts against isolated remote homes and executables."""
 import importlib.util
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import os
 from pathlib import Path
@@ -36,6 +36,7 @@ class SshAutoTests(unittest.TestCase):
         # An isolated PATH ensures the real machine's tmux cannot affect tests.
         for command in ('sh', 'stat', 'id', 'mkdir', 'cat', 'rm', 'rmdir'):
             (self.bin / command).symlink_to(shutil.which(command))
+        (self.bin / 'python3').symlink_to(sys.executable)
         self.log = self.directory / 'command'
         self.editor_env = self.directory / 'editor-env'
         self.tmux = self.bin / 'tmux'
@@ -63,6 +64,17 @@ class SshAutoTests(unittest.TestCase):
                                    self.home / '.local/state')
         with redirect_stdout(io.StringIO()):
             dalftui_setup.install(paths, ROOT, profile='tmux-only')
+
+    def install_historical_checkout(self, protocol_version=None):
+        # Use independent files: the real installation symlinks to ROOT, which
+        # must never be modified to simulate an old or incompatible server.
+        checkout = self.home / '.config/dalftui'
+        (checkout / 'config').mkdir(parents=True)
+        (checkout / 'vscode.py').touch()
+        (checkout / 'config/tmux.conf').touch()
+        if protocol_version is not None:
+            (checkout / 'bridge_protocol.py').write_text(
+                f'print({protocol_version!r})\n')
 
     def remote_command(self, **env):
         return self.real_run(shlex.split(picker.ssh_command('server')[-1]),
@@ -96,7 +108,10 @@ class SshAutoTests(unittest.TestCase):
                 self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_native_tmux_works_without_dalftui_or_editor_credentials(self):
-        prepared, bridge = self.prepare()
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            prepared, bridge = self.prepare()
+        self.assertEqual(output.getvalue(), '')
         self.assertFalse(prepared)
         self.assertFalse(Path(bridge.remote_directory).exists())
         result = self.remote_command()
@@ -132,6 +147,38 @@ class SshAutoTests(unittest.TestCase):
         prepared, bridge = self.prepare()
         self.assertFalse(prepared)
         self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def assert_update_suggestion_without_bridge(self):
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            prepared, bridge = self.prepare()
+        self.assertFalse(prepared)
+        self.assertFalse(Path(bridge.remote_directory).exists())
+        self.assertIn('https://github.com/dalf/dalftui', output.getvalue())
+        self.assertNotIn(bridge.token, output.getvalue())
+        result = self.remote_command()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_unversioned_remote_dalftui_suggests_github_update_and_keeps_tmux(self):
+        self.install_historical_checkout()
+        self.assert_update_suggestion_without_bridge()
+
+    def test_unsupported_remote_protocol_suggests_github_update_and_keeps_tmux(self):
+        self.install_historical_checkout(999)
+        self.assert_update_suggestion_without_bridge()
+
+    def test_malformed_remote_protocol_suggests_github_update_and_keeps_tmux(self):
+        self.install_historical_checkout('unknown')
+        self.assert_update_suggestion_without_bridge()
+
+    def test_missing_remote_python_skips_bridge_and_keeps_tmux(self):
+        self.install()
+        (self.bin / 'python3').unlink()
+        self.assert_update_suggestion_without_bridge()
 
     def test_broken_installation_skips_bridge(self):
         config = self.home / '.config'

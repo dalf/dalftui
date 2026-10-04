@@ -16,7 +16,8 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
-from vscode import EditorBridge, SOCKET_ENV, TOKEN_ENV
+from bridge_protocol import SOCKET_ENV, SUPPORTED_PROTOCOL_VERSIONS, TOKEN_BYTES, TOKEN_ENV
+from vscode import EditorBridge
 
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
@@ -34,6 +35,7 @@ fi
 
 # The installer links the checkout here in both desktop and tmux-only modes.
 # Status 3 means there is no remote editor integration to prepare.
+# Status 4 means an installed integration cannot declare a supported protocol.
 REMOTE_EDITOR_CHECK = """command -v tmux >/dev/null 2>&1 || exit 3
 case ${XDG_CONFIG_HOME:-} in
     /*) dalftui_config=$XDG_CONFIG_HOME ;;
@@ -41,6 +43,12 @@ case ${XDG_CONFIG_HOME:-} in
 esac
 [ -r "$dalftui_config/dalftui/vscode.py" ] &&
 [ -r "$dalftui_config/dalftui/config/tmux.conf" ] || exit 3
+[ -r "$dalftui_config/dalftui/bridge_protocol.py" ] || exit 4
+command -v python3 >/dev/null 2>&1 || exit 4
+remote_protocol=$(python3 "$dalftui_config/dalftui/bridge_protocol.py" --version 2>/dev/null) || exit 4
+case $remote_protocol in
+""" + f"    {'|'.join(str(version) for version in sorted(SUPPORTED_PROTOCOL_VERSIONS))}) ;;\n" + """    *) exit 4 ;;
+esac
 """
 
 
@@ -328,6 +336,11 @@ trap - EXIT HUP INT TERM
                             input=(bridge.token + '\n').encode('ascii'), env=env)
     if check_installation and result.returncode == 3:
         return False
+    if check_installation and result.returncode == 4:
+        print('Remote dalftui cannot declare a supported editor bridge protocol. '
+              'Update dalftui from https://github.com/dalf/dalftui on the older machine '
+              'and reconnect. Connecting without the VS Code bridge.', file=sys.stderr)
+        return False
     if result.returncode:
         raise RuntimeError('Could not prepare the VS Code bridge credentials on the SSH server.')
     return True
@@ -370,7 +383,7 @@ editor_file_valid "$editor_token" || editor_credentials_error
 """
         editor_setup += (f'{TOKEN_ENV}=$(cat -- "$editor_token") || editor_credentials_error\n'
                          'rm -f -- "$editor_token" || editor_credentials_error\n'
-                         f'[ "${{{TOKEN_ENV}}}" ] && [ "${{#{TOKEN_ENV}}}" -eq 64 ] || editor_credentials_error\n'
+                         f'[ "${{{TOKEN_ENV}}}" ] && [ "${{#{TOKEN_ENV}}}" -eq {TOKEN_BYTES * 2} ] || editor_credentials_error\n'
                          f'case "${{{TOKEN_ENV}}}" in *[!0-9a-f]*) editor_credentials_error ;; esac\n'
                          f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
                          f'export {SOCKET_ENV} {TOKEN_ENV}\n')

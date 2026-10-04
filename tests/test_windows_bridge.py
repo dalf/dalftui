@@ -409,7 +409,7 @@ class BridgeTests(unittest.TestCase):
         message['padding'] = 'x' * (vscode.MAX_REQUEST - size)
         connection = self.connect(bridge)
         vscode.send_message(connection, message)
-        self.assertEqual(vscode.read_message(connection), {'ok': True})
+        self.assertEqual(vscode.read_message(connection), {'ok': True, 'protocol_version': 1})
         self.launch.assert_called_once()
 
     def test_real_editor_cli_errors_and_timeouts_are_reaped_and_capacity_recovers(self):
@@ -484,7 +484,7 @@ class BridgeTests(unittest.TestCase):
         folder = "/home/alice/project 'quoted' %PATH% & #?é"
         vscode.send_message(connection, {'folder': folder, 'token': bridge.token,
                                          'destination': 'attacker-host'})
-        self.assertEqual(vscode.read_message(connection), {'ok': True})
+        self.assertEqual(vscode.read_message(connection), {'ok': True, 'protocol_version': 1})
         self.assertEqual(self.launch.call_args.args[:2], (folder, 'fixed-host'))
 
     @unittest.skipIf(os.name == 'nt', 'Private Unix sockets are the Linux transport')

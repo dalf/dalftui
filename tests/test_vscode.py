@@ -71,6 +71,27 @@ class EditorTests(DisposableSetup):
             vscode.request(bridge.local_socket, '/valid', bridge.token)
             self.assertTrue(self.log.exists())
 
+    def test_unix_bridge_rejects_protocol_changed_during_an_attachment(self):
+        with vscode.EditorBridge('server', self.editor_env) as bridge:
+            vscode.request(bridge.local_socket, '/before-update', bridge.token)
+            self.assertTrue(self.log.exists())
+            self.log.unlink()
+            # An already running bridge must recheck every request: a remote
+            # checkout can be updated while its SSH attachment remains open.
+            with socket.socket(socket.AF_UNIX) as connection:
+                connection.settimeout(5)
+                connection.connect(bridge.local_socket)
+                vscode.send_message(connection, {'folder': '/after-update',
+                                                 'token': bridge.token,
+                                                 'protocol_version': 999})
+                response = vscode.read_message(connection)
+                self.assertIn('protocol', response['error'].lower())
+                self.assertNotIn(bridge.token, response['error'])
+            self.assertFalse(self.log.exists())
+            vscode.request(bridge.local_socket, '/still-supported', bridge.token)
+            self.assertEqual(json.loads(self.log.read_text())[-1],
+                             vscode.folder_uri('/still-supported', 'server'))
+
     def assert_unix_authentication(self, bridge):
         messages = [{'folder': '/project'}]
         messages += [{'folder': '/project', 'token': token} for token in
@@ -92,7 +113,7 @@ class EditorTests(DisposableSetup):
             connection.connect(bridge.local_socket)
             vscode.send_message(connection, {'folder': '/valid', 'token': bridge.token,
                                              'destination': 'other-server'})
-            self.assertEqual(vscode.read_message(connection), {'ok': True})
+            self.assertEqual(vscode.read_message(connection), {'ok': True, 'protocol_version': 1})
         self.assertEqual(json.loads(self.log.read_text())[-1],
                          vscode.folder_uri('/valid', bridge.destination))
 

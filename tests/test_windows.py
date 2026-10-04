@@ -190,6 +190,24 @@ class WindowsTests(unittest.TestCase):
                 vscode.request(f'tcp:127.0.0.1:{bridge.local_port}', '/project', bridge.token)
                 self.assertEqual(opened[0][:2], ('/project', 'vm-alias'))
 
+    def test_tcp_protocol_mismatch_never_launches_and_preserves_existing_bridge(self):
+        with patch.object(vscode, 'launch') as launch:
+            with vscode.EditorBridge('vm-alias', transport='tcp') as bridge:
+                endpoint = f'tcp:127.0.0.1:{bridge.local_port}'
+                vscode.request(endpoint, '/before-update', bridge.token)
+                launch.assert_called_once()
+                with socket.create_connection(('127.0.0.1', bridge.local_port), timeout=5) as connection:
+                    vscode.send_message(connection, {'folder': '/after-update',
+                                                     'token': bridge.token,
+                                                     'protocol_version': 999})
+                    response = vscode.read_message(connection)
+                    self.assertIn('protocol', response['error'].lower())
+                    self.assertNotIn(bridge.token, response['error'])
+                launch.assert_called_once()
+                vscode.request(endpoint, '/still-supported', bridge.token)
+                self.assertEqual(launch.call_count, 2)
+                self.assertEqual(launch.call_args.args[:2], ('/still-supported', 'vm-alias'))
+
     def test_tcp_listener_is_closed_when_the_connection_ends(self):
         with vscode.EditorBridge('vm-alias', transport='tcp') as bridge:
             address = bridge.listener.getsockname()

@@ -1,0 +1,190 @@
+"""The shared contract between a remote pane and its local VS Code bridge.
+
+Version 1: one UTF-8 JSON object followed by a newline, at most 16384 bytes
+including the newline, per request/response. Requests contain an absolute POSIX
+``folder`` and a ``token`` of 64 lowercase hexadecimal characters. The SSH
+launcher delivers that token on stdin into a private remote file; attachment
+consumes it and exports DALFTUI_EDITOR_SOCKET and DALFTUI_EDITOR_TOKEN in the
+individual tmux client's environment. Endpoints are Unix socket paths or
+``tcp:127.0.0.1:PORT``. The local bridge fixes the SSH destination; a request
+cannot choose another host. Responses contain either ``ok: true`` or a nonempty
+human-readable ``error`` string. Unknown fields are ignored.
+
+Current messages declare ``protocol_version`` when it fits the existing v1 byte
+limit; at the boundary v1 metadata is omitted to preserve valid old payloads.
+Its absence means the historical authenticated v1 message format, which is
+still supported. An installation must
+declare its version via this module's --version command before the SSH picker
+enables its bridge; old installations without this module remain unverified.
+
+WHEN TO BUMP: increment PROTOCOL_VERSION when a previously supported mixed
+old/new pairing can no longer perform a valid operation correctly. Review both
+old-remote/new-local and new-remote/old-local directions. This includes changing
+required fields/types/meaning, framing, endpoint syntax, credential delivery,
+environment names, authentication requirements, or response semantics. A new
+optional field does not need a bump only when old peers ignore it safely and
+new peers still work without it. Internal refactors, human-readable error text,
+and fixes enforcing this existing contract normally do not need a bump.
+
+Add compatibility tests and record why a change does or does not need a bump.
+Preserve tests/fixtures/bridge_protocol_v1.py; it models deployed code and must
+not import current protocol constants or helpers. Only list versions in
+SUPPORTED_PROTOCOL_VERSIONS whose behavior we actually implement and test.
+Protocol compatibility does not establish release freshness or security fixes.
+Pre-declaration peers ignore unknown fields, including protocol_version: a
+future breaking version must establish compatibility before sending an operation,
+not rely on an old peer rejecting new metadata after a side effect has occurred.
+See AGENTS.md for the review rule, including the SSH bootstrap in ssh-picker.py.
+"""
+import argparse
+from dataclasses import dataclass
+import json
+import re
+import time
+
+PROTOCOL_VERSION = 1
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({1})
+SOCKET_ENV = 'DALFTUI_EDITOR_SOCKET'
+TOKEN_ENV = 'DALFTUI_EDITOR_TOKEN'
+TOKEN_BYTES = 32
+MAX_MESSAGE_BYTES = 16384
+# Retain the public name used by existing callers and tests.
+MAX_REQUEST = MAX_MESSAGE_BYTES
+
+
+class IncompatibleProtocolError(ValueError):
+    """A peer declared a version whose behavior we do not support."""
+
+
+@dataclass(frozen=True)
+class OpenFolderRequest:
+    folder: str
+    token: str
+    protocol_version: int
+
+
+def message_version(message):
+    # The pre-declaration authenticated format is frozen as v1, not whatever
+    # version the current implementation happens to emit in the future.
+    version = message.get('protocol_version', 1)
+    if type(version) is not int or version not in SUPPORTED_PROTOCOL_VERSIONS:
+        supported = ', '.join(str(value) for value in sorted(SUPPORTED_PROTOCOL_VERSIONS))
+        # Do not echo arbitrary peer values, which can include credentials.
+        raise IncompatibleProtocolError(
+            f'Unsupported editor bridge protocol (supported: {supported}). '
+            'Update dalftui from GitHub on the older machine and reconnect.')
+    return version
+
+
+def valid_token(token):
+    return isinstance(token, str) and re.fullmatch(rf'[0-9a-f]{{{TOKEN_BYTES * 2}}}', token) is not None
+
+
+def validate_folder(folder):
+    if not isinstance(folder, str) or not folder.startswith('/') or '\0' in folder:
+        raise ValueError('The editor folder must be an absolute path.')
+
+
+def request_message(folder, token, *, protocol_version=PROTOCOL_VERSION):
+    payload = {'folder': folder, 'token': token}
+    parse_request({'protocol_version': protocol_version, **payload})
+    return _versioned_message(payload, protocol_version)
+
+
+def parse_request(message):
+    if not isinstance(message, dict):
+        raise ValueError('Invalid editor request.')
+    version = message_version(message)
+    if not valid_token(message.get('token')):
+        raise ValueError('Invalid editor bridge credentials. '
+                         'Reconnect using the dalftui SSH launcher.')
+    validate_folder(message.get('folder'))
+    return OpenFolderRequest(message['folder'], message['token'], version)
+
+
+def success_message():
+    return _versioned_message({'ok': True}, PROTOCOL_VERSION)
+
+
+def error_message(error):
+    return _versioned_message({'error': str(error) or 'The VS Code request failed.'}, PROTOCOL_VERSION)
+
+
+def _json_line(message):
+    return json.dumps(message).encode('utf-8') + b'\n'
+
+
+def _versioned_message(payload, version):
+    message = {'protocol_version': version, **payload}
+    # Explicit metadata is optional in v1. Do not shrink the payload size that
+    # deployed v1 clients could send inside the already fixed framing limit.
+    if type(version) is int and version == 1 and len(_json_line(message)) > MAX_MESSAGE_BYTES:
+        return payload
+    return message
+
+
+def parse_response(message):
+    if not isinstance(message, dict):
+        raise ValueError('Invalid editor response.')
+    message_version(message)
+    if message.get('ok') is True and 'error' not in message:
+        return
+    error = message.get('error')
+    if isinstance(error, str) and error and 'ok' not in message:
+        raise RuntimeError(error)
+    raise ValueError('Invalid editor response.')
+
+
+def parse_endpoint(value):
+    if not isinstance(value, str) or not value or '\0' in value:
+        raise ValueError('Invalid editor endpoint.')
+    if value.startswith('tcp:'):
+        match = re.fullmatch(r'tcp:127\.0\.0\.1:([0-9]+)', value)
+        if not match or not 0 < int(match[1]) < 65536:
+            raise ValueError('Invalid loopback editor endpoint.')
+        return 'tcp', ('127.0.0.1', int(match[1]))
+    return 'unix', value
+
+
+def read_message(connection, *, deadline=None):
+    """Read one bounded JSON line, optionally before a monotonic deadline."""
+    data = bytearray()
+    while len(data) <= MAX_MESSAGE_BYTES:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Editor request deadline expired.')
+            connection.settimeout(remaining)
+        chunk = connection.recv(min(4096, MAX_MESSAGE_BYTES + 1 - len(data)))
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError('Editor request deadline expired.')
+        if not chunk:
+            break
+        data.extend(chunk)
+        if b'\n' in chunk:
+            break
+    if len(data) > MAX_MESSAGE_BYTES or not data.endswith(b'\n'):
+        raise ValueError('Invalid editor request.')
+    message = json.loads(data.decode('utf-8'))
+    if not isinstance(message, dict):
+        raise ValueError('Invalid editor request.')
+    return message
+
+
+def send_message(connection, message):
+    line = _json_line(message)
+    if len(line) > MAX_MESSAGE_BYTES:
+        raise ValueError('Editor message exceeds the 16 KiB protocol limit.')
+    connection.sendall(line)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Report the editor bridge protocol version.')
+    parser.add_argument('--version', action='store_true', required=True)
+    parser.parse_args()
+    print(PROTOCOL_VERSION)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
