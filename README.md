@@ -576,6 +576,110 @@ git push -u origin main
 
 Once the remote exists, the update commands above work on other installations.
 
+### Layout and entrypoints
+
+The Python package runs directly from the checkout; no pip installation is
+needed. Representative layout:
+
+```text
+.
+├── dalftui/
+│   ├── ssh.py
+│   ├── vscode.py
+│   ├── linux/
+│   │   ├── alacritty_config.py
+│   │   ├── setup.py
+│   │   ├── shortcuts.py
+│   │   ├── ssh_picker.py
+│   │   ├── tmux_editor.py
+│   │   ├── remote_bootstrap.py
+│   │   └── tmux-start.sh
+│   └── windows/
+│       ├── ssh.py
+│       ├── vscode.py
+│       ├── terminal_settings.py
+│       ├── setup.ps1
+│       ├── profile.ps1
+│       └── ssh-tab.ps1
+├── bridge_protocol.py
+├── install
+├── reload
+├── shortcuts.py
+├── ssh-picker.py
+├── vscode.py
+├── setup-windows.ps1
+├── windows.ps1
+├── windows-terminal.ps1
+├── windows-terminal.py
+├── tmux-start.sh
+├── config/
+├── tests/
+│   ├── test_windows_launcher.py
+│   ├── test_windows_terminal.py
+│   ├── test_bridge_protocol.py
+│   ├── test_bridge_lifecycle.py
+│   ├── test_remote_bootstrap.py
+│   └── fixtures/
+│       ├── bridge_protocol_v1.py
+│       └── ssh_bootstrap_v1.py
+└── vendor/
+    └── catppuccin/
+```
+
+[dalftui/ssh.py](dalftui/ssh.py) owns shared host/tag/login evaluation, fzf,
+SSH arguments, and connection orchestration. [dalftui/vscode.py](dalftui/vscode.py)
+owns URI construction, editor launching, both Unix and TCP bridge transports,
+authentication, and lifecycle handling. Platform modules own local operating-system
+integration. Directory placement describes the environment targeted by code;
+portable helpers can be imported on other operating systems.
+In particular, [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py)
+generates Linux-server shell programs from portable Python and is also used by
+Windows desktops. [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) is
+the canonical startup policy: the root script forwards local startup, while
+remote execution embeds the canonical policy directly.
+
+The root paths are deliberate public and compatibility entrypoints:
+
+| Path | Role |
+| --- | --- |
+| [install](install) | Linux installation CLI |
+| [reload](reload) | Linux configuration reload CLI |
+| [shortcuts.py](shortcuts.py) | Shortcut-guide launcher and installed compatibility target |
+| [ssh-picker.py](ssh-picker.py) | Shared SSH launcher |
+| [vscode.py](vscode.py) | Shared editor launcher and remote discovery target |
+| [setup-windows.ps1](setup-windows.ps1) | Windows setup CLI |
+| [windows.ps1](windows.ps1) | Existing PowerShell profile-loader target |
+| [windows-terminal.ps1](windows-terminal.ps1) | Existing Terminal-tab launcher target |
+| [windows-terminal.py](windows-terminal.py) | Terminal settings CLI |
+| [tmux-start.sh](tmux-start.sh) | Existing local terminal startup target |
+| [bridge_protocol.py](bridge_protocol.py) | Canonical standalone contract and version declaration |
+
+Existing profile entries, tmux bindings, Alacritty configuration, installed paths,
+and historical SSH probes depend on these locations. Keep them stable.
+`bridge_protocol.py` contains the actual contract and version declaration;
+it is not a forwarding wrapper.
+
+### Filename conventions
+
+These conventions apply to filenames, directories, and placement:
+
+- Importable Python modules and package directories use `snake_case`.
+- Shell and PowerShell script filenames use lowercase words, with hyphens when
+  needed. Prefer purpose-specific names such as `profile.ps1`, `ssh-tab.ps1`,
+  and `terminal_settings.py`.
+- Platform directories normally supply the platform context; avoid redundant
+  platform prefixes within them.
+- Tests stay flat and use `test_<feature>.py`. Windows-focused launcher and
+  integration suites may use `test_windows_<feature>.py`; shared bridge tests
+  use feature names without a Windows label.
+- Historical fixtures keep their versioned names and remain frozen. Existing
+  root command names are compatibility exceptions; vendored upstream filenames
+  remain unchanged.
+
+Keep `config/`, `vendor/`, and the flat test layout. Apply these rules when adding
+or moving files; they do not call for renaming functions, classes, variables,
+already-clear files, or adding speculative platform directories.
+
 ### Changing the editor bridge
 
 [bridge_protocol.py](bridge_protocol.py) owns the dependency-free wire contract,
@@ -636,11 +740,28 @@ Bridge protocol tests exercise frozen v1 messages and historical peers in both
 directions, reject unsupported versions without editor launches, and check the
 remote declaration before credential setup.
 
-The Windows-compatible launcher tests run separately without tmux or curses:
+The Windows-compatible launcher and Terminal suites run separately without tmux
+or curses:
 
 ```sh
 python -m unittest discover -s tests -p "test_windows*.py" -v
 ```
+
+This selects [tests/test_windows_launcher.py](tests/test_windows_launcher.py)
+and [tests/test_windows_terminal.py](tests/test_windows_terminal.py).
+Run the shared bridge lifecycle and historical compatibility suites separately:
+
+```sh
+python -m unittest discover -s tests -p "test_bridge*.py" -v
+```
+
+This selects [tests/test_bridge_lifecycle.py](tests/test_bridge_lifecycle.py)
+and [tests/test_bridge_protocol.py](tests/test_bridge_protocol.py). Together,
+the Windows and bridge selections cover native Windows CI's Python tests;
+platform and dependency skips still apply. Linux-targeted startup and remote
+bootstrap coverage lives in
+[tests/test_remote_bootstrap.py](tests/test_remote_bootstrap.py) and runs with
+full Linux discovery.
 
 Check the PowerShell setup and profile integration separately:
 

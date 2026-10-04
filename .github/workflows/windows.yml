@@ -37,5 +37,5 @@ jobs:
           # Package setup refreshes only its process; refresh this step's PATH too.
           $env:PATH += ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')
           python -m unittest discover -s tests -p 'test_windows*.py' -v
-      - name: Verify historical editor bridge protocol compatibility
-        run: python -m unittest discover -s tests -p 'test_bridge_protocol.py' -v
+      - name: Verify editor bridge lifecycle and historical protocol compatibility
+        run: python -m unittest discover -s tests -p 'test_bridge*.py' -v
