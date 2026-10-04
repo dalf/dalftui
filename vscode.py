@@ -25,10 +25,13 @@ def validate_folder(folder):
 
 
 def folder_uri(folder, destination=None):
-    validate_folder(folder)
     if destination:
+        validate_folder(folder)
         authority = quote('ssh-remote+' + destination, safe='+@')
         return 'vscode-remote://' + authority + quote(folder, safe='/')
+    # Local Windows folders may start with a drive letter or a UNC share.
+    if not isinstance(folder, str) or '\0' in folder or not Path(folder).is_absolute():
+        raise ValueError('The editor folder must be an absolute path.')
     return Path(folder).as_uri()
 
 
@@ -216,15 +219,24 @@ def open_pane(pane, client):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pane', required=True)
-    parser.add_argument('--client', required=True, type=int)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--pane')
+    target.add_argument('--folder', help='Open an absolute local folder, including on Windows')
+    parser.add_argument('--client', type=int)
     parser.add_argument('--client-tty')
     args = parser.parse_args()
+    if args.pane and args.client is None:
+        parser.error('--client is required with --pane')
     try:
-        open_pane(args.pane, args.client)
+        if args.folder:
+            launch(args.folder)
+        else:
+            open_pane(args.pane, args.client)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         message = f'VS Code: {error}'
         print(message, file=sys.stderr)
+        if args.folder:
+            return 1
         command = ['tmux', 'display-message', '-d', '8000']
         if args.client_tty:
             command += ['-c', args.client_tty]

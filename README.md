@@ -271,12 +271,25 @@ In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect to its tmux session. The shortcut works while the
 current tab is in SSH, tmux, or another program. It uses Terminal's
 [new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
-and keeps your default profile and appearance. **Ctrl+B, then F3** remains the
-remote VS Code shortcut.
+and keeps your default profile and appearance.
+
+**Ctrl+Shift+F3** opens the current directory in a new VS Code window:
+
+- At a local PowerShell prompt, it uses the current filesystem directory and
+  preserves any command you are typing.
+- In remote tmux connected through `dssh`, it opens the active pane's directory
+  in Windows VS Code with Remote - SSH, including while an app is running.
+
+Terminal translates this shortcut to the existing **Ctrl+B, then F3** sequence,
+so existing remote dalftui configurations already support it. PowerShell setup
+installs the local handler through
+[PSReadLine](https://learn.microsoft.com/en-us/powershell/module/psreadline/set-psreadlinekeyhandler).
+Other local shells and running
+local programs need their own handler; use a PowerShell prompt for local folders.
 
 Setup finds existing Stable, Preview, Canary, and unpackaged Terminal settings.
 It backs up each changed `settings.json`, preserves comments and other settings,
-and adds no duplicates on repeated runs. An existing Ctrl+Shift+F2 binding is
+and adds no duplicates on repeated runs. An existing Ctrl+Shift+F2 or F3 binding is
 preserved; setup reports the conflict so you can remove that binding and rerun.
 If no settings are found, open Windows Terminal once and rerun setup. For a
 portable installation, pass its settings path explicitly:
@@ -318,7 +331,8 @@ Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
 to cancel. Selection connects in the current terminal window. SSH uses the
 configured username; if none is configured, the launcher asks for one. It
 creates or reattaches tmux using the usual session policy. Once attached,
-**Ctrl+B, then F3** opens the active pane's remote folder in Windows VS Code.
+**Ctrl+Shift+F3** opens the active pane's remote folder in Windows VS Code.
+**Ctrl+B, then F3** remains available as a tmux fallback.
 
 Without PowerShell setup, including from Command Prompt, you can run the
 launcher directly:

@@ -41,6 +41,29 @@ class WindowsTests(unittest.TestCase):
                 self.assertEqual(module.main(), 0)
         connect.assert_called_once_with('vm-alias', None)
 
+    def test_local_folder_uri_handles_native_drive_unc_and_special_characters(self):
+        folder = self.root / "project's %cash #?\u00e9"
+        self.assertEqual(vscode.folder_uri(str(folder)), folder.as_uri())
+        if sys.platform == 'win32':
+            from pathlib import PureWindowsPath
+            share = r'\\server\share\project with spaces'
+            self.assertEqual(vscode.folder_uri(share), PureWindowsPath(share).as_uri())
+        for invalid in ('relative', '', None, str(self.root) + '\0bad'):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    vscode.folder_uri(invalid)
+
+    def test_local_editor_cli_does_not_require_tmux_and_reports_failures_locally(self):
+        folder = str(self.root)
+        with patch.object(sys, 'argv', ['vscode.py', '--folder', folder]):
+            with patch.object(vscode, 'launch') as launch:
+                self.assertEqual(vscode.main(), 0)
+                launch.assert_called_once_with(folder)
+            with patch.object(vscode, 'launch', side_effect=RuntimeError('test editor missing')):
+                with patch.object(vscode.subprocess, 'run') as run:
+                    self.assertEqual(vscode.main(), 1)
+                run.assert_not_called()
+
     def test_windows_picker_connects_selected_host_without_curses_or_alacritty(self):
         with patch.object(picker.sys, 'platform', 'win32'):
             with patch.object(picker, 'pick_fzf', return_value='vm-alias') as choose:

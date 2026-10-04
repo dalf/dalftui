@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Install dssh, its fzf host picker, and the Windows Terminal new-tab shortcut.
+Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts.
 .EXAMPLE
 .\setup-windows.ps1
 .EXAMPLE
@@ -171,7 +171,7 @@ function Invoke-DalftuiWindowsSetup {
             -Checkout $Checkout -SettingsPaths $SettingsPaths
     }
     if (-not (Find-DalftuiApplication 'code')) {
-        Write-Warning 'For Ctrl+B, F3, install VS Code with its code command on PATH and the Remote - SSH extension.'
+        Write-Warning 'For Ctrl+Shift+F3, install VS Code with its code command on PATH. Remote folders also need the Remote - SSH extension.'
     }
     Write-Host 'dssh HOST is ready.'
     if ($pickerReady) { Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).' }

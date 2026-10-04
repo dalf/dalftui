@@ -48,6 +48,9 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(action['command']['action'], 'newTab')
         self.assertNotIn('profile', action['command'])
         self.assertFalse(action['command']['suppressApplicationTitle'])
+        editor = result['actions'][2]
+        self.assertEqual(editor['keys'], 'ctrl+shift+f3')
+        self.assertEqual(editor['command'], {'action': 'sendInput', 'input': '\x02\x1bOR'})
 
     def test_modern_actions_and_bindings_keep_personal_entries(self):
         personal = '{"actions": [{"id":"Personal.Copy","command":"copy"}], "keybindings": [{"id":"Personal.Copy","keys":"ctrl+c"}]}'
@@ -56,6 +59,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(result['keybindings'][0], {'id': 'Personal.Copy', 'keys': 'ctrl+c'})
         self.assertNotIn('keys', result['actions'][1])
         self.assertEqual(result['keybindings'][1], {'id': terminal.ACTION_ID, 'keys': terminal.SHORTCUT})
+        self.assertEqual(result['keybindings'][2], {'id': terminal.EDITOR_ACTION_ID, 'keys': terminal.EDITOR_SHORTCUT})
 
     def test_handles_empty_missing_arrays_and_compact_settings(self):
         for personal in ('{}', '{ /* comment */ }', '{"theme":"dark"}',
@@ -64,27 +68,31 @@ class TerminalSetupTests(unittest.TestCase):
                          '{"actions":[{"command":"copy"} // final comment\n]}'):
             with self.subTest(personal=personal):
                 result = self.settings(terminal.updated_settings(personal, 'launcher'))
-                self.assertEqual(result['actions'][-1]['id'], terminal.ACTION_ID)
+                self.assertEqual({entry.get('id') for entry in result['actions'] if 'id' in entry},
+                                 {terminal.ACTION_ID, terminal.EDITOR_ACTION_ID})
 
     def test_reruns_are_idempotent_and_moved_checkout_updates_managed_action(self):
         first = terminal.updated_settings('{"actions":[],"keybindings":[]}', 'old-launcher')
         self.assertEqual(terminal.updated_settings(first, 'old-launcher'), first)
         result = self.settings(terminal.updated_settings(first, 'new-launcher'))
-        self.assertEqual(len(result['actions']), 1)
-        self.assertEqual(len(result['keybindings']), 1)
+        self.assertEqual(len(result['actions']), 2)
+        self.assertEqual(len(result['keybindings']), 2)
         self.assertEqual(result['actions'][0]['command']['commandline'], 'new-launcher')
 
     def test_ui_migration_and_additional_personal_shortcuts_do_not_duplicate_entries(self):
-        action = self.settings(terminal.updated_settings('{}', 'launcher'))['actions'][0]
-        del action['keys']
-        personal = json.dumps({'actions': [action], 'keybindings': [
+        actions = self.settings(terminal.updated_settings('{}', 'launcher'))['actions']
+        for action in actions:
+            del action['keys']
+        personal = json.dumps({'actions': actions, 'keybindings': [
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'},
+            {'id': terminal.EDITOR_ACTION_ID, 'keys': 'ctrl+shift+f3'},
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+alt+s'},
         ]})
         self.assertEqual(terminal.updated_settings(personal, 'launcher'), personal)
 
     def test_shortcut_conflicts_preserve_settings_without_writing_or_backup(self):
-        for key in ('ctrl+shift+f2', 'SHIFT+CTRL+F2', ['ctrl+v', 'ctrl+shift+f2']):
+        for key in ('ctrl+shift+f2', 'SHIFT+CTRL+F2', ['ctrl+v', 'ctrl+shift+f2'],
+                    'ctrl+shift+f3', 'SHIFT+CTRL+F3', ['ctrl+v', 'ctrl+shift+f3']):
             for array in ('actions', 'keybindings'):
                 with self.subTest(key=key, array=array):
                     personal = json.dumps({array: [{'id': 'Personal.Action', 'keys': key}]})
@@ -139,6 +147,15 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(command['commandline'], subprocess.list2cmdline([
             shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'windows-terminal.ps1')]))
         self.assertEqual(command['startingDirectory'], '%USERPROFILE%')
+
+    def test_upgrade_from_picker_only_adds_editor_without_rewriting_picker(self):
+        both = self.settings(terminal.updated_settings('{"actions":[],"keybindings":[]}', 'launcher'))
+        original = json.dumps({'actions': [both['actions'][0]], 'keybindings': [both['keybindings'][0]]})
+        upgraded = terminal.updated_settings(original, 'launcher')
+        result = self.settings(upgraded)
+        self.assertEqual(result, both)
+        self.assertEqual(terminal.updated_settings(upgraded, 'launcher'), upgraded)
+        self.assertIn(json.dumps(both['actions'][0]), upgraded)
 
 
 if __name__ == '__main__':

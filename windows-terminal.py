@@ -1,4 +1,4 @@
-"""Install the dssh new-tab shortcut without rewriting personal Terminal settings."""
+"""Install the SSH picker and VS Code shortcuts, preserving Terminal settings."""
 import argparse
 import json
 import os
@@ -12,6 +12,9 @@ import uuid
 sys.dont_write_bytecode = True
 ACTION_ID = 'User.DalftuiSshPicker'
 SHORTCUT = 'ctrl+shift+f2'
+EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
+EDITOR_SHORTCUT = 'ctrl+shift+f3'
+EDITOR_INPUT = '\x02\x1bOR'
 DECODER = json.JSONDecoder()
 JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
@@ -65,12 +68,12 @@ def normalized_key(key):
     return tuple(sorted(part.strip().lower() for part in key.split('+')))
 
 
-def has_shortcut(entry):
+def has_shortcut(entry, shortcut=SHORTCUT):
     keys = entry.get('keys', [])
     if isinstance(keys, str):
         keys = [keys]
     return isinstance(keys, list) and any(
-        isinstance(key, str) and normalized_key(key) == normalized_key(SHORTCUT)
+        isinstance(key, str) and normalized_key(key) == normalized_key(shortcut)
         for key in keys)
 
 
@@ -89,11 +92,14 @@ def updated_settings(text, commandline):
                 raise ValueError(f'Terminal {name} must be an array.')
             arrays[name] = members(clean, begin)
             for entry in value:
-                if isinstance(entry, dict) and has_shortcut(entry) and entry.get('id') != ACTION_ID:
-                    raise ValueError('Ctrl+Shift+F2 already has a binding. Remove that binding in Terminal settings, then rerun setup. The existing settings were preserved.')
+                for shortcut, action_id, label in (
+                        (SHORTCUT, ACTION_ID, 'Ctrl+Shift+F2'),
+                        (EDITOR_SHORTCUT, EDITOR_ACTION_ID, 'Ctrl+Shift+F3')):
+                    if isinstance(entry, dict) and has_shortcut(entry, shortcut) and entry.get('id') != action_id:
+                        raise ValueError(f'{label} already has a binding. Remove that binding in Terminal settings, then rerun setup. The existing settings were preserved.')
 
     modern = 'keybindings' in properties
-    action = {
+    picker_action = {
         'id': ACTION_ID,
         'name': 'SSH host picker (dssh)',
         'command': {
@@ -102,32 +108,44 @@ def updated_settings(text, commandline):
             'suppressApplicationTitle': False, 'elevate': False,
         },
     }
+    editor_action = {
+        'id': EDITOR_ACTION_ID,
+        'name': 'Open current folder in VS Code',
+        'command': {'action': 'sendInput', 'input': EDITOR_INPUT},
+    }
+    actions = [(picker_action, SHORTCUT), (editor_action, EDITOR_SHORTCUT)]
     if not modern:
         # Inline keys are supported by older Terminal versions as well.
-        action['keys'] = SHORTCUT
-    desired = {'actions': action}
+        for action, shortcut in actions:
+            action['keys'] = shortcut
+    desired = {'actions': actions}
     if modern:
-        desired['keybindings'] = {'id': ACTION_ID, 'keys': SHORTCUT}
+        desired['keybindings'] = [({'id': action['id'], 'keys': shortcut}, shortcut)
+                                  for action, shortcut in actions]
     edits = []
     missing = []
     newline = '\r\n' if '\r\n' in text else '\n'
-    for name, entry in desired.items():
-        encoded = json.dumps(entry, ensure_ascii=False)
+    for name, entries in desired.items():
+        additions = []
         if name not in arrays:
-            missing.append(json.dumps(name) + ': [' + encoded + ']')
+            missing.append(json.dumps(name) + ': ' + json.dumps([entry for entry, _ in entries], ensure_ascii=False))
             continue
         items, end = arrays[name]
-        owned = [item for item in items if isinstance(item[1], dict) and
-                 item[1].get('id') == ACTION_ID and
-                 (name == 'actions' or has_shortcut(item[1]))]
-        if len(owned) > 1:
-            raise ValueError(f'Duplicate dalftui entries in {name}; remove the duplicates before rerunning setup.')
-        if owned:
-            _, previous, begin, finish = owned[0]
-            if previous != entry:
-                edits.append((begin, finish, encoded))
-        else:
-            append_entry(text, items, end, encoded, newline, edits)
+        for entry, shortcut in entries:
+            encoded = json.dumps(entry, ensure_ascii=False)
+            owned = [item for item in items if isinstance(item[1], dict) and
+                     item[1].get('id') == entry['id'] and
+                     (name == 'actions' or has_shortcut(item[1], shortcut))]
+            if len(owned) > 1:
+                raise ValueError(f'Duplicate dalftui entries in {name}; remove the duplicates before rerunning setup.')
+            if owned:
+                _, previous, begin, finish = owned[0]
+                if previous != entry:
+                    edits.append((begin, finish, encoded))
+            else:
+                additions.append(encoded)
+        if additions:
+            append_entry(text, items, end, (',' + newline + '    ').join(additions), newline, edits)
     if missing:
         append_entry(text, root_items, root_end, (',' + newline + '    ').join(missing), newline, edits)
     for begin, end, replacement in sorted(edits, reverse=True):
@@ -166,6 +184,7 @@ def configure(path, commandline):
     path.write_bytes(updated.encode(encoding))
     print(f'Terminal backup: {backup}')
     print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
+    print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
 
 
 def settings_paths(local_app_data):

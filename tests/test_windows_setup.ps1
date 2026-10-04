@@ -135,6 +135,25 @@ try {
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
+    [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(0)')
+    $null = dssh
+    Assert-True ($LASTEXITCODE -eq 0) 'Successful dssh must not reuse an exit status captured when the profile loaded'
+    [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
+    # Run the local editor callback with a fake Python backend. The folder is
+    # passed as one argument, including drive letters and shell metacharacters.
+    [IO.File]::WriteAllText((Join-Path $checkout 'vscode.py'), 'import json, sys; print(json.dumps(sys.argv[1:]))')
+    $editorFolder = Join-Path $root ("project's %cash & " + [char]0xe9)
+    [IO.Directory]::CreateDirectory($editorFolder) | Out-Null
+    Push-Location -LiteralPath $editorFolder
+    try {
+        $argumentJson = Open-DalftuiCurrentFolder
+        $arguments = ConvertFrom-Json -InputObject $argumentJson
+        Assert-True ($arguments.Count -eq 2 -and $arguments[0] -eq '--folder' -and $arguments[1] -eq $editorFolder) 'Editor callback must use the current folder and preserve its path'
+    } finally { Pop-Location }
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+b,F3'
+    Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
+    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+Shift+F3'
+    Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Native Ctrl+Shift+F3 must also work at a PowerShell prompt'
     # Exercise the real new-tab launcher without a GUI or SSH connection.
     foreach ($file in @('windows-terminal.py', 'windows-terminal.ps1')) {
         Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $checkout
@@ -152,6 +171,8 @@ try {
     $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
     Assert-True ($settings.keybindings[0].keys -eq 'ctrl+shift+f2') 'Setup must install Ctrl+Shift+F2'
     Assert-True ($settings.actions[0].command.action -eq 'newTab') 'Shortcut must open a new tab'
+    Assert-True ($settings.keybindings[1].keys -eq 'ctrl+shift+f3') 'Setup must install Ctrl+Shift+F3'
+    Assert-True ($settings.actions[1].command.input -eq ([char]2 + [string][char]27 + 'OR')) 'Editor shortcut must send the existing tmux F3 sequence'
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
