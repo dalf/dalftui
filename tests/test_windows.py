@@ -30,7 +30,7 @@ class WindowsTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix='dalftui-windows-')
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        self.root = Path(directory.name).resolve()
 
     def test_connect_cli_imports_without_curses(self):
         with patch.dict(sys.modules, {'curses': None}):
@@ -118,6 +118,7 @@ class WindowsTests(unittest.TestCase):
     def test_configured_username_and_unset_username_use_real_ssh_config(self):
         if not shutil.which(picker.ssh_executable()):
             self.skipTest('OpenSSH is not installed')
+        picker.secure_ssh_directory(self.root)
         config = self.root / 'ssh config with spaces'
         config.write_text('Host vm-alias\n    HostName 127.0.0.1\n    User alice\n')
         with patch.object(picker, 'SSH_CONFIG', config):
