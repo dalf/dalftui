@@ -323,7 +323,7 @@ raise SystemExit(status)
                 return subprocess.CompletedProcess(command, 0, b'')
             self.assertEqual(command[0], str(native))
             wrapper = Path(command[command.index('-F') + 1])
-            self.assertTrue(wrapper.read_text().startswith('Host *\n    User '))
+            self.assertTrue(wrapper.read_text(encoding='utf-8').startswith('Host *\n    User '))
             return subprocess.CompletedProcess(command, 0, 'user alice\n', '')
 
         with (patch.object(sys, 'platform', 'win32'),
@@ -750,7 +750,8 @@ else:
             try:
                 bridge = vscode.EditorBridge('vm-alias', transport='tcp')
                 picker.cleanup_editor_bridge('vm-alias', None, bridge, dict(os.environ))
-            except BaseException as error:
+            # Report any background cleanup failure on the test's main thread.
+            except BaseException as error:  # pylint: disable=broad-exception-caught
                 errors.append(error)
             finally:
                 finished.set()
@@ -788,7 +789,7 @@ else:
                 bridge = vscode.EditorBridge('vm-alias', transport='tcp')
                 prepare_error = (RuntimeError('setup failed') if stage == 'setup-failure'
                                  else KeyboardInterrupt() if stage == 'setup-cancel' else None)
-                def cleanup_after_stop(*args):
+                def cleanup_after_stop(*_args, stage=stage, bridge=bridge):
                     if stage.startswith('setup-'):
                         self.assertFalse(hasattr(bridge, 'listener'))
                     else:

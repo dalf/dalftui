@@ -14,10 +14,12 @@ import time
 from urllib.parse import quote
 
 from bridge_protocol import (
-    MAX_REQUEST, SOCKET_ENV, TOKEN_BYTES, TOKEN_ENV, error_message, parse_endpoint,
+    TOKEN_BYTES, error_message, parse_endpoint,
     parse_request, parse_response, read_message, request_message, send_message,
     success_message, valid_token, validate_folder,
 )
+# Preserve these public aliases used by existing bridge callers.
+from bridge_protocol import MAX_REQUEST, SOCKET_ENV, TOKEN_ENV  # pylint: disable=unused-import
 REQUEST_TIMEOUT = 3
 RESPONSE_TIMEOUT = 3
 LAUNCH_TIMEOUT = 15
@@ -167,10 +169,10 @@ class EditorBridge:
                     or not secrets.compare_digest(supplied, self.token)):
                 raise ValueError('Invalid editor bridge credentials. '
                                  'Reconnect using the dalftui SSH launcher.')
-            request = parse_request(message)
+            operation = parse_request(message)
             if self.stopped.is_set():
                 return
-            launch(request.folder, self.destination, self.env, runner=self.run_editor)
+            launch(operation.folder, self.destination, self.env, runner=self.run_editor)
             response = success_message()
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             response = error_message(error)
@@ -182,7 +184,7 @@ class EditorBridge:
             except (OSError, ValueError):
                 pass
 
-    def run_editor(self, command, *, env, timeout, **kwargs):
+    def run_editor(self, command, *, env, timeout, **_kwargs):
         """Start under the shutdown lock; wait outside it so accepts stay independent."""
         # A file avoids pipe-reader threads or inherited pipes delaying shutdown.
         with tempfile.TemporaryFile() as stderr:

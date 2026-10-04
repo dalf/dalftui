@@ -179,7 +179,7 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         self.install()
         prepared, bridge = self.prepare()
         self.assertTrue(prepared)
-        self.assertEqual(Path(bridge.remote_token_file).read_text(), bridge.token + '\n')
+        self.assertEqual(Path(bridge.remote_token_file).read_text(encoding='utf-8'), bridge.token + '\n')
 
     def test_custom_absolute_config_directory_is_detected(self):
         config = self.directory / "custom config's directory"

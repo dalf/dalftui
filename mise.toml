@@ -5,14 +5,20 @@ min_version = "2026.7.5"
 powershell = "{{ env.DALFTUI_POWERSHELL | default(value='powershell') }}"
 
 [tasks.check]
-description = "Run spelling, then all tests for the current platform"
+description = "Run spelling, Pylint, then all tests for the current platform"
 alias = "default"
 depends = ["spellcheck"]
-run = [{ task = "test" }]
+run = [{ task = "pylint" }, { task = "test" }]
 
 [tasks.spellcheck]
 description = "Check spelling with the pinned codespell version"
 run = "uvx codespell==2.4.3"
+
+[tasks.pylint]
+description = "Check Python source, entrypoints, and tests with Pylint"
+alias = "lint"
+run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install reload shortcuts.py ssh-picker.py vscode.py windows-terminal.py"
+run_windows = "uvx --python python pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install reload shortcuts.py ssh-picker.py vscode.py windows-terminal.py"
 
 [tasks.test]
 description = "Run all tests for the current platform"

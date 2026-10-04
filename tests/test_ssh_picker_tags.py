@@ -27,10 +27,10 @@ class Screen:
     def erase(self):
         pass
 
-    def addnstr(self, y, x, text, count, style):
+    def addnstr(self, _y, _x, text, _count, _style):
         self.messages.append(text)
 
-    def move(self, y, x):
+    def move(self, _y, _x):
         pass
 
     def refresh(self):
@@ -171,7 +171,7 @@ class DesktopPickerTests(unittest.TestCase):
     def test_desktop_default_dispatch_and_cancellation(self):
         for key in ('\x1b', '\x03', '\n'):
             with self.subTest(key=key):
-                def wrapper(callback, hosts):
+                def wrapper(callback, hosts, key=key):
                     self.assertIs(callback, ssh_picker.pick)
                     return self.choose([key], hosts)[0]
 
@@ -211,9 +211,9 @@ class DesktopWindowTests(unittest.TestCase):
               patch.object(ssh_picker, 'curses', None),
               patch.object(picker, 'target_hosts') as hosts,
               redirect_stderr(output)):
-            with self.assertRaises(SystemExit) as exit:
+            with self.assertRaises(SystemExit) as failure:
                 picker.main()
-        self.assertEqual(exit.exception.code, 2)
+        self.assertEqual(failure.exception.code, 2)
         hosts.assert_not_called()
         self.assertIn('Use --connect HOST on Windows; the interactive host picker requires curses.',
                       output.getvalue())
@@ -225,7 +225,7 @@ class DesktopWindowTests(unittest.TestCase):
         for output, expected in ((b'Alacritty failed', 'Alacritty failed'),
                                  (b'', 'Could not open Alacritty')):
             with self.subTest(output=output):
-                def start(command, **kwargs):
+                def start(_command, *, output=output, **kwargs):
                     kwargs['stderr'].write(output)
                     process = Mock()
                     process.wait.return_value = 1

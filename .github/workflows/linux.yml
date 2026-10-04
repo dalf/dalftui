@@ -39,5 +39,7 @@ jobs:
           sudo apt-get install --yes fzf git less openssh-client tmux
       - name: Check spelling
         run: mise run spellcheck
+      - name: Check Python with Pylint
+        run: mise run pylint
       - name: Verify Linux and shared functionality
         run: mise run test:linux

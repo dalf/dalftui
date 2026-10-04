@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from test_install import DisposableSetup, TmuxFixture, ROOT
+from test_install import DisposableSetup, TmuxFixture
 from dalftui.linux.alacritty_config import load
 from dalftui import vscode
 from dalftui.linux import tmux_editor
@@ -301,6 +301,11 @@ class EditorTests(DisposableSetup):
                         'printf "%s\\n" "$DALFTUI_EDITOR_SOCKET" > "$TEST_SOCKET_ENV"\n'
                         'printf "%s\\n" "$@" > "$TEST_TMUX_ARGS"\n')
         tmux.chmod(0o755)
+        # Simulate only the SSH execution by running its sh command locally.
+        real_run = subprocess.run
+        def local_ssh(args, **kwargs):
+            return real_run(shlex.split(args[-1]), **kwargs, timeout=5)
+
         for sessions, selection, expected in [('', '', ['new-session', '-A', '-s', '0']),
                                               ('$5 0\n', '', ['attach-session', '-t', '$5']),
                                               ('$5 1\n', '', ['new-session']),
@@ -313,10 +318,6 @@ class EditorTests(DisposableSetup):
                 bridge.remote_token_file = bridge.remote_directory + '/token'
                 bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
                 bridge.remote_socket = bridge.remote_directory + '/editor.sock'
-                # Simulate only the SSH execution by running its sh command locally.
-                real_run = subprocess.run
-                def local_ssh(args, **kwargs):
-                    return real_run(shlex.split(args[-1]), **kwargs, timeout=5)
                 with patch.object(picker.subprocess, 'run', side_effect=local_ssh):
                     picker.prepare_editor_credentials('server', None, bridge, self.editor_env)
                 socket_file = Path(bridge.remote_socket)
@@ -414,14 +415,14 @@ class RemoteCredentialsTests(unittest.TestCase):
                 for filename in (bridge.remote_owner_file, bridge.remote_token_file):
                     self.assertEqual(stat.S_IMODE(Path(filename).stat().st_mode), 0o600)
                     self.assertEqual(Path(filename).stat().st_uid, os.getuid())
-                self.assertEqual(Path(bridge.remote_token_file).read_text(), bridge.token + '\n')
+                self.assertEqual(Path(bridge.remote_token_file).read_text(encoding='utf-8'), bridge.token + '\n')
                 if transport == 'unix':
                     # Simulate sshd's bind locally before executing the command.
                     with socket.socket(socket.AF_UNIX) as forwarded:
                         forwarded.bind(bridge.remote_socket)
                 result = self.attach(bridge, TEST_TMUX_STATUS='23', SHELL='/usr/bin/fish')
                 self.assertEqual(result.returncode, 23, result.stderr)
-                attachment = json.loads(Path(self.env['TEST_ATTACH']).read_text())
+                attachment = json.loads(Path(self.env['TEST_ATTACH']).read_text(encoding='utf-8'))
                 self.assertEqual(attachment, {'endpoint': bridge.remote_socket,
                                              'digest': hashlib.sha256(bridge.token.encode()).hexdigest(),
                                              'token_file_exists': False})
@@ -452,7 +453,7 @@ class RemoteCredentialsTests(unittest.TestCase):
             self.prepare(bridge)
         self.cleanup(bridges[0])
         self.assertFalse(Path(bridges[0].remote_directory).exists())
-        self.assertEqual(Path(bridges[1].remote_token_file).read_text(), bridges[1].token + '\n')
+        self.assertEqual(Path(bridges[1].remote_token_file).read_text(encoding='utf-8'), bridges[1].token + '\n')
         self.cleanup(bridges[1])
         self.assertFalse(Path(bridges[1].remote_directory).exists())
 
@@ -466,7 +467,7 @@ class RemoteCredentialsTests(unittest.TestCase):
                 if kind == 'directory':
                     target.mkdir(mode=0o700)
                 elif kind == 'file':
-                    target.write_text('existing')
+                    target.write_text('existing', encoding='utf-8')
                 else:
                     target.symlink_to(victim, target_is_directory=True)
                 with self.assertRaisesRegex(RuntimeError, 'prepare.*credentials'):
@@ -516,7 +517,7 @@ class RemoteCredentialsTests(unittest.TestCase):
                 if kind == 'missing':
                     token_file.unlink()
                 elif kind == 'malformed':
-                    token_file.write_text('do-not-print-this-invalid-credential')
+                    token_file.write_text('do-not-print-this-invalid-credential', encoding='utf-8')
                 elif kind == 'public':
                     token_file.chmod(0o644)
                 else:

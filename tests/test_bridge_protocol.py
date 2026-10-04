@@ -101,7 +101,7 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                     bridge, check_installation=True), token=legacy.TOKEN + '\n')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout + result.stderr, '')
-                self.assertEqual(Path(bridge.remote_token_file).read_text(), legacy.TOKEN + '\n')
+                self.assertEqual(Path(bridge.remote_token_file).read_text(encoding='utf-8'), legacy.TOKEN + '\n')
                 self.assertTrue(Path(bridge.remote_owner_file).is_file())
                 cleanup = self.run_script(remote_bootstrap.cleanup_script(bridge))
                 self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
@@ -170,7 +170,8 @@ class FrozenPeerTests(unittest.TestCase):
                     connection.settimeout(5)
                     outcome['message'] = legacy.serve_connection(
                         connection, legacy.TOKEN, launch_error=launch_error)
-            except BaseException as error:
+            # Report any historical peer failure on the test's main thread.
+            except BaseException as error:  # pylint: disable=broad-exception-caught
                 outcome['error'] = error
 
         worker = threading.Thread(target=serve, daemon=True)

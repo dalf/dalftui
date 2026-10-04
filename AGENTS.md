@@ -86,8 +86,8 @@ declaration; it is not a forwarding wrapper. Do not remove or rename these paths
 
 Commands are centralized in [mise.toml](mise.toml). Use `mise tasks` to list them.
 Tasks use the existing Python and uv installations and run from the repository
-root. `mise run check` runs spelling before the current platform's functionality
-suites; `mise run` defaults to the same check.
+root. `mise run check` runs spelling and Pylint before the current platform's
+functionality suites; `mise run` defaults to the same check.
 
 Run the pinned spelling check before the functionality suites:
 
@@ -99,6 +99,20 @@ This invokes `uvx codespell==2.4.3`. Both Linux and Windows CI run this task usi
 `.codespellrc`. Vendored code, frozen historical fixtures, and local artifacts
 are excluded. The same task works on Windows; uv manages the tool's isolated
 environment automatically.
+
+Run the pinned Python lint check before the functionality suites:
+
+```sh
+mise run pylint
+```
+
+This invokes Pylint 4.1.2 through uv, using the existing platform Python and
+[.pylintrc](.pylintrc). It checks the package, Python entrypoints (including
+`install` and `reload`), standalone bridge contract, and tests; vendored code and
+frozen historical fixtures are excluded. Documentation and size/layout rules
+are relaxed while correctness checks remain enabled. Both CI workflows use this
+task. Fix useful diagnostics; keep any additional suppression narrow and explain
+it. `mise run lint` is an alias for the same task.
 
 Full Linux discovery:
 

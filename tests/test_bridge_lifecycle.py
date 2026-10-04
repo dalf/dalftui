@@ -70,7 +70,8 @@ class BridgeTests(unittest.TestCase):
         def run():
             try:
                 outcome.append(function())
-            except BaseException as error:
+            # Report any background failure on the test's main thread.
+            except BaseException as error:  # pylint: disable=broad-exception-caught
                 outcome.append(error)
             finally:
                 done.set()
@@ -193,7 +194,7 @@ class BridgeTests(unittest.TestCase):
         release = threading.Event()
         self.addCleanup(release.set)
 
-        def launch(folder, *args, **kwargs):
+        def launch(folder, *_args, **_kwargs):
             if folder == '/busy':
                 entered.set()
                 if not release.wait(5):
@@ -330,7 +331,7 @@ class BridgeTests(unittest.TestCase):
         release = threading.Event()
         self.addCleanup(release.set)
 
-        def command(env):
+        def command(_env):
             preparing.set()
             if not release.wait(5):
                 raise RuntimeError('Test command was not released')
@@ -453,7 +454,7 @@ class BridgeTests(unittest.TestCase):
         real_read = vscode.read_message
         real_send = vscode.send_message
 
-        def launch(*args, **kwargs):
+        def launch(*_args, **_kwargs):
             entered.set()
             if not release.wait(5):
                 raise RuntimeError('Test launch was not released')

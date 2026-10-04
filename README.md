@@ -730,8 +730,9 @@ mise tasks
 
 | Task | Purpose |
 | --- | --- |
-| `mise run check` | Spelling first, then all tests for the current platform |
+| `mise run check` | Spelling, Pylint, then all tests for the current platform |
 | `mise run spellcheck` | Pinned codespell check through uv |
+| `mise run pylint` | Pinned Pylint check of Python source, entrypoints, and tests (alias: `lint`) |
 | `mise run test` | Full Linux discovery, or Windows Python and PowerShell suites |
 | `mise run test:linux` | Full Python discovery, including Linux integration tests |
 | `mise run test:windows` | Windows launcher/Terminal and shared bridge Python suites |
@@ -766,7 +767,7 @@ selecting Python and PowerShell versions through its existing matrix.
 
 ## Verification
 
-Run spelling and functionality checks from the repository root with
+Run spelling, Python lint, and functionality checks from the repository root with
 [uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
 
 ```sh
@@ -779,6 +780,18 @@ such as CI workflows using [.codespellrc](.codespellrc). Vendored code, frozen
 historical fixtures, and local artifacts are excluded. The pinned version in the
 `spellcheck` task keeps local and CI checks consistent. uv manages the tool's isolated
 environment automatically.
+
+`mise run pylint` runs Pylint 4.1.2 through uv using the current platform's
+`python3` or `python` interpreter and [.pylintrc](.pylintrc). It checks `dalftui/`,
+the Python root entrypoints (including `install` and `reload`), the standalone
+bridge contract, and `tests/`. Vendored code and frozen historical fixtures are
+excluded. The configuration targets Python 3.11, disables docstring requirements,
+line-length and size heuristics, and recognizes the checkout's import/bootstrap
+and resource-lifecycle patterns. Error and warning checks such as undefined names,
+bad calls, unused imports, and unsafe defaults remain enabled. Output contains
+diagnostics without reports or scores; any enabled diagnostic fails the task.
+Both CI workflows run this same check before functionality tests. Use
+`mise run pylint` or `mise run lint` to run it separately.
 
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions.
@@ -802,10 +815,11 @@ directions, reject unsupported versions without editor launches, and check the
 remote declaration before credential setup.
 
 The Windows-compatible launcher and Terminal suites run separately without tmux
-or curses. In PowerShell, run the same spelling check before the Python suites:
+or curses. In PowerShell, run spelling and Pylint before the Python suites:
 
 ```powershell
 mise run spellcheck
+mise run pylint
 ```
 
 Run the launcher, Terminal, and shared bridge suites:
@@ -840,8 +854,8 @@ mise run test:powershell
 
 GitHub Actions runs the full Linux suite on Ubuntu with Python 3.11 and 3.14,
 installing tmux, OpenSSH, fzf, Git, and less for the integration tests.
-Both Linux and Windows CI run the same pinned spelling check before the Python
-test suites. CI also runs native Windows tests with Python 3.11 and 3.14, in
+Both Linux and Windows CI run the same pinned spelling and Pylint checks before
+the Python test suites. CI also runs native Windows tests with Python 3.11 and 3.14, in
 PowerShell 5.1 and 7. They cover package manager selection and failures,
 profile backups and repeated setup, safe VS Code discovery and portable-path
 configuration, the `dssh` command, real fzf filtering, SSH tag and login

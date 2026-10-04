@@ -32,7 +32,7 @@ def load(path=None, *, home_dir=None, depth=0, ancestors=()):
     canonical = path.resolve()
     if canonical in ancestors or depth > 16:
         raise ValueError(f'Recursive Alacritty imports: {path}')
-    data = tomllib.loads(path.read_text())
+    data = tomllib.loads(path.read_text(encoding='utf-8'))
     imports = data.get('import', data.get('general', {}).get('import', []))
     if not isinstance(imports, list) or any(not isinstance(item, str) for item in imports):
         raise ValueError(f'Invalid Alacritty import list: {path}')

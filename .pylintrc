@@ -1,0 +1,54 @@
+[MAIN]
+# Match the oldest supported Python, regardless of the interpreter running lint.
+py-version = 3.11
+recursive = yes
+persistent = no
+# Upstream code and frozen historical peers must remain unchanged.
+ignore = vendor,fixtures,__pycache__,.venv
+# Only Linux integration tests import this Unix-only standard library module.
+ignored-modules = termios
+
+[REPORTS]
+# Show actionable diagnostics only, without reports or a numeric score.
+reports = no
+score = no
+
+[MESSAGES CONTROL]
+disable =
+    # Documentation is optional; use it when behavior needs explanation.
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    # Avoid layout rewrites and arbitrary size limits, including test fixtures
+    # and Python that generates shell programs.
+    line-too-long,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-instance-attributes,
+    too-many-public-methods,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-boolean-expressions,
+    duplicate-code,
+    consider-using-from-import,
+    use-dict-literal,
+    # Entrypoints set up their import path and bytecode policy before imports;
+    # platform adapters use lazy imports to keep shared code portable.
+    wrong-import-position,
+    import-outside-toplevel,
+    cyclic-import,
+    # Return codes and resource cleanup are managed explicitly by callers.
+    subprocess-run-check,
+    consider-using-with,
+    # The bridge deliberately uses exact type checks to reject bool versions.
+    unidiomatic-typecheck
+
+[BASIC]
+# Keep naming checks, with the two historical root command exceptions.
+module-rgx = ^([a-z_][a-z0-9_]*|ssh-picker|windows-terminal)$
+
+[CLASSES]
+# The bridge creates its sockets and worker state when entering its context.
+defining-attr-methods = __init__,__new__,setUp,asyncSetUp,__post_init__,__enter__
