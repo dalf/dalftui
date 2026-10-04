@@ -351,6 +351,8 @@ cd "$HOME\code\dalftui"
 PowerShell 5.1 with `-NoProfile -ExecutionPolicy Bypass`. The bypass applies only
 to the installer process. The wrapper forwards options and returns the
 installer's exit status; it also works from Command Prompt.
+It clears inherited module paths for the child so that launching it from
+PowerShell 7 uses Windows PowerShell's own modules.
 
 Setup records the absolute `Code.exe` path in
 `%LOCALAPPDATA%\dalftui\config.json`. Folder launches use only that configured

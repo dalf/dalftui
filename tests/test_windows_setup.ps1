@@ -147,6 +147,7 @@ function Invoke-DalftuiWindowsSetup {
         # Exercise the CMD installer through the renamed PowerShell entrypoint
         # in a copied checkout, without touching any real profile or packages.
         $cmdInstaller = Join-Path $forwardingCheckout 'install.cmd'
+        $modulePathBefore = $env:PSModulePath
         Push-Location -LiteralPath $unrelated
         try {
             $null = & $cmdInstaller -PackageManager choco -SkipFzf `
@@ -162,6 +163,8 @@ function Invoke-DalftuiWindowsSetup {
                 'install.cmd must locate install.ps1 and preserve options from another directory'
             Assert-True ($forwarded.ProcessPolicy -eq 'Bypass') `
                 'install.cmd must set the bypass policy for its child process'
+            Assert-True ($env:PSModulePath -eq $modulePathBefore) `
+                'install.cmd must preserve the calling shell module paths'
             $env:DALFTUI_SETUP_PROBE_FAIL = '1'
             $ErrorActionPreference = 'Continue'
             $failureOutput = & $cmdInstaller 2>&1
