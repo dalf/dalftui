@@ -173,8 +173,9 @@ class TerminalSetupTests(unittest.TestCase):
         backups = list(self.root.glob('settings.json.dalftui-*.bak'))
         self.assertEqual(len(backups), 1)
         action = self.settings(installed.decode())['actions'][0]['command']
+        # Windows temp paths may use an 8.3 alias; the launcher resolves it.
         self.assertEqual(action['commandline'], subprocess.list2cmdline([
-            shell, '-NoLogo', '-NoProfile', '-File', str(checkout / 'windows-terminal.ps1')]))
+            shell, '-NoLogo', '-NoProfile', '-File', str(checkout.resolve() / 'windows-terminal.ps1')]))
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
