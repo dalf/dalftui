@@ -225,6 +225,48 @@ the bridge; reconnect with the picker, or run
 `python3 ~/code/dalftui/ssh-picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
 
+### Connect from Windows
+
+The Windows launcher runs in PowerShell or Command Prompt. It needs Python
+3.11+, Windows OpenSSH, and Windows VS Code with **Remote - SSH**. The `code`
+command must be on PATH. No local tmux, Alacritty, curses package, or Windows
+installation of the dalftui configuration is needed.
+
+Clone the repository once on Windows, then connect using an alias from
+`%USERPROFILE%\.ssh\config`:
+
+```powershell
+git clone https://github.com/dalf/dalftui.git "$HOME\code\dalftui"
+cd "$HOME\code\dalftui"
+py -3 .\ssh-picker.py --connect my-vm
+```
+
+SSH uses the configured username; if none is configured, the launcher asks for
+one. It creates or reattaches tmux using the usual session policy. Once attached,
+**Ctrl+B, then F3** opens the active pane's remote folder in Windows VS Code.
+The Windows launcher uses the current terminal window.
+
+Windows uses a loopback TCP bridge authenticated with a connection token,
+forwarded through SSH. The Linux VM must permit remote TCP forwarding
+(`AllowTcpForwarding yes` or `remote`). The token is sent through SSH stdin to
+a private file, then consumed when attaching; it is not included in remote
+command-line arguments. Setup uses an additional SSH connection, so password
+authentication may prompt twice. SSH keys and an agent avoid repeated prompts.
+The launcher chooses a remote forwarding port for each connection; if SSH
+reports that port is occupied, run the connection command again.
+
+Update and reload dalftui on the VM before connecting from Windows:
+
+```sh
+cd ~/code/dalftui
+git pull --ff-only
+./reload
+```
+
+For later Windows updates, run `git pull --ff-only` in the Windows checkout and
+start a new connection. Linux connections keep using their private Unix socket
+bridge by default. `--bridge tcp` also allows testing TCP connections on Linux.
+
 You can also open a remote folder directly from your **local** terminal:
 
 ```sh
@@ -272,3 +314,13 @@ personal overrides, both shortcut guides, tag filtering, mode switching, and
 reloads that preserve pane processes and Claude status. The CLI is also tested
 with Alacritty and SSH absent from PATH. Desktop picker tests are skipped when
 OpenSSH's Tag directive is unavailable; it is not required by server mode.
+
+The Windows-compatible launcher tests run separately without tmux or curses:
+
+```sh
+python -m unittest discover -s tests -p test_windows.py -v
+```
+
+GitHub Actions runs these tests on Windows with Python 3.11 and 3.14. They cover
+TCP authentication, native VS Code CLI arguments, SSH login resolution, and
+connection-token handling. GUI launches are mocked in the automated tests.

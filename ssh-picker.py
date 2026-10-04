@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Pick an SSH host, open another Alacritty window, and attach remote tmux."""
 import argparse
-import curses
+try:
+    import curses
+except ImportError:
+    curses = None
 import glob
 import os
 from pathlib import Path
@@ -13,13 +16,13 @@ import sys
 import tempfile
 
 sys.dont_write_bytecode = True
-from vscode import EditorBridge, SOCKET_ENV
+from vscode import EditorBridge, SOCKET_ENV, TOKEN_ENV
 
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
 
 # Execute with sh so this also works when the remote login shell is fish.
-REMOTE_SCRIPT = """unset TMUX TMUX_PANE DALFTUI_EDITOR_SOCKET
+REMOTE_SCRIPT = """unset TMUX TMUX_PANE DALFTUI_EDITOR_SOCKET DALFTUI_EDITOR_TOKEN
 {editor_setup}
 if ! command -v tmux >/dev/null 2>&1; then
     printf '%s\\n' 'tmux is not installed on this host.' >&2
@@ -45,6 +48,14 @@ run_tmux
 def valid_host(value):
     return bool(value) and not value.startswith('-') and all(
         char.isprintable() and not char.isspace() for char in value)
+
+
+def ssh_executable():
+    if sys.platform == 'win32':
+        native = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/OpenSSH/ssh.exe'
+        if native.is_file():
+            return str(native)
+    return 'ssh'
 
 
 def configured_hosts(path=SSH_CONFIG):
@@ -88,7 +99,7 @@ def configured_tag(host):
     """Ask OpenSSH for the effective tag, including matching Host/Match/Include rules."""
     if not valid_host(host):
         raise ValueError('Invalid SSH destination')
-    args = ['ssh', '-G', '-F', str(SSH_CONFIG), '--', host]
+    args = [ssh_executable(), '-G', '-F', str(SSH_CONFIG), '--', host]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -188,7 +199,7 @@ def configured_login(host):
             quoted = str(SSH_CONFIG).replace('\\', '\\\\').replace('"', '\\"')
             content = f'Include "{quoted}"\n'
         wrapper.write_text(content + f'Host *\n    User {marker}\n')
-        result = subprocess.run(['ssh', '-G', '-F', str(wrapper), '--', host],
+        result = subprocess.run([ssh_executable(), '-G', '-F', str(wrapper), '--', host],
                                 capture_output=True, text=True, timeout=10)
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or 'Could not read SSH configuration')
@@ -197,26 +208,66 @@ def configured_login(host):
         return None if user == marker else user
 
 
-def ssh_command(host, login=None, bridge=None):
+def ssh_base(host, login=None):
     if not valid_host(host):
         raise ValueError('Invalid SSH destination')
-    args = ['ssh', '-t', '-o', 'RemoteCommand=none']
-    editor_setup = ''
-    if bridge:
-        # Keep the forwarding and its local bridge owned by this SSH window.
-        args += ['-S', 'none', '-R', f'{bridge.remote_socket}:{bridge.local_socket}']
-        editor_setup = (f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
-                        f'export {SOCKET_ENV}\n'
-                        f'trap \'rm -f -- "${SOCKET_ENV}"\' EXIT\n')
+    args = [ssh_executable(), '-o', 'RemoteCommand=none']
     if login is not None:
         if not valid_host(login) or '@' in login or '/' in login:
             raise ValueError('Invalid SSH login')
         args.extend(['-l', login])
+    return args
+
+
+def prepare_tcp_token(host, login, bridge, env):
+    # stdin is carried by SSH; putting the secret in sh -c arguments would expose
+    # it through the VM's process list. The private file is consumed on attach.
+    script = 'umask 077\nset -C\ncat > ' + shlex.quote(bridge.remote_token_file)
+    result = subprocess.run([*ssh_base(host, login), '-T', '-o', 'ClearAllForwardings=yes',
+                             '--', host, 'sh -c ' + shlex.quote(script)],
+                            input=(bridge.token + '\n').encode('ascii'), env=env)
+    if result.returncode:
+        raise RuntimeError('Could not prepare the Windows VS Code bridge on the SSH server.')
+
+
+def cleanup_tcp_token(host, login, bridge, env):
+    # Normal attachment consumes the file. If attachment fails, avoid asking for
+    # another password just to remove an inactive token left by the setup step.
+    script = 'rm -f -- ' + shlex.quote(bridge.remote_token_file)
+    try:
+        subprocess.run([*ssh_base(host, login), '-T', '-n', '-o', 'ClearAllForwardings=yes',
+                        '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
+                        '--', host, 'sh -c ' + shlex.quote(script)], env=env,
+                       capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def ssh_command(host, login=None, bridge=None):
+    args = [*ssh_base(host, login), '-t']
+    editor_setup = ''
+    if bridge:
+        # Keep the forwarding and its local bridge owned by this SSH window.
+        if sys.platform != 'win32':
+            args += ['-S', 'none']
+        forward = getattr(bridge, 'forward_spec', f'{bridge.remote_socket}:{bridge.local_socket}')
+        args += ['-R', forward]
+        editor_setup = (f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
+                        f'export {SOCKET_ENV}\n')
+        if getattr(bridge, 'token', None):
+            # Refuse an occupied remote TCP port instead of attaching with a broken bridge.
+            args += ['-o', 'ExitOnForwardFailure=yes']
+            token_file = shlex.quote(bridge.remote_token_file)
+            editor_setup += (f'{TOKEN_ENV}=$(cat -- {token_file}) || exit 1\n'
+                             f'export {TOKEN_ENV}\n'
+                             f'rm -f -- {token_file}\n')
+        else:
+            editor_setup += f'trap \'rm -f -- "${SOCKET_ENV}"\' EXIT\n'
     return [*args, '--', host,
             'sh -c ' + shlex.quote(REMOTE_SCRIPT.replace('{editor_setup}', editor_setup))]
 
 
-def connect(host):
+def connect(host, transport=None):
     env = dict(os.environ, TERM='xterm-256color')
     env.pop('TMUX', None)
     env.pop('TMUX_PANE', None)
@@ -231,8 +282,15 @@ def connect(host):
                     print('Enter a username, such as alice.')
         print(f'Connecting to {host} …', flush=True)
         destination = f'{login}@{host}' if login else host
-        with EditorBridge(destination, env) as bridge:
-            status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
+        with EditorBridge(destination, env, transport) as bridge:
+            status = 1
+            try:
+                if bridge.token:
+                    prepare_tcp_token(host, login, bridge, env)
+                status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
+            finally:
+                if bridge.token and status:
+                    cleanup_tcp_token(host, login, bridge, env)
     except KeyboardInterrupt:
         return 130
     except (OSError, RuntimeError, subprocess.TimeoutExpired, EOFError, ValueError) as error:
@@ -272,13 +330,19 @@ def open_window(host):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--connect', metavar='HOST')
+    parser.add_argument('--bridge', choices=('unix', 'tcp'),
+                        help='Editor bridge transport (default: TCP on Windows, Unix socket on Linux)')
     parser.add_argument('--list', action='store_true', help='Print the host list without connecting')
     args = parser.parse_args()
+    if sys.version_info < (3, 11):
+        parser.error('Python 3.11 or newer is required.')
     if args.connect:
-        return connect(args.connect)
+        return connect(args.connect, args.bridge)
     if args.list:
         print('\n'.join(target_hosts()))
         return 0
+    if curses is None:
+        parser.error('Use --connect HOST on Windows; the interactive host picker requires curses.')
     try:
         host = curses.wrapper(pick, target_hosts())
         if host:

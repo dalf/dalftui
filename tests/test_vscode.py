@@ -185,6 +185,15 @@ class EditorTmuxTests(TmuxFixture):
                     self.assertEqual(self.press_f3(master),
                                      ['--new-window', '--folder-uri', vscode.folder_uri(str(folder), destination)])
 
+    def test_f3_uses_tcp_endpoint_and_token_from_its_ssh_client(self):
+        folder = self.prepare_pane()
+        with vscode.EditorBridge('windows-vm', self.editor_env, transport='tcp') as bridge:
+            _, master = self.attach(dict(self.editor_env, SSH_CONNECTION='remote',
+                                          DALFTUI_EDITOR_SOCKET=f'tcp:127.0.0.1:{bridge.local_port}',
+                                          DALFTUI_EDITOR_TOKEN=bridge.token))
+            self.assertEqual(self.press_f3(master),
+                             ['--new-window', '--folder-uri', vscode.folder_uri(str(folder), 'windows-vm')])
+
 
 if __name__ == '__main__':
     unittest.main()
