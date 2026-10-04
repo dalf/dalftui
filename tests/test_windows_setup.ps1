@@ -127,11 +127,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
     Write-DalftuiProfile -Path (Join-Path $root 'connection-profile.ps1') -Checkout $checkout
     . (Join-Path $root 'connection-profile.ps1')
-    $arguments = @(dssh 'alice@vm-alias' | ConvertFrom-Json)
-    Assert-True (($arguments -join ' ') -eq '--connect alice@vm-alias') 'dssh HOST must preserve its host and route through the launcher'
+    $argumentJson = dssh 'alice@vm-alias'
+    $arguments = ConvertFrom-Json -InputObject $argumentJson
+    Assert-True (($arguments -join ' ') -eq '--connect alice@vm-alias') "dssh HOST must preserve its host and route through the launcher: $argumentJson"
     Assert-True ($LASTEXITCODE -eq 17) 'dssh must preserve the launcher exit status'
-    $arguments = @(dssh | ConvertFrom-Json)
-    Assert-True (($arguments -join ' ') -eq '--pick') 'dssh without a host must open the picker'
+    $argumentJson = dssh
+    $arguments = ConvertFrom-Json -InputObject $argumentJson
+    Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
     Write-Host "Passed $checks Windows setup assertions."
     # The exit-status test above deliberately ran a failing native command.
