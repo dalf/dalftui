@@ -11,12 +11,12 @@ import sys
 import tempfile
 import time
 
-from alacritty_config import config_directory, load
+from .alacritty_config import config_directory, load
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
 PROFILES = ('desktop', 'tmux-only')
-REPO = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ import sys
 import subprocess
 
 sys.dont_write_bytecode = True
-from dalftui_setup import reload_config
+from dalftui.linux.setup import reload_config
 
 
 def main():

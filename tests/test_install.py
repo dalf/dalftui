@@ -18,8 +18,9 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import alacritty_config
-import dalftui_setup as setup
+import dalftui.linux.alacritty_config as alacritty_config
+import dalftui.linux.setup as setup
+import dalftui.linux.shortcuts as shortcuts
 
 
 class DependencyTests(unittest.TestCase):
@@ -180,12 +181,9 @@ class InstallationTests(DisposableSetup):
         self.install()
         local = self.paths.config_dir / 'alacritty/local.toml'
         local.write_text('[keyboard]\nbindings = [{key="F10", mods="Alt", action="None"}]\n')
-        spec = importlib.util.spec_from_file_location('shortcut_guide', ROOT / 'shortcuts.py')
-        guide = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guide)
-        with patch.object(guide, 'config_path', return_value=self.paths.alacritty):
-            with patch.object(guide.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
-                content = guide.render()
+        with patch.object(shortcuts, 'config_path', return_value=self.paths.alacritty):
+            with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
+                content = shortcuts.render()
         self.assertIn('Alt+F10', content)
         self.assertNotIn('Cannot read Alacritty bindings', content)
 
@@ -196,6 +194,64 @@ class InstallationTests(DisposableSetup):
         with self.assertRaisesRegex(ValueError, 'Recursive'):
             self.install()
         self.assertFalse(self.paths.root.exists())
+
+
+class RelocationTests(DisposableSetup):
+    def command_environment(self):
+        command_dir = self.directory / "commands 'quoted' $bin"
+        command_dir.mkdir()
+        (command_dir / 'tmux').write_text(
+            '#!/bin/sh\n'
+            'case "$*" in\n'
+            '  "-V") echo "tmux 3.4" ;;\n'
+            '  "list-keys") echo "bind-key -T prefix F1 display-popup help" ;;\n'
+            '  *"has-session"*) echo "no server running" >&2; exit 1 ;;\n'
+            'esac\n')
+        for name in ('less', 'git'):
+            (command_dir / name).write_text('#!/bin/sh\nexit 0\n')
+        (command_dir / 'python3').symlink_to(sys.executable)
+        for command in command_dir.iterdir():
+            if not command.is_symlink():
+                command.chmod(0o755)
+        outside = self.directory / "outside 'quoted' $cwd"
+        outside.mkdir()
+        environment = dict(os.environ, HOME=str(self.paths.home_dir),
+                           XDG_CONFIG_HOME=str(self.paths.config_dir),
+                           XDG_STATE_HOME=str(self.paths.state_dir),
+                           PATH=str(command_dir) + os.pathsep + os.environ['PATH'])
+        environment.pop('PYTHONPATH', None)
+        return environment, outside
+
+    def install_from_copied_checkout(self):
+        environment, outside = self.command_environment()
+        result = subprocess.run([str(self.repo / 'install'), '--tmux-only'], cwd=outside,
+                                env=environment, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return environment, outside
+
+    def test_default_installation_root_is_the_copied_checkout(self):
+        self.install_from_copied_checkout()
+        self.assertTrue(self.paths.root.is_symlink())
+        self.assertEqual(self.paths.root.resolve(), self.repo)
+
+    def test_installed_shortcut_launcher_works_outside_checkout_without_pythonpath(self):
+        environment, outside = self.install_from_copied_checkout()
+        guide = self.paths.config_dir / 'tmux/shortcuts.py'
+        self.assertEqual(guide.resolve(), self.repo / 'shortcuts.py')
+        result = subprocess.run([sys.executable, str(guide), '--tmux-only', '--print'], cwd=outside,
+                                env=environment, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Ctrl+B → c', result.stdout)
+        self.assertIn('LIVE TMUX BINDINGS / PREFIX', result.stdout)
+        self.assertNotIn('ALACRITTY CUSTOM BINDINGS', result.stdout)
+
+    def test_reload_entrypoint_works_outside_checkout(self):
+        environment, outside = self.install_from_copied_checkout()
+        socket = self.directory / "socket 'quoted' $tmux"
+        result = subprocess.run([str(self.repo / 'reload'), '--socket', str(socket)], cwd=outside,
+                                env=environment, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('tmux is not running', result.stdout)
 
 
 @unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
@@ -343,13 +399,10 @@ class ServerInstallationTests(DisposableSetup):
         self.assertFalse(self.paths.config_dir.exists())
 
     def test_server_guide_uses_tmux_keys_without_reading_alacritty(self):
-        spec = importlib.util.spec_from_file_location('server_guide', ROOT / 'shortcuts.py')
-        guide = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guide)
         live = subprocess.CompletedProcess(['tmux'], 0, stdout='bind-key -T prefix F1 display-popup help\n')
-        with patch.object(guide, 'load', side_effect=AssertionError('Alacritty was read')):
-            with patch.object(guide.subprocess, 'run', return_value=live):
-                content = guide.render(tmux_only=True)
+        with patch.object(shortcuts, 'load', side_effect=AssertionError('Alacritty was read')):
+            with patch.object(shortcuts.subprocess, 'run', return_value=live):
+                content = shortcuts.render(tmux_only=True)
         self.assertIn('Ctrl+B → c', content)
         self.assertIn('Live tmux bindings'.upper(), content)
         self.assertNotIn('ALACRITTY CUSTOM BINDINGS', content)

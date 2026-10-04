@@ -5,7 +5,7 @@ import sys
 import subprocess
 
 sys.dont_write_bytecode = True
-from dalftui_setup import dependencies, install, installed_profile
+from dalftui.linux.setup import dependencies, install, installed_profile
 
 
 def main():

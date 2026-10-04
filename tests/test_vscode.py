@@ -18,7 +18,7 @@ import unittest
 from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture, ROOT
-from alacritty_config import load
+from dalftui.linux.alacritty_config import load
 import vscode
 
 spec = importlib.util.spec_from_file_location('editor_picker', ROOT / 'ssh-picker.py')

@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import dalftui_setup
+import dalftui.linux.setup as setup
 from vscode import EditorBridge
 
 spec = importlib.util.spec_from_file_location('auto_picker', ROOT / 'ssh-picker.py')
@@ -60,10 +60,10 @@ class SshAutoTests(unittest.TestCase):
         self.real_run = subprocess.run
 
     def install(self, config=None):
-        paths = dalftui_setup.Paths(self.home, config or self.home / '.config',
-                                   self.home / '.local/state')
+        paths = setup.Paths(self.home, config or self.home / '.config',
+                            self.home / '.local/state')
         with redirect_stdout(io.StringIO()):
-            dalftui_setup.install(paths, ROOT, profile='tmux-only')
+            setup.install(paths, ROOT, profile='tmux-only')
 
     def install_historical_checkout(self, protocol_version=None):
         # Use independent files: the real installation symlinks to ROOT, which
