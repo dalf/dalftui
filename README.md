@@ -714,10 +714,20 @@ tests check supported historical root layouts before delivering credentials.
 
 ## Verification
 
+Run spelling and functionality checks from the repository root with
+[uv](https://docs.astral.sh/uv/getting-started/installation/) installed:
+
 ```sh
+uvx codespell==2.4.3
 python3 -m unittest discover -s tests -v
 python3 ssh-picker.py --list
 ```
+
+Codespell checks documentation, source, tests, configuration, and hidden files
+such as CI workflows using [.codespellrc](.codespellrc). Vendored code, frozen
+historical fixtures, and local artifacts are excluded. The pinned version in the
+`uvx` command keeps local and CI checks consistent. uv manages the tool's isolated
+environment automatically.
 
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions.
@@ -741,7 +751,13 @@ directions, reject unsupported versions without editor launches, and check the
 remote declaration before credential setup.
 
 The Windows-compatible launcher and Terminal suites run separately without tmux
-or curses:
+or curses. In PowerShell, run the same spelling check before the Python suites:
+
+```powershell
+uvx codespell==2.4.3
+```
+
+Run the launcher and Terminal suites:
 
 ```sh
 python -m unittest discover -s tests -p "test_windows*.py" -v
@@ -771,7 +787,8 @@ Check the PowerShell setup and profile integration separately:
 
 GitHub Actions runs the full Linux suite on Ubuntu with Python 3.11 and 3.14,
 installing tmux, OpenSSH, fzf, Git, and less for the integration tests.
-It also runs native Windows tests with Python 3.11 and 3.14, in
+Both Linux and Windows CI run the same pinned spelling check before the Python
+test suites. CI also runs native Windows tests with Python 3.11 and 3.14, in
 PowerShell 5.1 and 7. They cover package manager selection and failures,
 profile backups and repeated setup, safe VS Code discovery and portable-path
 configuration, the `dssh` command, real fzf filtering, SSH tag and login

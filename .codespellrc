@@ -1,0 +1,7 @@
+[codespell]
+# Include hidden project files such as GitHub Actions workflows.
+check-hidden = true
+# Ignore local artifacts, upstream code, and frozen historical peers.
+skip = .git,.agents,.aws,.codex,.backups,.venv,__pycache__,*.py[cod],
+    .pytest_cache,.mypy_cache,.ruff_cache,.coverage,.coverage.*,htmlcov,
+    vendor,./tests/fixtures,*.swp,*.swo,*~

@@ -28,6 +28,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - name: Check spelling
+        run: uvx codespell==2.4.3
       - name: Verify setup and PowerShell profile integration
         run: .\tests\test_windows_setup.ps1
       - name: Set up the real fzf package in an isolated profile

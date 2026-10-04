@@ -24,9 +24,15 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: false
       - name: Install test dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --yes fzf git less openssh-client tmux
+      - name: Check spelling
+        run: uvx codespell==2.4.3
       - name: Verify Linux and shared functionality
         run: python3 -m unittest discover -s tests -v

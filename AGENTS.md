@@ -84,6 +84,17 @@ declaration; it is not a forwarding wrapper. Do not remove or rename these paths
 
 ## Verification
 
+Use uv to run the pinned spelling check from the repository root before the
+functionality suites:
+
+```sh
+uvx codespell==2.4.3
+```
+
+Both Linux and Windows CI run this check using `.codespellrc`. Vendored code,
+frozen historical fixtures, and local artifacts are excluded. The same command
+works on Windows; uv manages the tool's isolated environment automatically.
+
 Full Linux discovery:
 
 ```sh

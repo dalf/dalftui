@@ -398,7 +398,7 @@ function Invoke-DalftuiWindowsSetup {
         $arguments = ConvertFrom-Json -InputObject $argumentJson
         Assert-True ($arguments.Count -eq 2 -and $arguments[0] -eq '--folder' -and $arguments[1] -eq $editorFolder) 'Editor callback must use the current folder and preserve its path'
     } finally { Pop-Location }
-    # Windows PowerShell ships an older PSReadLine without Get's -Chord option.
+    # Windows PowerShell ships an older PSReadLine without the -Chord option on Get-PSReadLineKeyHandler.
     $handlers = @(Get-PSReadLineKeyHandler)
     $handler = $handlers | Where-Object { $_.Key -eq 'Ctrl+b,F3' }
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
