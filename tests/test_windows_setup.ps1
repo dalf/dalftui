@@ -62,17 +62,27 @@ try {
     Set-Item Function:\Invoke-DalftuiPackageInstall $originalInstall
 
     # Capture the exact manager arguments without running either package manager.
-    $capture = Join-Path $root 'manager-arguments.json'
+    $capture = Join-Path $root 'manager-arguments.txt'
     $fakeManager = Join-Path $root 'fake-manager.ps1'
     $escapedCapture = $capture.Replace("'", "''")
-    [IO.File]::WriteAllText($fakeManager, "ConvertTo-Json -InputObject @(`$args) | Set-Content -LiteralPath '$escapedCapture'; `$global:LASTEXITCODE = 0")
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        # PowerShell 5.1 parses script parameters differently from native argv.
+        $fakeManager = Join-Path $root 'fake-manager.cmd'
+        [IO.File]::WriteAllText($fakeManager, "@echo off`r`necho %* > `"$capture`"`r`nexit /b 0`r`n")
+    } else {
+        [IO.File]::WriteAllText($fakeManager, "(`$args -join ' ') | Set-Content -LiteralPath '$escapedCapture'; `$global:LASTEXITCODE = 0")
+    }
     Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'winget.exe'; Source = $fakeManager})
-    $arguments = @(Get-Content -LiteralPath $capture -Raw | ConvertFrom-Json)
-    Assert-True (($arguments -join ' ') -eq 'install --id junegunn.fzf --exact --source winget --accept-package-agreements --accept-source-agreements') 'WinGet must install the exact fzf package'
+    $arguments = [IO.File]::ReadAllText($capture).Trim()
+    Assert-True ($arguments -eq 'install --id junegunn.fzf --exact --source winget --accept-package-agreements --accept-source-agreements') "WinGet arguments must install the exact fzf package: $arguments"
     Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'choco.exe'; Source = $fakeManager})
-    $arguments = @(Get-Content -LiteralPath $capture -Raw | ConvertFrom-Json)
-    Assert-True (($arguments -join ' ') -eq 'install fzf --yes --no-progress') 'Chocolatey must install only fzf'
-    [IO.File]::WriteAllText($fakeManager, '$global:LASTEXITCODE = 17')
+    $arguments = [IO.File]::ReadAllText($capture).Trim()
+    Assert-True ($arguments -eq 'install fzf --yes --no-progress') "Chocolatey arguments must install only fzf: $arguments"
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        [IO.File]::WriteAllText($fakeManager, "@echo off`r`nexit /b 17`r`n")
+    } else {
+        [IO.File]::WriteAllText($fakeManager, '$global:LASTEXITCODE = 17')
+    }
     Assert-Throws { Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'winget.exe'; Source = $fakeManager}) } 'A nonzero manager status must fail setup'
     Set-Item Function:\Find-DalftuiApplication $originalFind
     Set-Item Function:\Update-DalftuiProcessPath $originalPath
@@ -124,6 +134,8 @@ try {
     Assert-True (($arguments -join ' ') -eq '--pick') 'dssh without a host must open the picker'
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
     Write-Host "Passed $checks Windows setup assertions."
+    # The exit-status test above deliberately ran a failing native command.
+    $global:LASTEXITCODE = 0
 } finally {
     Remove-Item -LiteralPath $root -Recurse -Force
 }
