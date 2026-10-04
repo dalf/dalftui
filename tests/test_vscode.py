@@ -1,4 +1,4 @@
-"""Verify editor routing, private socket requests, and the real tmux F3 binding."""
+"""Verify editor routing, private sockets, and the Alacritty shortcut through tmux."""
 import importlib.util
 import json
 import os
@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture, ROOT
+from alacritty_config import load
 import vscode
 
 spec = importlib.util.spec_from_file_location('editor_picker', ROOT / 'ssh-picker.py')
@@ -148,9 +149,9 @@ class EditorTmuxTests(TmuxFixture):
         self.fail('The tmux client did not attach')
 
     def press_f3(self, master):
-        os.write(master, b'\x02')
-        time.sleep(0.1)
-        os.write(master, b'\x1bOR')
+        binding = next(item for item in load(self.repo / 'config/alacritty.toml')['keyboard']['bindings']
+                       if item['key'] == 'F3' and item['mods'] == 'Control|Shift')
+        os.write(master, binding['chars'].encode())
         until = time.monotonic() + 5
         while time.monotonic() < until:
             if self.log.exists():

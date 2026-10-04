@@ -43,7 +43,12 @@ save_to_clipboard = true
 # Browser-style shortcuts for tmux windows.
 [keyboard]
 bindings = [
-    # Shortcut guide: Ctrl+B then F1 in tmux, or Win+Shift+H here.
+    # Help, SSH host picker and VS Code use the same function-key modifiers.
+    # Translate to the existing tmux actions, including over SSH.
+    { key = "F1", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOP" },
+    { key = "F2", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOQ" },
+    { key = "F3", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOR" },
+    # Alternative shortcut for the guide.
     { key = "H", mods = "Super|Shift", chars = "\u0002\u001bOP" },
     # Send Shift+Page Up to tmux instead of Alacritty scrollback.
     { key = "PageUp", mods = "Shift", mode = "~Vi|~Search", chars = "\u001b[5;2~" },

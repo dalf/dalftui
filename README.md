@@ -59,6 +59,7 @@ The server uses the same rounded tabs, Claude status styling, pane bindings,
 and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys
 and reminders for shortcuts supplied by your local Alacritty. The guide reads
 live tmux bindings and does not try to read Alacritty settings on the server.
+From dalftui Alacritty, **Ctrl+Shift+F1** also opens that guide.
 **Ctrl+B, then F2** is disabled in server mode because its picker launches a
 local Alacritty window.
 
@@ -147,9 +148,9 @@ private. Backups and Python caches are excluded from Git.
 
 ## Shortcuts
 
-- **Ctrl+B, then F1:** open the keyboard shortcut guide.
-- **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
-- **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
+- **Ctrl+Shift+F1:** open the keyboard shortcut guide.
+- **Ctrl+Shift+F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
+- **Ctrl+Shift+F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
 - **Ctrl+Shift+T:** new tmux window.
 - **Ctrl+Page Up / Page Down:** previous / next window.
 - **Ctrl+Shift+D / Ctrl+Shift+E:** split side by side / top and bottom.
@@ -159,6 +160,11 @@ private. Backups and Python caches are excluded from Git.
 The guide reads Alacritty imports and local overrides, and shows live tmux
 bindings. The terminal font needs glyphs for the rounded Powerline caps (`` and
 ``) and the status circle (`⬤`). The system monospace font remains the default.
+
+Alacritty translates Ctrl+Shift+F1/F2/F3 to the existing tmux actions. The
+tmux prefix bindings remain available as fallbacks. Reload locally to use
+the new Alacritty shortcuts; existing remote tmux configurations already
+understand the translated keys.
 
 ## SSH hosts and login
 
@@ -203,10 +209,10 @@ Install `--tmux-only` on each server where you want the shared configuration.
 
 ## Open the current folder in VS Code
 
-Press **Ctrl+B, then F3** in a local pane to open its directory in a new local
+Press **Ctrl+Shift+F3** in an Alacritty pane to open its directory in a new local
 VS Code window. Install VS Code's `code` command on your desktop.
 
-In an SSH window opened through **Ctrl+B, then F2**, the same shortcut opens
+In an SSH window opened through **Ctrl+Shift+F2**, the same shortcut opens
 the remote pane's directory in local VS Code using Microsoft's **Remote - SSH**
 extension. VS Code uses the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses

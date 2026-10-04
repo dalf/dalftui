@@ -41,7 +41,7 @@ def render(tmux_only=False):
 
     heading("Keyboard shortcuts")
     intro = ("Ctrl+B then F1 opens this guide. These tmux keys work over SSH." if tmux_only
-             else "Ctrl+B then F1 opens this guide. Win means the Windows/Super key.")
+             else "Ctrl+Shift+F1 opens this guide. Win means the Windows/Super key.")
     paragraph(intro, MUTED)
     paragraph("↑/↓ or Page Up/Down: scroll   /: find a shortcut   q: close", MUTED)
     paragraph("Ctrl+B → key means release Ctrl+B, then press the next key.", MUTED)
@@ -77,18 +77,18 @@ def render(tmux_only=False):
             ("Ctrl+Shift+F / Ctrl+Shift+B", "Search Alacritty's own buffer forward / backward"),
         ],
         "SSH / servers": [
-            ("Ctrl+B → F2", "Choose a host tagged dalftui; open a new Alacritty window with remote tmux"),
+            ("Ctrl+Shift+F2", "Choose a host tagged dalftui; open a new Alacritty window with remote tmux"),
             ("Type / arrows / Enter", "Filter hosts / select / connect in the host picker"),
             ("Esc", "Close the host picker"),
         ],
         "Session / help": [
-            ("Ctrl+B → F1", "Open this guide"),
+            ("Ctrl+Shift+F1", "Open this guide"),
             ("Win+Shift+H", "Alternative in Alacritty"),
             ("Ctrl+B → ?", "Open tmux's native key reference"),
             ("Ctrl+B → d", "Detach; reopen Alacritty to reattach to session 0"),
         ],
         "Editor": [
-            ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window"),
+            ("Ctrl+Shift+F3", "Open the current pane's folder in a new VS Code window"),
         ],
     }
     if tmux_only:
@@ -114,7 +114,10 @@ def render(tmux_only=False):
             ("Ctrl+B → ?", "Open tmux's native key reference"),
             ("Ctrl+B → d", "Detach from tmux; leave the session running"),
         ]
+        groups["Editor"][0] = ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window")
         groups["From your dalftui Alacritty client"] = [
+            ("Ctrl+Shift+F1", "Open this shortcut guide"),
+            ("Ctrl+Shift+F3", "Open the current remote pane's folder in local VS Code"),
             ("Ctrl+Shift+T", "New remote tmux window"),
             ("Ctrl+Page Up / Page Down", "Previous / next remote window"),
             ("Ctrl+Shift+D / Ctrl+Shift+E", "Split side by side / top and bottom"),
@@ -147,7 +150,8 @@ def render(tmux_only=False):
                     chars = binding.get("chars", "")
                     if chars.startswith("\x02"):
                         tail = chars[1:]
-                        description = "tmux: Ctrl+B → " + ("F1" if tail == "\x1bOP" else tail)
+                        function_keys = {"\x1bOP": "F1", "\x1bOQ": "F2", "\x1bOR": "F3"}
+                        description = "tmux: Ctrl+B → " + function_keys.get(tail, tail)
                     else:
                         description = "Send " + ascii(chars)
                 row(label, description)
