@@ -1,4 +1,20 @@
+# Installer backups
 .backups/
+
+# Python caches and local environments
 __pycache__/
 *.py[cod]
 .venv/
+
+# Test, coverage, and analysis output
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editor backup files
+*.swp
+*.swo
+*~
