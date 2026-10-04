@@ -1,10 +1,13 @@
 """Check the bridge contract against frozen peers, not two matching new peers."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -14,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import bridge_protocol as protocol
-import vscode
+from dalftui import vscode
+from dalftui.windows import vscode as windows_vscode
 
 spec = importlib.util.spec_from_file_location(
     'frozen_bridge_protocol_v1', Path(__file__).parent / 'fixtures/bridge_protocol_v1.py')
@@ -96,6 +100,48 @@ class FrozenPeerTests(unittest.TestCase):
                     legacy.request(f'tcp:127.0.0.1:{bridge.local_port}',
                                    legacy.FOLDER, bridge.token)
 
+    def test_old_remote_client_uses_current_configured_windows_editor(self):
+        with tempfile.TemporaryDirectory(prefix='dalftui-historical-windows-') as directory:
+            root = Path(directory).resolve()
+            application = root / "VS Code's %PATH% & é" / 'Code.exe'
+            cli = application.parent / 'resources/app/out/cli.js'
+            cli.parent.mkdir(parents=True)
+            cli.touch()
+            application.touch()
+            local_app_data = root / 'local application data'
+            config = local_app_data / windows_vscode.WINDOWS_CONFIG
+            config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({'code': str(application)}, ensure_ascii=False),
+                              encoding='utf-8-sig')
+            env = dict(LOCALAPPDATA=str(local_app_data), PATH='untrusted-alternative',
+                       VSCODE_DEV='1', TMUX='stale', TMUX_PANE='%9',
+                       VSCODE_IPC_HOOK_CLI='stale')
+            original_env = dict(env)
+            with (patch.object(vscode, 'WINDOWS', True),
+                  patch.object(windows_vscode, 'windows_code_command',
+                               wraps=windows_vscode.windows_code_command) as select,
+                  patch.object(vscode.shutil, 'which', side_effect=AssertionError('unsafe discovery'))):
+                with vscode.EditorBridge('alice@fixed-server', env, transport='tcp') as bridge:
+                    with patch.object(bridge, 'run_editor',
+                                      return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
+                        legacy.request(f'tcp:127.0.0.1:{bridge.local_port}',
+                                       legacy.FOLDER, bridge.token)
+                    select.assert_called_once()
+                    run.assert_called_once()
+                    self.assertEqual(run.call_args.args[0],
+                                     [str(application), str(cli), '--new-window', '--folder-uri',
+                                      'vscode-remote://ssh-remote+alice@fixed-server/'
+                                      'home/alice/project.with.dot%20%22quoted%22%20'
+                                      '%24cash%20%23%3F%C3%A9'])
+                    selected_env = run.call_args.kwargs['env']
+                    self.assertEqual(selected_env,
+                                     {'LOCALAPPDATA': str(local_app_data),
+                                      'PATH': 'untrusted-alternative', 'ELECTRON_RUN_AS_NODE': '1'})
+                    self.assertFalse(run.call_args.kwargs.get('shell', False))
+                    self.assertEqual(run.call_args.kwargs['timeout'], vscode.LAUNCH_TIMEOUT)
+                    self.assertEqual(bridge.env, original_env)
+            self.assertEqual(env, original_env)
+
     def test_current_remote_client_opens_folder_on_old_laptop(self):
         endpoint, worker, outcome = self.old_laptop()
         vscode.request(endpoint, legacy.FOLDER, legacy.TOKEN)
@@ -104,6 +150,56 @@ class FrozenPeerTests(unittest.TestCase):
         self.assertEqual(outcome['message']['token'], legacy.TOKEN)
         # The old server must ignore the newly explicit v1 metadata.
         self.assertEqual(outcome['message']['protocol_version'], 1)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
+    def test_root_editor_entrypoint_routes_client_credentials_to_old_laptop(self):
+        with tempfile.TemporaryDirectory(prefix='dalftui-historical-entrypoint-') as directory:
+            root = Path(directory).resolve()
+            checkout = root / "checkout's $cash ; é"
+            for relative in ('vscode.py', 'bridge_protocol.py', 'dalftui/__init__.py',
+                             'dalftui/vscode.py', 'dalftui/linux/__init__.py',
+                             'dalftui/linux/tmux_editor.py'):
+                destination = checkout / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, destination)
+            outside = root / 'unrelated directory'
+            outside.mkdir()
+            binary = root / 'bin'
+            binary.mkdir()
+            tmux = binary / 'tmux'
+            tmux.write_text("#!/bin/sh\n"
+                            "[ \"$#\" -eq 5 ] && [ \"$1\" = display-message ] &&\n"
+                            "[ \"$2\" = -p ] && [ \"$3\" = -t ] && [ \"$4\" = %7 ] &&\n"
+                            "[ \"$5\" = '#{pane_current_path}' ] || exit 99\n"
+                            "printf '%s\\n' \"$TEST_PANE_FOLDER\"\n")
+            tmux.chmod(0o755)
+            endpoint, worker, outcome = self.old_laptop()
+            client_env = dict(os.environ, DALFTUI_EDITOR_SOCKET=endpoint,
+                              DALFTUI_EDITOR_TOKEN=legacy.TOKEN, SSH_CONNECTION='remote')
+            client_env.pop('PYTHONPATH', None)
+            # /proc exposes the attach client's initial environment. Keep a
+            # separate disposable client alive with credentials supplied at exec.
+            client = subprocess.Popen([sys.executable, '-I', '-c',
+                                       'import sys; sys.stdin.buffer.read()'],
+                                      stdin=subprocess.PIPE, env=client_env)
+            try:
+                command_env = dict(client_env, PATH=str(binary), TEST_PANE_FOLDER=legacy.FOLDER,
+                                   DALFTUI_EDITOR_SOCKET='tcp:127.0.0.1:0',
+                                   DALFTUI_EDITOR_TOKEN='wrong-client-token')
+                result = subprocess.run(
+                    [sys.executable, str(checkout / 'vscode.py'), '--pane', '%7',
+                     '--client', str(client.pid), '--client-tty', '/dev/pts/probe'],
+                    cwd=outside, env=command_env, capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(result.stderr, '')
+                self.assert_old_laptop_finished(worker, outcome)
+                self.assertEqual(outcome['message']['folder'], legacy.FOLDER)
+                self.assertEqual(outcome['message']['token'], legacy.TOKEN)
+                self.assertEqual(outcome['message']['protocol_version'], 1)
+            finally:
+                client.stdin.close()
+                client.wait(timeout=5)
 
     def test_current_remote_client_reads_old_laptop_error(self):
         endpoint, worker, outcome = self.old_laptop(launch_error='Historical editor error.')

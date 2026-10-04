@@ -1,6 +1,6 @@
 """Exercise tag filtering with OpenSSH's real configuration evaluator; no logins."""
-from contextlib import ExitStack
-import importlib.util
+from contextlib import ExitStack, redirect_stderr
+import io
 import os
 from pathlib import Path
 import shutil
@@ -8,12 +8,12 @@ import sys
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location('ssh_picker', Path(__file__).resolve().parents[1] / 'ssh-picker.py')
-picker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(picker)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dalftui import ssh as picker
+from dalftui.linux import ssh_picker
 
 
 class Screen:
@@ -48,8 +48,7 @@ def supports_ssh_tag():
     return result.returncode == 0
 
 
-@unittest.skipUnless(supports_ssh_tag(), 'OpenSSH 9.4+ is required for desktop picker tests')
-class TagTests(unittest.TestCase):
+class TagConfig(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='dalftui-tag-tests-')
         self.addCleanup(self.directory.cleanup)
@@ -60,15 +59,9 @@ class TagTests(unittest.TestCase):
         source.start()
         self.addCleanup(source.stop)
 
-    def input(self, text, hosts):
-        screen = Screen([*text, '\n', '\x1b'])
-        with ExitStack() as stack:
-            for name in ['use_default_colors', 'init_pair', 'set_escdelay', 'color_pair']:
-                stack.enter_context(patch.object(picker.curses, name, return_value=0))
-            stack.enter_context(patch.object(picker.curses, 'COLORS', 256, create=True))
-            result = picker.pick(screen, hosts)
-        return result, screen.messages
 
+@unittest.skipUnless(supports_ssh_tag(), 'OpenSSH 9.4+ is required for SSH tags')
+class TagTests(TagConfig):
     def test_git_services_are_absent_and_server_login_is_preserved(self):
         self.config.write_text('Host server\n Tag dalftui\n User alice\n'
                                'Host github.com gitlab.com gitedu.hesge.ch\n User git\n')
@@ -100,6 +93,25 @@ class TagTests(unittest.TestCase):
         self.assertEqual(picker.configured_tag('chosen@server'), 'dalftui')
         self.assertEqual(picker.configured_login('server'), 'alice')
 
+    def test_tag_changes_are_read_on_each_open(self):
+        self.config.write_text('Host server\n Tag dalftui\n')
+        self.assertEqual(picker.target_hosts(), ['server'])
+        self.config.write_text('Host server\n')
+        self.assertEqual(picker.target_hosts(), [])
+
+
+@unittest.skipUnless(supports_ssh_tag() and ssh_picker.curses is not None,
+                     'OpenSSH 9.4+ and curses are required for desktop tag tests')
+class PickerTagTests(TagConfig):
+    def input(self, text, hosts):
+        screen = Screen([*text, '\n', '\x1b'])
+        with ExitStack() as stack:
+            for name in ['use_default_colors', 'init_pair', 'set_escdelay', 'color_pair']:
+                stack.enter_context(patch.object(ssh_picker.curses, name, return_value=0))
+            stack.enter_context(patch.object(ssh_picker.curses, 'COLORS', 256, create=True))
+            result = ssh_picker.pick(screen, hosts)
+        return result, screen.messages
+
     def test_typing_an_untagged_service_does_not_bypass_filter(self):
         self.config.write_text('Host server\n Tag dalftui\nHost github.com\n User git\n')
         selected, messages = self.input('github.com', picker.target_hosts())
@@ -112,11 +124,117 @@ class TagTests(unittest.TestCase):
         selected, _ = self.input('another.lab', [])
         self.assertEqual(selected, 'another.lab')
 
-    def test_tag_changes_are_read_on_each_open(self):
-        self.config.write_text('Host server\n Tag dalftui\n')
-        self.assertEqual(picker.target_hosts(), ['server'])
-        self.config.write_text('Host server\n')
-        self.assertEqual(picker.target_hosts(), [])
+
+@unittest.skipUnless(ssh_picker.curses is not None, 'curses is required for desktop UI tests')
+class DesktopPickerTests(unittest.TestCase):
+    def choose(self, keys, hosts):
+        screen = Screen(keys)
+        with ExitStack() as stack:
+            for name in ('use_default_colors', 'init_pair', 'set_escdelay', 'color_pair'):
+                stack.enter_context(patch.object(ssh_picker.curses, name, return_value=0))
+            stack.enter_context(patch.object(ssh_picker.curses, 'COLORS', 256, create=True))
+            selected = ssh_picker.pick(screen, hosts)
+        return selected, screen.messages
+
+    def test_filter_navigation_and_query_editing(self):
+        keys = ssh_picker.curses
+        cases = (
+            ([*'AL', '\n'], ['beta', 'Alpha'], 'Alpha'),
+            ([keys.KEY_DOWN, '\n'], ['alpha', 'beta'], 'beta'),
+            ([keys.KEY_DOWN, keys.KEY_UP, '\n'], ['alpha', 'beta'], 'alpha'),
+            ([keys.KEY_NPAGE, keys.KEY_PPAGE, '\n'], ['alpha', 'beta'], 'alpha'),
+            ([*'wrong', '\x15', *'betx', keys.KEY_BACKSPACE, '\n'], ['alpha', 'beta'], 'beta'),
+        )
+        for typed, hosts, expected in cases:
+            with self.subTest(keys=typed):
+                self.assertEqual(self.choose(typed, hosts)[0], expected)
+
+    def test_typed_host_checks_use_shared_validation_and_effective_tags(self):
+        for tag, expected in (('dalftui', 'another.lab'), ('', None)):
+            with self.subTest(tag=tag):
+                with patch.object(picker, 'configured_tag', return_value=tag) as evaluate:
+                    selected, messages = self.choose([*'another.lab', '\n', '\x1b'], [])
+                self.assertEqual(selected, expected)
+                evaluate.assert_called_once_with('another.lab')
+                if not tag:
+                    self.assertTrue(any('another.lab is not enabled' in text for text in messages))
+        with patch.object(picker, 'configured_tag') as evaluate:
+            self.assertIsNone(self.choose([*'-option', '\n', '\x1b'], [])[0])
+        evaluate.assert_not_called()
+
+    def test_typed_host_evaluation_error_is_shown_and_allows_cancellation(self):
+        with patch.object(picker, 'configured_tag', side_effect=RuntimeError('tag probe failed')):
+            selected, messages = self.choose([*'host', '\n', '\x1b'], [])
+        self.assertIsNone(selected)
+        self.assertIn('tag probe failed', messages)
+
+    def test_desktop_default_dispatch_and_cancellation(self):
+        for key in ('\x1b', '\x03', '\n'):
+            with self.subTest(key=key):
+                def wrapper(callback, hosts):
+                    self.assertIs(callback, ssh_picker.pick)
+                    return self.choose([key], hosts)[0]
+
+                with (patch.object(sys, 'platform', 'linux'),
+                      patch.object(sys, 'argv', ['ssh-picker.py']),
+                      patch.object(picker, 'target_hosts', return_value=['server']) as hosts,
+                      patch.object(ssh_picker.curses, 'wrapper', side_effect=wrapper),
+                      patch.object(ssh_picker, 'open_window') as window):
+                    self.assertEqual(picker.main(), 0)
+                hosts.assert_called_once_with()
+                if key == '\n':
+                    window.assert_called_once_with('server')
+                else:
+                    window.assert_not_called()
+
+    def test_desktop_errors_keep_the_return_prompt_and_status(self):
+        for error in (OSError('window failed'), RuntimeError('window failed'),
+                      ssh_picker.curses.error('window failed')):
+            with self.subTest(error=error):
+                output = io.StringIO()
+                with (patch.object(sys, 'platform', 'linux'),
+                      patch.object(sys, 'argv', ['ssh-picker.py']),
+                      patch.object(picker, 'target_hosts', return_value=['server']),
+                      patch.object(ssh_picker.curses, 'wrapper', side_effect=error),
+                      patch('builtins.input', side_effect=EOFError) as prompt,
+                      redirect_stderr(output)):
+                    self.assertEqual(picker.main(), 1)
+                prompt.assert_called_once_with('Press Enter to return.')
+                self.assertIn('Could not open SSH window: window failed', output.getvalue())
+
+
+class DesktopWindowTests(unittest.TestCase):
+    def test_default_desktop_without_curses_keeps_the_cli_error(self):
+        output = io.StringIO()
+        with (patch.object(sys, 'platform', 'linux'),
+              patch.object(sys, 'argv', ['ssh-picker.py']),
+              patch.object(ssh_picker, 'curses', None),
+              patch.object(picker, 'target_hosts') as hosts,
+              redirect_stderr(output)):
+            with self.assertRaises(SystemExit) as exit:
+                picker.main()
+        self.assertEqual(exit.exception.code, 2)
+        hosts.assert_not_called()
+        self.assertIn('Use --connect HOST on Windows; the interactive host picker requires curses.',
+                      output.getvalue())
+
+    def test_missing_alacritty_and_startup_failures(self):
+        with patch.object(ssh_picker.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'Alacritty was not found in PATH'):
+                ssh_picker.open_window('server')
+        for output, expected in ((b'Alacritty failed', 'Alacritty failed'),
+                                 (b'', 'Could not open Alacritty')):
+            with self.subTest(output=output):
+                def start(command, **kwargs):
+                    kwargs['stderr'].write(output)
+                    process = Mock()
+                    process.wait.return_value = 1
+                    return process
+
+                with (patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'),
+                      patch.object(ssh_picker.subprocess, 'Popen', side_effect=start)):
+                    with self.assertRaisesRegex(RuntimeError, expected):
+                        ssh_picker.open_window('server')
 
 
 if __name__ == '__main__':

@@ -34,7 +34,7 @@ Protocol compatibility does not establish release freshness or security fixes.
 Pre-declaration peers ignore unknown fields, including protocol_version: a
 future breaking version must establish compatibility before sending an operation,
 not rely on an old peer rejecting new metadata after a side effect has occurred.
-See AGENTS.md for the review rule, including the SSH bootstrap in ssh-picker.py.
+See AGENTS.md for the review rule, including the SSH bootstrap in dalftui/ssh.py.
 """
 import argparse
 from dataclasses import dataclass

@@ -1,6 +1,7 @@
 """Verify editor routing, private sockets, and the Alacritty shortcut through tmux."""
-import importlib.util
+from contextlib import redirect_stderr
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -19,11 +20,106 @@ from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture, ROOT
 from dalftui.linux.alacritty_config import load
-import vscode
+from dalftui import vscode
+from dalftui.linux import tmux_editor
 
-spec = importlib.util.spec_from_file_location('editor_picker', ROOT / 'ssh-picker.py')
-picker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(picker)
+from dalftui import ssh as picker
+
+
+class PaneDispatchTests(unittest.TestCase):
+    def arguments(self):
+        return patch.object(sys, 'argv', ['vscode.py', '--pane', '%7', '--client', '123',
+                                         '--client-tty', '/dev/pts/7'])
+
+    def test_local_pane_dispatch_uses_shared_launch_and_client_environment(self):
+        env = {'PATH': 'client-path', 'EDITOR_TEST_LOG': 'client-log'}
+        cwd = subprocess.CompletedProcess([], 0, '/project with # and é\n', '')
+        with (self.arguments(),
+              patch.object(tmux_editor, 'client_environment', return_value=env) as read_env,
+              patch.object(tmux_editor.subprocess, 'run', return_value=cwd) as query,
+              patch.object(vscode, 'launch') as launch,
+              patch.object(vscode, 'request') as request):
+            self.assertEqual(vscode.main(), 0)
+        query.assert_called_once_with(
+            ['tmux', 'display-message', '-p', '-t', '%7', '#{pane_current_path}'],
+            capture_output=True, text=True, check=True, timeout=5)
+        read_env.assert_called_once_with(123)
+        launch.assert_called_once_with('/project with # and é', env=env)
+        request.assert_not_called()
+
+    def test_remote_pane_dispatch_uses_shared_authenticated_request(self):
+        with patch.object(vscode, 'launch') as launch:
+            with vscode.EditorBridge('fixed-server', transport='tcp') as bridge:
+                endpoint = f'tcp:127.0.0.1:{bridge.local_port}'
+                env = {vscode.SOCKET_ENV: endpoint, vscode.TOKEN_ENV: bridge.token,
+                       'SSH_CONNECTION': 'remote'}
+                with (self.arguments(),
+                      patch.object(tmux_editor, 'client_environment', return_value=env) as read_env,
+                      patch.object(tmux_editor.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess([], 0, '/project\n', '')),
+                      patch.object(vscode, 'request', wraps=vscode.request) as request):
+                    self.assertEqual(vscode.main(), 0)
+                read_env.assert_called_once_with(123)
+                request.assert_called_once_with(endpoint, '/project', bridge.token)
+                self.assertEqual(launch.call_args.args[:2], ('/project', 'fixed-server'))
+
+    def test_missing_remote_credentials_notify_the_triggering_client(self):
+        for env in ({'SSH_CONNECTION': 'remote'}, {'SSH_CLIENT': 'remote'},
+                    {vscode.SOCKET_ENV: 'tcp:127.0.0.1:12345'}):
+            with self.subTest(env=env):
+                output = io.StringIO()
+                with (self.arguments(), redirect_stderr(output),
+                      patch.object(tmux_editor, 'client_environment', return_value=env),
+                      patch.object(tmux_editor.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess([], 0, '/project\n', '')) as run,
+                      patch.object(vscode.socket, 'socket') as socket_factory,
+                      patch.object(vscode, 'launch') as launch):
+                    self.assertEqual(vscode.main(), 1)
+                launch.assert_not_called()
+                socket_factory.assert_not_called()
+                self.assertIn('reconnect', output.getvalue().lower())
+                self.assertEqual(run.call_args.args[0][:6],
+                                 ['tmux', 'display-message', '-d', '8000', '-c', '/dev/pts/7'])
+                self.assertEqual(run.call_args.args[0][6], output.getvalue().strip())
+                self.assertEqual(run.call_args.kwargs, {'timeout': 5, 'check': False})
+
+    def test_pane_query_errors_preserve_status_and_escape_notifications(self):
+        errors = (
+            (OSError('pane #7 unavailable'), 'VS Code: pane ##7 unavailable'),
+            (ValueError('pane #7 invalid'), 'VS Code: pane ##7 invalid'),
+            (RuntimeError('pane #7 failed'), 'VS Code: pane ##7 failed'),
+            (subprocess.CalledProcessError(1, 'tmux'),
+             "VS Code: Command 'tmux' returned non-zero exit status 1."),
+            (subprocess.TimeoutExpired('tmux', 5),
+             "VS Code: Command 'tmux' timed out after 5 seconds"),
+        )
+        for error, notification in errors:
+            with self.subTest(error=error):
+                output = io.StringIO()
+                with (self.arguments(), redirect_stderr(output),
+                      patch.object(tmux_editor.subprocess, 'run', side_effect=[error, None]) as run):
+                    self.assertEqual(vscode.main(), 1)
+                self.assertEqual(run.call_args.args[0],
+                                 ['tmux', 'display-message', '-d', '8000', '-c', '/dev/pts/7',
+                                  notification])
+                self.assertEqual(run.call_args.kwargs, {'timeout': 5, 'check': False})
+
+    def test_client_environment_and_notification_failures_preserve_status(self):
+        for tty_args in ([], ['--client-tty', '/dev/pts/7']):
+            with self.subTest(tty_args=tty_args):
+                with (patch.object(sys, 'argv', ['vscode.py', '--pane', '%7', '--client', '123',
+                                                *tty_args]), redirect_stderr(io.StringIO()),
+                      patch.object(tmux_editor, 'client_environment',
+                                   side_effect=OSError('client #123 exited')),
+                      patch.object(tmux_editor.subprocess, 'run', side_effect=[
+                          subprocess.CompletedProcess([], 0, '/project\n', ''),
+                          subprocess.TimeoutExpired('tmux', 5)]) as run):
+                    self.assertEqual(vscode.main(), 1)
+                expected = ['tmux', 'display-message', '-d', '8000']
+                if tty_args:
+                    expected += ['-c', '/dev/pts/7']
+                self.assertEqual(run.call_args.args[0],
+                                 [*expected, 'VS Code: client ##123 exited'])
 
 
 class EditorTests(DisposableSetup):
@@ -44,6 +140,21 @@ class EditorTests(DisposableSetup):
         vscode.launch(folder, env=self.editor_env)
         self.assertEqual(json.loads(self.log.read_text()),
                          ['--new-window', '--folder-uri', Path(folder).as_uri()])
+
+    def test_installed_editor_entrypoint_opens_local_folder_outside_checkout(self):
+        self.install(profile='tmux-only')
+        env = dict(self.editor_env)
+        env.pop('PYTHONPATH', None)
+        folder = self.directory / "project's $cash ; é"
+        folder.mkdir()
+        result = subprocess.run([sys.executable, str(self.paths.root / 'vscode.py'),
+                                 '--folder', str(folder)], cwd=self.paths.home_dir,
+                                env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(json.loads(self.log.read_text()),
+                         ['--new-window', '--folder-uri', folder.as_uri()])
 
     def test_bridge_uses_its_fixed_destination_and_cleans_up(self):
         folder = "/home/alice/project.with.dot 'quoted' $cash #?é"
@@ -148,11 +259,11 @@ class EditorTests(DisposableSetup):
         cwd = subprocess.CompletedProcess(['tmux'], 0, '/project\n', '')
         with vscode.EditorBridge('server', self.editor_env) as bridge:
             env = {vscode.SOCKET_ENV: bridge.local_socket, 'SSH_CONNECTION': 'remote'}
-            with patch.object(vscode, 'client_environment', return_value=env):
-                with patch.object(vscode.subprocess, 'run', return_value=cwd):
+            with patch.object(tmux_editor, 'client_environment', return_value=env):
+                with patch.object(tmux_editor.subprocess, 'run', return_value=cwd):
                     with patch.object(vscode.socket, 'socket') as connection:
                         with self.assertRaisesRegex(RuntimeError, 'Reconnect using the dalftui SSH launcher'):
-                            vscode.open_pane('%0', 123)
+                            tmux_editor.open_pane('%0', 123)
                         connection.assert_not_called()
             self.assertFalse(self.log.exists())
 
@@ -212,11 +323,11 @@ class EditorTests(DisposableSetup):
 
     def test_plain_remote_ssh_does_not_try_to_launch_a_remote_gui(self):
         cwd = subprocess.CompletedProcess(['tmux'], 0, '/home/alice/project\n', '')
-        with patch.object(vscode, 'client_environment', return_value={'SSH_CONNECTION': 'remote'}):
-            with patch.object(vscode.subprocess, 'run', return_value=cwd):
+        with patch.object(tmux_editor, 'client_environment', return_value={'SSH_CONNECTION': 'remote'}):
+            with patch.object(tmux_editor.subprocess, 'run', return_value=cwd):
                 with patch.object(vscode, 'launch') as launch:
                     with self.assertRaisesRegex(RuntimeError, 'local dalftui terminal'):
-                        vscode.open_pane('%0', 123)
+                        tmux_editor.open_pane('%0', 123)
                     launch.assert_not_called()
 
 

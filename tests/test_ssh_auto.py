@@ -1,7 +1,7 @@
 """Run SSH startup scripts against isolated remote homes and executables."""
-import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
 import shlex
@@ -16,11 +16,9 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import dalftui.linux.setup as setup
-from vscode import EditorBridge
+from dalftui.vscode import EditorBridge
 
-spec = importlib.util.spec_from_file_location('auto_picker', ROOT / 'ssh-picker.py')
-picker = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(picker)
+from dalftui import ssh as picker
 
 
 @unittest.skipIf(sys.platform == 'win32', 'Remote startup runs in a POSIX shell')
@@ -59,11 +57,11 @@ class SshAutoTests(unittest.TestCase):
                         DALFTUI_EDITOR_SOCKET='stale-endpoint', DALFTUI_EDITOR_TOKEN='stale-token')
         self.real_run = subprocess.run
 
-    def install(self, config=None):
+    def install(self, config=None, checkout=ROOT):
         paths = setup.Paths(self.home, config or self.home / '.config',
                             self.home / '.local/state')
         with redirect_stdout(io.StringIO()):
-            setup.install(paths, ROOT, profile='tmux-only')
+            setup.install(paths, checkout, profile='tmux-only')
 
     def install_historical_checkout(self, protocol_version=None):
         # Use independent files: the real installation symlinks to ROOT, which
@@ -119,6 +117,51 @@ class SshAutoTests(unittest.TestCase):
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
         self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_installed_picker_dispatches_and_embeds_its_copied_root_policy(self):
+        checkout = self.directory / "checkout's $cash ; é"
+        shutil.copytree(ROOT, checkout, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+        policy = checkout / 'tmux-start.sh'
+        policy.write_text("printf '%s\\n' copied-policy > \"$TEST_POLICY_LOG\"\n" + policy.read_text())
+        self.install(checkout=checkout)
+        installed = self.home / '.config/dalftui'
+        self.assertEqual(installed.resolve(), checkout.resolve())
+        ssh_log = self.directory / 'ssh-arguments'
+        policy_log = self.directory / 'policy-log'
+        ssh = self.bin / 'ssh'
+        ssh.write_text(f'#!{sys.executable}\n' + '''import json, os, shlex, sys
+with open(os.environ['TEST_SSH_LOG'], 'a', encoding='utf-8') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+if '-G' in sys.argv:
+    print('user alice')
+    sys.exit(0)
+if '-T' in sys.argv:
+    # Model a remote host without editor integration, without opening SSH.
+    sys.exit(3)
+os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
+''')
+        ssh.chmod(0o755)
+        self.tmux.write_text(self.tmux.read_text() + 'exit 23\n')
+        outside = self.directory / 'unrelated directory'
+        outside.mkdir()
+        env = dict(self.env, TEST_SSH_LOG=str(ssh_log), TEST_POLICY_LOG=str(policy_log),
+                   TEST_SH=str(self.bin / 'sh'))
+        env.pop('PYTHONPATH', None)
+        host = "alice@prod-é;$(probe)'"
+        result = self.real_run([sys.executable, str(installed / 'ssh-picker.py'),
+                                '--connect', host, '--bridge', 'tcp'],
+                               cwd=outside, env=env, input='', capture_output=True,
+                               text=True, timeout=5)
+        self.assertEqual(result.returncode, 23, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertIn(f'SSH to {host} ended with status 23.', result.stdout)
+        commands = [json.loads(line) for line in ssh_log.read_text().splitlines()]
+        self.assertEqual(len(commands), 3)
+        for command in commands:
+            self.assertEqual(command[command.index('--') + 1], host)
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(policy_log.read_text(), 'copied-policy\n')
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_installed_dalftui_prepares_credentials_before_starting_a_listener(self):

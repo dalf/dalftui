@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import vscode
+from dalftui import vscode
 
 
 class ObservedBridge(vscode.EditorBridge):
@@ -179,6 +179,8 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(done.wait(5), 'Valid request was blocked behind unauthenticated input')
         self.assertEqual(outcome, [None])
         self.assertFalse(stop.is_set())
+        # Receiving the response can precede the worker's completion notification.
+        self.assertTrue(bridge.wait_for('finished', 1))
         with bridge.observed:
             self.assertEqual(bridge.finished, 1)
             self.assertEqual(bridge.active, 1)

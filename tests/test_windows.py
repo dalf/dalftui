@@ -1,5 +1,4 @@
 """Windows-compatible connection tests; no curses, tmux, or desktop GUI required."""
-import importlib.util
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
@@ -18,17 +17,136 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import vscode
+from dalftui import vscode
+from dalftui import ssh as picker
+from dalftui.windows import ssh as windows_ssh
+from dalftui.windows import vscode as windows_vscode
 
 
-def load_picker(name='windows_picker'):
-    spec = importlib.util.spec_from_file_location(name, ROOT / 'ssh-picker.py')
-    picker = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(picker)
-    return picker
+class SharedLauncherTests(unittest.TestCase):
+    """Exercise copied entrypoints without relying on the development checkout."""
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix='dalftui-launchers-')
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name).resolve()
+        self.checkout = self.root / "checkout's $cash ; & é"
+        for relative in ('ssh-picker.py', 'vscode.py', 'bridge_protocol.py', 'tmux-start.sh',
+                         'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py',
+                         'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
+                         'dalftui/linux/tmux_editor.py', 'dalftui/windows/__init__.py',
+                         'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py'):
+            destination = self.checkout / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, destination)
+        self.outside = self.root / 'unrelated directory'
+        self.outside.mkdir()
+        self.env = dict(os.environ)
+        self.env.pop('PYTHONPATH', None)
+        self.env.pop('PYTHONDONTWRITEBYTECODE', None)
 
+    def command(self, script, *args):
+        return subprocess.run([sys.executable, str(self.checkout / script), *args],
+                              cwd=self.outside, env=self.env, capture_output=True,
+                              text=True, timeout=10)
 
-picker = load_picker()
+    def test_copied_commands_import_and_validate_arguments_outside_checkout(self):
+        for script, description in (
+                ('ssh-picker.py', 'Pick an SSH host'),
+                ('vscode.py', "Open a pane's folder")):
+            with self.subTest(script=script):
+                result = self.command(script, '--help')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'usage: {script} ', result.stdout)
+                self.assertIn(description, result.stdout)
+                self.assertEqual(result.stderr, '')
+        cases = (
+            ('ssh-picker.py', ('--pick', '--list'), 'not allowed with argument'),
+            ('ssh-picker.py', ('--connect', 'host', '--list'), 'not allowed with argument'),
+            ('ssh-picker.py', ('--bridge', 'invalid'), 'invalid choice'),
+            ('vscode.py', (), 'required'),
+            ('vscode.py', ('--pane', '%7'), '--client is required with --pane'),
+            ('vscode.py', ('--pane', '%7', '--client', 'invalid'), 'invalid int value'),
+            ('vscode.py', ('--pane', '%7', '--folder', str(self.outside)),
+             'not allowed with argument'),
+        )
+        for script, args, message in cases:
+            with self.subTest(script=script, args=args):
+                result = self.command(script, *args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(f'usage: {script} ', result.stderr)
+                self.assertIn(message, result.stderr)
+        self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
+
+    def test_launchers_dispatch_to_their_own_package_and_propagate_status(self):
+        cases = (
+            ('ssh-picker.py', 'ssh', ('--connect', "alice@prod-é;$host'", '--bridge', 'tcp'), 17),
+            ('ssh-picker.py', 'ssh', ('--pick', '--bridge', 'unix'), 17),
+            ('vscode.py', 'vscode', ('--folder', str(self.outside / "project's $cash & é")), 23),
+            ('vscode.py', 'vscode', ('--pane', '%7', '--client', '123',
+                                   '--client-tty', '/dev/pts/7'), 23),
+        )
+        for script, module, args, status in cases:
+            with self.subTest(script=script, args=args):
+                implementation = self.checkout / 'dalftui' / (module + '.py')
+                implementation.write_text('import json, sys\n'
+                                          'assert sys.dont_write_bytecode\n'
+                                          'def main():\n'
+                                          '    print(json.dumps({"argv": sys.argv, "module": __file__}))\n'
+                                          f'    return {status}\n', encoding='utf-8')
+                result = self.command(script, *args)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(result.stderr, '')
+                observation = json.loads(result.stdout)
+                self.assertEqual(observation['argv'], [str(self.checkout / script), *args])
+                self.assertEqual(Path(observation['module']).resolve(), implementation.resolve())
+                # Importing either launcher must not call main().
+                result = subprocess.run(
+                    [sys.executable, '-I', '-c',
+                     'import runpy, sys; runpy.run_path(sys.argv[1], run_name="imported_launcher")',
+                     str(self.checkout / script)], cwd=self.outside, env=self.env,
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(result.stderr, '')
+        self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
+
+    def test_alacritty_launches_the_copied_root_picker_as_separate_arguments(self):
+        host = "alice@prod-é;$host'"
+        program = '''import json, subprocess, sys
+from unittest.mock import patch
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+from dalftui import ssh as picker
+from dalftui.linux import ssh_picker
+with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
+    with patch.object(ssh_picker.subprocess, 'Popen') as start:
+        start.return_value.wait.side_effect = subprocess.TimeoutExpired('alacritty-probe', 0.4)
+        host = sys.argv[2]
+        with patch.object(ssh_picker, 'curses') as curses:
+            curses.wrapper.return_value = host
+            with patch.object(picker, 'target_hosts', return_value=[host]):
+                with patch.object(sys, 'platform', 'linux'), patch.object(sys, 'argv', ['ssh-picker.py']):
+                    assert picker.main() == 0
+            curses.wrapper.assert_called_once_with(ssh_picker.pick, [host])
+        args, kwargs = start.call_args
+        assert kwargs['stdin'] == subprocess.DEVNULL
+        assert kwargs['stdout'] is kwargs['stderr']
+        start.return_value.wait.assert_called_once_with(timeout=0.4)
+        print(json.dumps({'args': args[0],
+                          'tmux': [name for name in ('TMUX', 'TMUX_PANE') if name in kwargs['env']],
+                          'detached': kwargs['start_new_session']}))
+'''
+        result = subprocess.run([sys.executable, '-I', '-c', program,
+                                 str(self.checkout), host], cwd=self.outside,
+                                env=dict(self.env, TMUX='stale', TMUX_PANE='%3'),
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observation = json.loads(result.stdout)
+        self.assertEqual(observation['args'],
+                         ['alacritty-probe', '--title', f'SSH · {host}', '-e', sys.executable,
+                          str(self.checkout.resolve() / 'ssh-picker.py'), '--connect', host])
+        self.assertTrue(observation['detached'])
+        self.assertEqual(observation['tmux'], [])
 
 
 class WindowsTests(unittest.TestCase):
@@ -48,20 +166,72 @@ class WindowsTests(unittest.TestCase):
         return application, cli
 
     def configured_editor_env(self, application):
-        config = self.local_app_data / vscode.WINDOWS_CONFIG
+        config = self.local_app_data / windows_vscode.WINDOWS_CONFIG
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text(json.dumps({'code': str(application)}, ensure_ascii=False),
                           encoding='utf-8')
         return dict(os.environ, LOCALAPPDATA=str(self.local_app_data))
 
-    def test_connect_cli_imports_without_curses(self):
-        with patch.dict(sys.modules, {'curses': None}):
-            module = load_picker('no_curses_picker')
-        self.assertIsNone(module.curses)
-        with patch.object(module, 'connect', return_value=0) as connect:
-            with patch.object(sys, 'argv', ['ssh-picker.py', '--connect', 'vm-alias']):
-                self.assertEqual(module.main(), 0)
-        connect.assert_called_once_with('vm-alias', None)
+    def test_shared_imports_and_cli_dispatch_without_linux_adapters(self):
+        # A cached package import would miss the optional-import boundary. Keep
+        # both the blocked import and all module patches inside a fresh process.
+        app, cli = self.make_code_installation()
+        env = self.configured_editor_env(app)
+        program = '''import importlib.abc, subprocess, sys
+from unittest.mock import patch
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+blocked = {'curses', 'dalftui.linux.ssh_picker', 'dalftui.linux.tmux_editor'}
+class BlockPlatformImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise AssertionError('Unexpected platform import: ' + fullname)
+sys.meta_path.insert(0, BlockPlatformImports())
+from dalftui import ssh as picker
+from dalftui import vscode
+case, folder, application, cli = sys.argv[2:]
+with patch.object(picker, 'connect', return_value=17) as connect, \
+     patch.object(picker, 'target_hosts', return_value=['vm-alias']), \
+     patch.object(picker.shutil, 'which', return_value='harmless-probe'):
+    if case in ('folder', 'windows-folder'):
+        sys.argv = ['vscode.py', '--folder', folder]
+        with patch.object(vscode, 'WINDOWS', case == 'windows-folder'), \
+             patch.object(vscode.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+            status = vscode.main()
+            run.assert_called_once()
+            command = [application, cli] if case == 'windows-folder' else ['harmless-probe']
+            assert run.call_args.args[0] == [*command, '--new-window', '--folder-uri',
+                                            vscode.folder_uri(folder)]
+            if case == 'windows-folder':
+                assert run.call_args.kwargs['env']['ELECTRON_RUN_AS_NODE'] == '1'
+        connect.assert_not_called()
+    else:
+        arguments = {'connect': ['--connect', 'vm-alias'], 'list': ['--list'],
+                     'pick': ['--pick'], 'windows': []}[case]
+        sys.argv = ['ssh-picker.py', *arguments]
+        with patch.object(picker.sys, 'platform', 'win32' if case == 'windows' else 'linux'), \
+             patch.object(picker.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, 'vm-alias\\n')) as run:
+            status = picker.main()
+        if case == 'list':
+            connect.assert_not_called()
+        else:
+            connect.assert_called_once_with('vm-alias', None)
+        if case in ('pick', 'windows'):
+            assert run.call_args.args[0][0] == 'harmless-probe'
+            assert run.call_args.kwargs['input'] == 'vm-alias\\n'
+assert not blocked.intersection(sys.modules)
+raise SystemExit(status)
+'''
+        for case, status in (('connect', 17), ('list', 0), ('pick', 17),
+                             ('windows', 17), ('folder', 0), ('windows-folder', 0)):
+            with self.subTest(case=case):
+                result = subprocess.run([sys.executable, '-I', '-c', program, str(ROOT),
+                                         case, str(self.root), str(app), str(cli)], cwd=self.root, env=env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(result.stdout, 'vm-alias\n' if case == 'list' else '')
+                self.assertEqual(result.stderr, '')
 
     def test_local_folder_uri_handles_native_drive_unc_and_special_characters(self):
         folder = self.root / "project's %cash #?\u00e9"
@@ -74,6 +244,93 @@ class WindowsTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
                     vscode.folder_uri(invalid)
+
+    def test_shared_ssh_executable_selects_native_windows_helper(self):
+        system_root = self.root / 'Windows'
+        native = system_root / 'System32/OpenSSH/ssh.exe'
+        native.parent.mkdir(parents=True)
+        native.touch()
+        with (patch.dict(os.environ, {'SystemRoot': str(system_root)}),
+              patch.object(windows_ssh, 'ssh_executable', wraps=windows_ssh.ssh_executable) as select):
+            with patch.object(sys, 'platform', 'win32'):
+                self.assertEqual(picker.ssh_executable(), str(native))
+                native.unlink()
+                self.assertEqual(picker.ssh_executable(), 'ssh')
+            self.assertEqual(select.call_count, 2)
+            with patch.object(sys, 'platform', 'linux'):
+                self.assertEqual(picker.ssh_executable(), 'ssh')
+            self.assertEqual(select.call_count, 2)
+
+    def test_shared_login_prepares_windows_acl_before_writing_config(self):
+        system = self.root / 'Windows/System32'
+        native = system / 'OpenSSH/ssh.exe'
+        native.parent.mkdir(parents=True)
+        native.touch()
+        sid = 'S-1-5-21-123-456-789-1001'
+        observations = []
+
+        def run(command, **kwargs):
+            observations.append((command, kwargs))
+            if command[0] == str(system / 'whoami.exe'):
+                return subprocess.CompletedProcess(command, 0,
+                                                   f'"DOMAIN\\user","{sid}"\r\n'.encode('utf-16le'))
+            if command[0] == str(system / 'icacls.exe'):
+                self.assertFalse((Path(command[1]) / 'config').exists())
+                return subprocess.CompletedProcess(command, 0, b'')
+            self.assertEqual(command[0], str(native))
+            wrapper = Path(command[command.index('-F') + 1])
+            self.assertTrue(wrapper.read_text().startswith('Host *\n    User '))
+            return subprocess.CompletedProcess(command, 0, 'user alice\n', '')
+
+        with (patch.object(sys, 'platform', 'win32'),
+              patch.dict(os.environ, {'SystemRoot': str(system.parent)}),
+              patch.object(picker, 'SSH_CONFIG', self.root / 'absent-config'),
+              patch.object(windows_ssh.subprocess, 'run', side_effect=run)):
+            self.assertEqual(picker.configured_login('vm-alias'), 'alice')
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(observations[0],
+                         ([str(system / 'whoami.exe'), '/user', '/fo', 'csv', '/nh'],
+                          {'capture_output': True, 'check': True, 'timeout': 5}))
+        directory = observations[1][0][1]
+        self.assertEqual(observations[1],
+                         ([str(system / 'icacls.exe'), directory, '/inheritance:r', '/grant:r',
+                           f'*{sid}:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F',
+                           '/remove:g', '*S-1-3-4'],
+                          {'capture_output': True, 'check': True, 'timeout': 5}))
+        self.assertFalse(Path(directory).exists())
+        self.assertEqual(observations[2][1],
+                         {'capture_output': True, 'text': True, 'timeout': 10})
+
+    def test_windows_acl_errors_stop_shared_login_preparation(self):
+        failures = (
+            (subprocess.CompletedProcess([], 0, b'no SID'), 'determine the Windows account SID'),
+            (OSError('whoami unavailable'), 'secure the temporary Windows SSH configuration'),
+            (subprocess.TimeoutExpired('whoami', 5), 'secure the temporary Windows SSH configuration'),
+        )
+        for result, message in failures:
+            with self.subTest(result=result):
+                with (patch.object(sys, 'platform', 'win32'),
+                      patch.object(windows_ssh.subprocess, 'run',
+                                   side_effect=result if isinstance(result, Exception) else None,
+                                   return_value=result) as run):
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        picker.configured_login('vm-alias')
+                run.assert_called_once()
+        with (patch.object(sys, 'platform', 'win32'),
+              patch.object(windows_ssh.subprocess, 'run', side_effect=[
+                  subprocess.CompletedProcess([], 0, b'S-1-5-21-1001'),
+                  subprocess.CalledProcessError(1, 'icacls')]) as run):
+            with self.assertRaisesRegex(RuntimeError, 'secure the temporary Windows SSH configuration'):
+                picker.configured_login('vm-alias')
+        self.assertEqual(run.call_count, 2)
+
+    def test_non_windows_login_skips_acl_preparation(self):
+        with (patch.object(sys, 'platform', 'linux'),
+              patch.object(windows_ssh, 'secure_ssh_directory') as secure,
+              patch.object(picker.subprocess, 'run',
+                           return_value=subprocess.CompletedProcess([], 0, 'user alice\n', ''))):
+            self.assertEqual(picker.configured_login('vm-alias'), 'alice')
+        secure.assert_not_called()
 
     def test_local_editor_cli_does_not_require_tmux_and_reports_failures_locally(self):
         folder = str(self.root)
@@ -90,12 +347,11 @@ class WindowsTests(unittest.TestCase):
         with patch.object(picker.sys, 'platform', 'win32'):
             with patch.object(picker, 'pick_fzf', return_value='vm-alias') as choose:
                 with patch.object(picker, 'connect', return_value=17) as connect:
-                    with patch.object(picker, 'open_window') as window:
+                    with patch.dict(sys.modules, {'dalftui.linux.ssh_picker': None}):
                         with patch.object(sys, 'argv', ['ssh-picker.py']):
                             self.assertEqual(picker.main(), 17)
         choose.assert_called_once_with()
         connect.assert_called_once_with('vm-alias', None)
-        window.assert_not_called()
 
     def test_cancelled_picker_does_not_open_ssh(self):
         with patch.object(picker, 'pick_fzf', return_value=None):
@@ -147,7 +403,8 @@ class WindowsTests(unittest.TestCase):
                                capture_output=True, text=True, timeout=10)
         if probe.returncode:
             self.skipTest('OpenSSH 9.4+ is required for SSH tags')
-        picker.secure_ssh_directory(self.root)
+        if sys.platform == 'win32':
+            windows_ssh.secure_ssh_directory(self.root)
         config = self.root / 'config'
         included = self.root / 'servers included.conf'
         included.write_text('Host vm-alias\n Tag dalftui\n User alice\n'
@@ -223,11 +480,15 @@ class WindowsTests(unittest.TestCase):
 
     def test_configured_windows_cli_preserves_local_and_bridge_uri_arguments(self):
         app, cli = self.make_code_installation('VS Code with spaces %percent% \u00e9')
-        env = self.configured_editor_env(app)
+        env = dict(self.configured_editor_env(app), VSCODE_DEV='1', TMUX='stale',
+                   TMUX_PANE='%3', VSCODE_IPC_HOOK_CLI='stale')
+        original_env = dict(env)
         local_folder = str(self.root / "local project's %cash & #?\u00e9")
         remote_folder = "/home/alice/project.with.dot 'quoted' %PATH% & #?é"
         result = subprocess.CompletedProcess(['Code.exe'], 0, '', '')
-        with patch.object(vscode, 'WINDOWS', True):
+        with (patch.object(vscode, 'WINDOWS', True),
+              patch.object(windows_vscode, 'windows_code_command',
+                           wraps=windows_vscode.windows_code_command) as select):
             with patch.object(vscode.shutil, 'which', side_effect=AssertionError('unsafe discovery')):
                 with patch.object(vscode.subprocess, 'run', return_value=result) as run:
                     vscode.launch(local_folder, env=dict(env, VSCODE_DEV='1'))
@@ -244,6 +505,53 @@ class WindowsTests(unittest.TestCase):
         self.assertFalse(run.call_args.kwargs.get('shell', False))
         self.assertEqual(run.call_args.kwargs['env']['ELECTRON_RUN_AS_NODE'], '1')
         self.assertNotIn('VSCODE_DEV', run.call_args.kwargs['env'])
+        for name in ('TMUX', 'TMUX_PANE', 'VSCODE_IPC_HOOK_CLI'):
+            self.assertNotIn(name, run.call_args.kwargs['env'])
+        self.assertEqual(select.call_count, 2)
+        self.assertEqual(env, original_env)
+
+    def test_windows_configuration_helper_reads_utf8_bom(self):
+        app, cli = self.make_code_installation()
+        env = self.configured_editor_env(app)
+        config = self.local_app_data / windows_vscode.WINDOWS_CONFIG
+        config.write_text(json.dumps({'code': str(app)}, ensure_ascii=False), encoding='utf-8-sig')
+        env['VSCODE_DEV'] = '1'
+        self.assertEqual(windows_vscode.windows_code_command(env), [str(app), str(cli)])
+        self.assertEqual(env['ELECTRON_RUN_AS_NODE'], '1')
+        self.assertNotIn('VSCODE_DEV', env)
+
+    def test_invalid_windows_configuration_never_executes_or_discovers_an_alternative(self):
+        app, cli = self.make_code_installation()
+        env = self.configured_editor_env(app)
+        config = self.local_app_data / windows_vscode.WINDOWS_CONFIG
+        cases = (
+            (None, 'not configured'),
+            (b'\xff', 'Cannot read'),
+            (b'{broken', 'Cannot read'),
+            (json.dumps([]).encode(), 'is invalid'),
+            (json.dumps({}).encode(), 'is invalid'),
+            (json.dumps({'code': 42}).encode(), 'is invalid'),
+            (json.dumps({'code': 'relative/Code.exe'}).encode(), 'is invalid'),
+            (json.dumps({'code': str(app) + '\0'}).encode(), 'is invalid'),
+            (json.dumps({'code': str(app.with_name('other.exe'))}).encode(), 'is invalid'),
+        )
+        with (patch.object(vscode, 'WINDOWS', True),
+              patch.object(vscode.subprocess, 'run') as run,
+              patch.object(vscode.shutil, 'which', side_effect=AssertionError('unsafe discovery'))):
+            for content, message in cases:
+                with self.subTest(content=content):
+                    if content is None:
+                        config.unlink()
+                    else:
+                        config.write_bytes(content)
+                    with self.assertRaisesRegex(RuntimeError, message + '.*setup-windows.ps1'):
+                        vscode.launch('relative-folder', env=env)
+                    run.assert_not_called()
+            self.configured_editor_env(app)
+            cli.unlink()
+            with self.assertRaisesRegex(RuntimeError, 'configured VS Code installation is missing'):
+                vscode.launch(str(self.root), env=env)
+            run.assert_not_called()
 
     @unittest.skipIf(sys.platform == 'win32', 'POSIX executable is the simulated Windows probe')
     def test_simulated_windows_never_executes_project_code_even_with_unsafe_path_entries(self):
@@ -506,7 +814,8 @@ else:
     def test_configured_username_and_unset_username_use_real_ssh_config(self):
         if not shutil.which(picker.ssh_executable()):
             self.skipTest('OpenSSH is not installed')
-        picker.secure_ssh_directory(self.root)
+        if sys.platform == 'win32':
+            windows_ssh.secure_ssh_directory(self.root)
         config = self.root / 'ssh config with spaces'
         config.write_text('Host vm-alias\n    HostName 127.0.0.1\n    User alice\n')
         with patch.object(picker, 'SSH_CONFIG', config):
