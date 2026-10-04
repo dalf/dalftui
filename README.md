@@ -194,16 +194,20 @@ login. A destination such as `user@host` already provides its username.
 
 ## Remote tmux
 
-The SSH window starts tmux on the remote host:
+Local Alacritty windows and SSH windows use the same tmux session policy:
 
 - No sessions: create session `0`.
-- One session: attach to it, whatever its name.
-- Multiple sessions: open tmux's session chooser.
+- One detached session: attach to it, whatever its name.
+- One attached session: create a new independent session with the next numeric name.
+- Multiple sessions: list their IDs, names, and client counts. Enter a session ID to
+  attach, `n` or Enter for a new session, `s` for a plain login shell, or `q` to cancel.
 
 The remote host must have tmux installed. **Ctrl+B, then d** detaches and closes
 the SSH window while leaving its session running. Connection errors stay visible
-until Enter is pressed. Ordinary Alacritty windows create or reattach to local
-session `0`; SSH windows override that startup and connect directly to the server.
+until Enter is pressed. A plain shell is intentionally an explicit choice because
+tmux shortcuts, persistence, and the remote **Ctrl+Shift+F3** integration are not
+available outside tmux. SSH windows override Alacritty's local startup and apply
+the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--tmux-only` on each server where you want the shared configuration.
 
