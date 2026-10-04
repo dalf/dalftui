@@ -84,16 +84,19 @@ function Invoke-DalftuiWindowsSetup {
     $settingsTwo = Join-Path $root ("Terminal preview's " + [char]0xe9 + '.json')
     $wrapperLiteral = ConvertTo-DalftuiSingleQuotedLiteral `
         (Join-Path $forwardingCheckout 'setup-windows.ps1')
+    # Group concatenations so commas separate lines instead of joining operands.
     $runnerLines = @(
-        'Push-Location -LiteralPath ' + (ConvertTo-DalftuiSingleQuotedLiteral $unrelated),
+        '$ErrorActionPreference = ''Stop''',
+        ('Push-Location -LiteralPath ' + (ConvertTo-DalftuiSingleQuotedLiteral $unrelated)),
         'try {',
-        '    & ' + $wrapperLiteral + ' -PackageManager choco -SkipFzf' +
+        ('    & ' + $wrapperLiteral + ' -PackageManager choco -SkipFzf' +
             ' -VSCodePath ' + (ConvertTo-DalftuiSingleQuotedLiteral $selectedCode) +
             ' -ProfilePath ' + (ConvertTo-DalftuiSingleQuotedLiteral $targetProfile) +
             ' -SkipTerminal -TerminalSettingsPath @(' +
             (ConvertTo-DalftuiSingleQuotedLiteral $settingsOne) + ', ' +
-            (ConvertTo-DalftuiSingleQuotedLiteral $settingsTwo) + ')',
-        '} finally { Pop-Location }'
+            (ConvertTo-DalftuiSingleQuotedLiteral $settingsTwo) + ')'),
+        '} finally { Pop-Location }',
+        'exit $LASTEXITCODE'
     )
     [IO.File]::WriteAllLines($runner, $runnerLines, [Text.UTF8Encoding]::new($true))
     $probeShellName = 'powershell.exe'
@@ -115,7 +118,7 @@ function Invoke-DalftuiWindowsSetup {
                  $forwarded.SettingsPaths[1] -eq $settingsTwo) `
         'The public setup wrapper must preserve TerminalSettingsPath arrays'
 
-    [IO.File]::WriteAllLines($runner, @('& ' + $wrapperLiteral),
+    [IO.File]::WriteAllLines($runner, @(('& ' + $wrapperLiteral), 'exit $LASTEXITCODE'),
         [Text.UTF8Encoding]::new($true))
     $null = & $probeShell -NoLogo -NoProfile -File $runner
     Assert-True ($LASTEXITCODE -eq 0) 'The public setup wrapper must forward defaults successfully'
@@ -125,8 +128,17 @@ function Invoke-DalftuiWindowsSetup {
                  $forwarded.Checkout -eq $forwardingCheckout) `
         'The public setup wrapper must preserve effective defaults'
     $env:DALFTUI_SETUP_PROBE_FAIL = '1'
-    $failureOutput = & $probeShell -NoLogo -NoProfile -File $runner 2>&1
-    Assert-True ($LASTEXITCODE -eq 1) 'A setup implementation failure must return status 1'
+    # Windows PowerShell 5.1 turns captured native stderr into error records.
+    # Allow the expected failure output while still checking its exit status.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $failureOutput = & $probeShell -NoLogo -NoProfile -File $runner 2>&1
+        $failureExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    Assert-True ($failureExitCode -eq 1) 'A setup implementation failure must return status 1'
     Assert-True (($failureOutput | Out-String).Contains('Setup failed: probe failure')) `
         'A setup implementation failure must retain the Setup failed message'
     Remove-Item Env:\DALFTUI_SETUP_PROBE_FAIL
