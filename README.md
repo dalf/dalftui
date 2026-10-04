@@ -241,6 +241,44 @@ cd "$HOME\code\dalftui"
 py -3 .\ssh-picker.py --connect my-vm
 ```
 
+For a shorter command in PowerShell, define `dssh`:
+
+```powershell
+function dssh {
+    param([Parameter(Mandatory)][string]$HostName)
+    py -3 "$HOME\code\dalftui\ssh-picker.py" --connect $HostName
+}
+
+dssh my-vm
+```
+
+The function works from any directory. Adjust the script path if you cloned the
+repository elsewhere. It connects through the same launcher, so remote tmux and
+**Ctrl+B, then F3** keep working. This function connects directly to the supplied
+host alias; it does not open a host picker.
+
+To keep `dssh` available in new PowerShell sessions, create your
+[PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles)
+if needed, then open it:
+
+```powershell
+if (-not (Test-Path -LiteralPath $PROFILE)) {
+    New-Item -ItemType File -Path $PROFILE -Force | Out-Null
+}
+notepad $PROFILE
+```
+
+Add the `function dssh { ... }` definition above to the profile and save it.
+Reload the profile in your current PowerShell session:
+
+```powershell
+. $PROFILE
+dssh my-vm
+```
+
+A `git pull --ff-only` updates the launcher used by this function; you do not
+need to redefine it when the checkout stays at the same path.
+
 SSH uses the configured username; if none is configured, the launcher asks for
 one. It creates or reattaches tmux using the usual session policy. Once attached,
 **Ctrl+B, then F3** opens the active pane's remote folder in Windows VS Code.
