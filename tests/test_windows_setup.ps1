@@ -23,6 +23,16 @@ try {
         Assert-True (-not $parseErrors) "$file must parse in this PowerShell version"
     }
 
+    # Check Windows qualification semantics on every platform; IsPathRooted
+    # would incorrectly accept drive-relative and current-drive-rooted paths.
+    foreach ($path in @('', ' ', 'bin', '.\bin', '..\bin', 'C:', 'C:bin', 'C:.\bin', '\bin', '/bin')) {
+        Assert-True (-not (Test-DalftuiFullyQualifiedWindowsPath $path)) "Windows path must be rejected before normalization: $path"
+    }
+    foreach ($path in @('C:\Tools\Code', 'C:/Tools/Code', '\\server\share\Code',
+                         '//server/share/Code', '\\?\C:\Tools\Code', '\\?\UNC\server\share\Code')) {
+        Assert-True (Test-DalftuiFullyQualifiedWindowsPath $path) "Fully qualified Windows path must be accepted: $path"
+    }
+
     # VS Code discovery must inspect only explicit absolute PATH directories.
     # In particular, neither Windows' implicit current-directory lookup nor an
     # empty/relative PATH component may select a project-controlled Code.exe.
@@ -31,6 +41,9 @@ try {
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($fakeCli)) | Out-Null
     [IO.File]::WriteAllText((Join-Path $project 'Code.exe'), '')
     [IO.File]::WriteAllText($fakeCli, '')
+    $fakeBin = Join-Path $project 'bin'
+    [IO.Directory]::CreateDirectory($fakeBin) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fakeBin 'code.cmd'), '')
     $ordinaryBin = Join-Path $root 'ordinary absolute bin'
     [IO.Directory]::CreateDirectory($ordinaryBin) | Out-Null
     $portable = Join-Path $root ("portable VS Code spaces " + [char]0xe9)
@@ -50,6 +63,41 @@ try {
         $mixedEntries = @('', '.', 'relative-bin', $ordinaryBin, $portableBin) -join [IO.Path]::PathSeparator
         $found = Find-DalftuiVSCode $mixedEntries
         Assert-True ($found -eq (Join-Path $portable 'Code.exe')) 'Discovery must find a valid installation only in an absolute PATH directory'
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            # Match the process and PowerShell directories so Windows resolves
+            # the rejected entries to the real fake installation above.
+            $previousDirectory = [Environment]::CurrentDirectory
+            $previousLocalAppData = $env:LOCALAPPDATA
+            $knownLocalAppData = [Environment]::GetFolderPath(
+                [Environment+SpecialFolder]::LocalApplicationData)
+            try {
+                [Environment]::CurrentDirectory = $project
+                $drive = [IO.Path]::GetPathRoot($project).Substring(0, 2)
+                $relativeEntries = @(($drive + 'bin'), ($drive + '.\bin'), $fakeBin.Substring(2),
+                                     $fakeBin.Substring(2).Replace('\', '/'))
+                foreach ($entry in $relativeEntries) {
+                    Assert-True ([IO.Path]::IsPathRooted($entry)) "Regression fixture must exercise a rooted relative path: $entry"
+                    Assert-True (([IO.Path]::GetFullPath($entry)).Equals(
+                        [IO.Path]::GetFullPath($fakeBin), [StringComparison]::OrdinalIgnoreCase)) 'Rejected PATH fixture must resolve to the fake installation directory'
+                    Assert-True ($null -eq (Find-DalftuiVSCode $entry)) "Rooted relative PATH must not select the project executable: $entry"
+                    $mixedEntries = @($entry, $portableBin) -join [IO.Path]::PathSeparator
+                    Assert-True ((Find-DalftuiVSCode $mixedEntries) -eq (Join-Path $portable 'Code.exe')) 'Rejected entries must not hide a later trusted installation'
+                }
+                foreach ($entry in @(($drive + 'Code.exe'), ($drive + '.\Code.exe'),
+                                     (Join-Path $project 'Code.exe').Substring(2))) {
+                    Assert-True ([IO.File]::Exists([IO.Path]::GetFullPath($entry))) 'Rejected explicit-path fixture must point to the existing fake executable'
+                    Assert-Throws { Resolve-DalftuiVSCode $entry } "Explicit rooted relative executable must be rejected: $entry"
+                }
+                $unwrittenConfig = Join-Path $root 'rejected-config.json'
+                Assert-Throws { Set-DalftuiVSCodeConfiguration -RequestedPath ($drive + 'Code.exe') -ConfigPath $unwrittenConfig } 'Rejected installation must not be persisted'
+                Assert-True (-not [IO.File]::Exists($unwrittenConfig)) 'Rejected installation must leave no configuration file'
+                $env:LOCALAPPDATA = $drive + 'local-app-data'
+                Assert-True ((Get-DalftuiVSCodeConfigPath) -eq (Join-Path $knownLocalAppData 'dalftui\config.json')) 'A rooted relative application-data directory must use the Windows known-folder fallback'
+            } finally {
+                [Environment]::CurrentDirectory = $previousDirectory
+                $env:LOCALAPPDATA = $previousLocalAppData
+            }
+        }
     } finally { Pop-Location }
     Assert-Throws { Resolve-DalftuiVSCode '.\portable' } 'An explicit portable installation must use an absolute path'
     Assert-True ((Resolve-DalftuiVSCode $portable) -eq (Join-Path $portable 'Code.exe')) 'An explicit portable installation with spaces and Unicode must work'
@@ -58,7 +106,7 @@ try {
     Assert-True ((Read-DalftuiVSCodeConfig $editorConfig) -eq (Join-Path $portable 'Code.exe')) 'Setup must persist and reuse the absolute Code.exe path'
     Assert-True ((Set-DalftuiVSCodeConfiguration -ConfigPath $editorConfig) -eq (Join-Path $portable 'Code.exe')) 'Repeated setup must prefer the configured installation over discovery'
     $configuredJson = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($editorConfig))
-    Assert-True ([IO.Path]::IsPathRooted([string]$configuredJson.code)) 'The persisted VS Code path must be absolute'
+    Assert-True (Test-DalftuiFullyQualifiedPath ([string]$configuredJson.code)) 'The persisted VS Code path must be fully qualified'
 
     $originalFind = (Get-Item Function:\Find-DalftuiApplication).ScriptBlock
     $originalInstall = (Get-Item Function:\Invoke-DalftuiPackageInstall).ScriptBlock

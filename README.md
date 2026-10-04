@@ -249,8 +249,9 @@ cd "$HOME\code\dalftui"
 
 Setup records the absolute `Code.exe` path in
 `%LOCALAPPDATA%\dalftui\config.json`. Folder launches use only that configured
-installation; they never search the current project. Empty and relative PATH
-entries are ignored during initial discovery. To select an unpackaged or
+installation; they never search the current project. Initial discovery requires
+fully qualified drive or UNC paths; empty and relative PATH entries, including
+`C:bin` and `\bin`, are ignored. To select an unpackaged or
 portable installation explicitly, pass its directory or executable:
 
 ```powershell

@@ -26,9 +26,26 @@ function Find-DalftuiApplication([string]$Name) {
         Select-Object -First 1
 }
 
+function Test-DalftuiFullyQualifiedWindowsPath([string]$Path) {
+    # .NET Framework (PowerShell 5.1) lacks IsPathFullyQualified. Require a
+    # drive plus separator, or a UNC/device prefix, before any normalization.
+    # IsPathRooted alone also accepts working-directory-dependent C:bin and \bin.
+    return (-not [string]::IsNullOrWhiteSpace($Path) -and
+        $Path -match '\A(?:[A-Za-z]:[\\/]|[\\/]{2})')
+}
+
+function Test-DalftuiFullyQualifiedPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if ([IO.Path]::DirectorySeparatorChar -eq [char]92) {
+        return Test-DalftuiFullyQualifiedWindowsPath $Path
+    }
+    # Keep the disposable PowerShell tests usable on Linux.
+    return [IO.Path]::IsPathRooted($Path)
+}
+
 function Resolve-DalftuiVSCode([string]$Path) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
-        throw 'The VS Code installation path must be absolute.'
+    if (-not (Test-DalftuiFullyQualifiedPath $Path)) {
+        throw 'The VS Code installation path must be a fully qualified absolute path.'
     }
     $fullPath = [IO.Path]::GetFullPath($Path)
     if ([IO.Directory]::Exists($fullPath)) {
@@ -67,7 +84,7 @@ function Find-DalftuiVSCode([string]$PathValue = $env:PATH) {
     if ([string]::IsNullOrEmpty($PathValue)) { return $null }
     foreach ($rawEntry in $PathValue.Split([IO.Path]::PathSeparator)) {
         $entry = $rawEntry.Trim().Trim([char]34)
-        if ([string]::IsNullOrWhiteSpace($entry) -or -not [IO.Path]::IsPathRooted($entry)) {
+        if (-not (Test-DalftuiFullyQualifiedPath $entry)) {
             continue
         }
         try { $directory = [IO.Path]::GetFullPath($entry) }
@@ -92,11 +109,11 @@ function Find-DalftuiVSCode([string]$PathValue = $env:PATH) {
 
 function Get-DalftuiVSCodeConfigPath {
     $directory = $env:LOCALAPPDATA
-    if ([string]::IsNullOrWhiteSpace($directory) -or -not [IO.Path]::IsPathRooted($directory)) {
+    if (-not (Test-DalftuiFullyQualifiedPath $directory)) {
         $directory = [Environment]::GetFolderPath(
             [Environment+SpecialFolder]::LocalApplicationData)
     }
-    if ([string]::IsNullOrWhiteSpace($directory) -or -not [IO.Path]::IsPathRooted($directory)) {
+    if (-not (Test-DalftuiFullyQualifiedPath $directory)) {
         throw 'Cannot determine the local application-data directory for VS Code configuration.'
     }
     return Join-Path $directory 'dalftui\config.json'
