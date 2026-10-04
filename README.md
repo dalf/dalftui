@@ -149,6 +149,7 @@ private. Backups and Python caches are excluded from Git.
 
 - **Ctrl+B, then F1:** open the keyboard shortcut guide.
 - **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
+- **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
 - **Ctrl+Shift+T:** new tmux window.
 - **Ctrl+Page Up / Page Down:** previous / next window.
 - **Ctrl+Shift+D / Ctrl+Shift+E:** split side by side / top and bottom.
@@ -199,6 +200,36 @@ until Enter is pressed. Ordinary Alacritty windows create or reattach to local
 session `0`; SSH windows override that startup and connect directly to the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--tmux-only` on each server where you want the shared configuration.
+
+## Open the current folder in VS Code
+
+Press **Ctrl+B, then F3** in a local pane to open its directory in a new local
+VS Code window. Install VS Code's `code` command on your desktop.
+
+In an SSH window opened through **Ctrl+B, then F2**, the same shortcut opens
+the remote pane's directory in local VS Code using Microsoft's **Remote - SSH**
+extension. VS Code uses the same SSH host alias and login as the picker, so your
+SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
+VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
+
+Update dalftui and run `./reload` on both machines. Reopen older SSH windows
+with the picker to enable F3. The picker creates a private Unix socket bridge
+through that window's SSH connection, and removes it when the connection ends.
+No desktop VS Code installation is needed on the server; Remote - SSH manages
+its own server component when you first connect.
+
+The bridge follows the tmux client that pressed F3, including when several
+clients attach to the same session. Your SSH server must allow Unix socket
+forwarding (`AllowStreamLocalForwarding`). A plain `ssh host` connection lacks
+the bridge; reconnect with the picker, or run
+`python3 ~/code/dalftui/ssh-picker.py --connect HOST` from your local terminal.
+If VS Code cannot open, tmux displays the error in its status line.
+
+You can also open a remote folder directly from your **local** terminal:
+
+```sh
+code --new-window --folder-uri "vscode-remote://ssh-remote+work-server/home/alice/project"
+```
 
 ## Theme and Claude integration
 

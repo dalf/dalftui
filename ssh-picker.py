@@ -12,24 +12,33 @@ import subprocess
 import sys
 import tempfile
 
+sys.dont_write_bytecode = True
+from vscode import EditorBridge, SOCKET_ENV
+
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
 
 # Execute with sh so this also works when the remote login shell is fish.
-REMOTE_SCRIPT = """unset TMUX TMUX_PANE
+REMOTE_SCRIPT = """unset TMUX TMUX_PANE DALFTUI_EDITOR_SOCKET
+{editor_setup}
 if ! command -v tmux >/dev/null 2>&1; then
     printf '%s\\n' 'tmux is not installed on this host.' >&2
     exit 127
 fi
 sessions=$(tmux list-sessions -F '#{session_id}' 2>/dev/null)
+run_tmux() {
 if [ -z "$sessions" ]; then
-    exec tmux new-session -A -s 0
+    tmux new-session -A -s 0
+    return $?
 fi
 set -- $sessions
 if [ "$#" -eq 1 ]; then
-    exec tmux attach-session -t "$1"
+    tmux attach-session -t "$1"
+    return $?
 fi
-exec tmux attach-session \\; choose-tree -sZ
+tmux attach-session \\; choose-tree -sZ
+}
+run_tmux
 """
 
 
@@ -188,16 +197,23 @@ def configured_login(host):
         return None if user == marker else user
 
 
-def ssh_command(host, login=None):
+def ssh_command(host, login=None, bridge=None):
     if not valid_host(host):
         raise ValueError('Invalid SSH destination')
     args = ['ssh', '-t', '-o', 'RemoteCommand=none']
+    editor_setup = ''
+    if bridge:
+        # Keep the forwarding and its local bridge owned by this SSH window.
+        args += ['-S', 'none', '-R', f'{bridge.remote_socket}:{bridge.local_socket}']
+        editor_setup = (f'{SOCKET_ENV}={shlex.quote(bridge.remote_socket)}\n'
+                        f'export {SOCKET_ENV}\n'
+                        f'trap \'rm -f -- "${SOCKET_ENV}"\' EXIT\n')
     if login is not None:
         if not valid_host(login) or '@' in login or '/' in login:
             raise ValueError('Invalid SSH login')
         args.extend(['-l', login])
     return [*args, '--', host,
-            'sh -c ' + shlex.quote(REMOTE_SCRIPT)]
+            'sh -c ' + shlex.quote(REMOTE_SCRIPT.replace('{editor_setup}', editor_setup))]
 
 
 def connect(host):
@@ -214,7 +230,9 @@ def connect(host):
                 else:
                     print('Enter a username, such as alice.')
         print(f'Connecting to {host} …', flush=True)
-        status = subprocess.run(ssh_command(host, login), env=env).returncode
+        destination = f'{login}@{host}' if login else host
+        with EditorBridge(destination, env) as bridge:
+            status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
     except KeyboardInterrupt:
         return 130
     except (OSError, RuntimeError, subprocess.TimeoutExpired, EOFError, ValueError) as error:

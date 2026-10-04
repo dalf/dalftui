@@ -87,6 +87,9 @@ def render(tmux_only=False):
             ("Ctrl+B → ?", "Open tmux's native key reference"),
             ("Ctrl+B → d", "Detach; reopen Alacritty to reattach to session 0"),
         ],
+        "Editor": [
+            ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window"),
+        ],
     }
     if tmux_only:
         groups["Tabs / tmux windows"] = [
