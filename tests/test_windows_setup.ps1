@@ -150,9 +150,11 @@ try {
         $arguments = ConvertFrom-Json -InputObject $argumentJson
         Assert-True ($arguments.Count -eq 2 -and $arguments[0] -eq '--folder' -and $arguments[1] -eq $editorFolder) 'Editor callback must use the current folder and preserve its path'
     } finally { Pop-Location }
-    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+b,F3'
+    # Windows PowerShell ships an older PSReadLine without Get's -Chord option.
+    $handlers = @(Get-PSReadLineKeyHandler)
+    $handler = $handlers | Where-Object { $_.Key -eq 'Ctrl+b,F3' }
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
-    $handler = Get-PSReadLineKeyHandler -Chord 'Ctrl+Shift+F3'
+    $handler = $handlers | Where-Object { $_.Key -in @('Shift+Ctrl+F3', 'Ctrl+Shift+F3') }
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Native Ctrl+Shift+F3 must also work at a PowerShell prompt'
     # Exercise the real new-tab launcher without a GUI or SSH connection.
     foreach ($file in @('windows-terminal.py', 'windows-terminal.ps1')) {
