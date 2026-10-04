@@ -5,7 +5,7 @@ min_version = "2026.7.5"
 powershell = "{{ env.DALFTUI_POWERSHELL | default(value='powershell') }}"
 # Windows cannot infer these Unix-only APIs in platform-guarded code and tests.
 # Match exact qualified names; Linux lint checks them without exemptions.
-windows_lint_members = 'socket[.]AF_UNIX\Z,os[.]fchmod\Z,os[.]getuid\Z,os[.]killpg\Z,os[.]openpty\Z,signal[.]SIGHUP\Z,signal[.]SIGKILL\Z,curses[.]use_default_colors\Z,curses[.]init_pair\Z,curses[.]set_escdelay\Z,curses[.]error\Z,curses[.]color_pair\Z'
+windows_lint_members = 'socket[.]AF_UNIX\Z,os[.]fchmod\Z,os[.]getuid\Z,os[.]killpg\Z,os[.]openpty\Z,signal[.]SIGHUP\Z,signal[.]SIGKILL\Z,curses[.]use_default_colors\Z,curses[.]init_pair\Z,curses[.]set_escdelay\Z,curses[.]error\Z,curses[.]color_pair\Z,ssh_picker[.]curses[.]error\Z'
 
 [tasks.check]
 description = "Run spelling, Pylint, then all tests for the current platform"
