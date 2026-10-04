@@ -22,6 +22,23 @@ import alacritty_config
 import dalftui_setup as setup
 
 
+class DependencyTests(unittest.TestCase):
+    def test_server_accepts_supported_tmux_versions(self):
+        for version in ('3.2', '3.2a', '3.3a', '3.4', '3.7c'):
+            with self.subTest(version=version):
+                result = subprocess.CompletedProcess(['tmux', '-V'], 0, f'tmux {version}\n', '')
+                with patch.object(setup.shutil, 'which', return_value='/test/bin'):
+                    with patch.object(setup.subprocess, 'run', return_value=result):
+                        setup.dependencies('tmux-only')
+
+    def test_server_rejects_older_tmux_and_reports_its_version(self):
+        result = subprocess.CompletedProcess(['tmux', '-V'], 0, 'tmux 3.1c\n', '')
+        with patch.object(setup.shutil, 'which', return_value='/test/bin'):
+            with patch.object(setup.subprocess, 'run', return_value=result):
+                with self.assertRaisesRegex(RuntimeError, r'tmux 3\.2.*Detected 3\.1'):
+                    setup.dependencies('tmux-only')
+
+
 class DisposableSetup(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='dalftui-install-')

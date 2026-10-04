@@ -7,9 +7,9 @@ light pill uses dark status circles, and inactive dark pills use light circles.
 
 ## Install once
 
-Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.4+, OpenSSH 9.4+, Git,
+Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
 and `less` for the desktop mode. The server mode below needs Python 3.11+,
-tmux 3.4+, Git, and `less`. The installer configures software that is already installed. It
+tmux 3.2+, Git, and `less`. The installer configures software that is already installed. It
 uses no package manager, downloads, root access, or Python packages.
 
 Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
@@ -50,7 +50,7 @@ cd ~/code/dalftui
 ./reload
 ```
 
-Server requirements are **Python 3.11+, tmux 3.4+, Git, and `less`**. Alacritty
+Server requirements are **Python 3.11+, tmux 3.2+, Git, and `less`**. Alacritty
 and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
 server installer manages the shared configuration link, tmux loader, shortcut
 guide link, and `~/.config/tmux/local.conf`. It preserves existing Alacritty files.
@@ -61,6 +61,11 @@ and reminders for shortcuts supplied by your local Alacritty. The guide reads
 live tmux bindings and does not try to read Alacritty settings on the server.
 **Ctrl+B, then F2** is disabled in server mode because its picker launches a
 local Alacritty window.
+
+On tmux 3.2, popup windows use a plain border and the terminal's default colors,
+and history searches share the normal command prompt history. tmux 3.3+ adds
+the styled popup border and separate search history. The rounded tab design and
+Claude status colors are the same on every supported version.
 
 Your local terminal renders the fonts and rounded glyphs. Use the desktop SSH
 picker to open a direct remote tmux session; the Alacritty shortcuts then reach

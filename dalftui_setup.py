@@ -133,14 +133,15 @@ def dependencies(profile='desktop'):
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing))
-    specifications = [('tmux', '-V', (3, 4))]
+    specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
         specifications += [('alacritty', '--version', (0, 14)), ('ssh', '-V', (9, 4))]
     for name, flag, minimum in specifications:
         result = subprocess.run([name, flag], capture_output=True, text=True, timeout=10)
         match = re.search(r'(\d+)\.(\d+)', result.stdout + result.stderr)
         if result.returncode or not match or tuple(map(int, match.groups())) < minimum:
-            raise RuntimeError(f'{name} {minimum[0]}.{minimum[1]} or newer is required.')
+            detected = f' Detected {match.group(0)}.' if match else ''
+            raise RuntimeError(f'{name} {minimum[0]}.{minimum[1]} or newer is required.{detected}')
 
 
 def install(paths=None, repo=None, *, dry_run=False, profile=None):
