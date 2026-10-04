@@ -55,7 +55,7 @@ run = "./install"
 [tasks."install:windows"]
 description = "Set up Windows PowerShell, fzf, and Terminal integration"
 raw_args = true
-run = "{{ vars.powershell }} -NoProfile -File ./setup-windows.ps1"
+run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./setup-windows.ps1"
 
 [tasks."reload:linux"]
 description = "Reload Linux configuration (accepts --socket PATH)"

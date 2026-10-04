@@ -24,6 +24,8 @@ cd ~/code/dalftui
 Optional [mise tasks](#repository-tasks) provide named shortcuts for installation,
 reloads, spelling, and tests.
 
+On Windows, use `.\install.cmd`; see [Connect from Windows](#connect-from-windows).
+
 Existing configuration files and symlinks are backed up before replacement.
 The installer creates these connections:
 
@@ -326,13 +328,18 @@ command should be on an absolute PATH entry during setup. The host picker also
 needs fzf and OpenSSH 9.4+ for `Tag dalftui`. No local tmux, Alacritty, or
 curses package is needed.
 
-Clone the repository once on Windows, then run setup in PowerShell:
+Clone the repository once on Windows, then install from PowerShell:
 
 ```powershell
 git clone https://github.com/dalf/dalftui.git "$HOME\code\dalftui"
 cd "$HOME\code\dalftui"
-.\setup-windows.ps1
+.\install.cmd
 ```
+
+`install.cmd` runs the existing `setup-windows.ps1` entrypoint in Windows
+PowerShell 5.1 with `-NoProfile -ExecutionPolicy Bypass`. The bypass applies only
+to the installer process. The wrapper forwards options and returns the
+installer's exit status; it also works from Command Prompt.
 
 Setup records the absolute `Code.exe` path in
 `%LOCALAPPDATA%\dalftui\config.json`. Folder launches use only that configured
@@ -342,8 +349,8 @@ fully qualified drive or UNC paths; empty and relative PATH entries, including
 portable installation explicitly, pass its directory or executable:
 
 ```powershell
-.\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
-# or: .\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable\Code.exe'
+.\install.cmd -VSCodePath 'C:\Tools\VS Code Portable'
+# or: .\install.cmd -VSCodePath 'C:\Tools\VS Code Portable\Code.exe'
 ```
 
 If that installation is moved or removed, folder opening fails without trying
@@ -354,8 +361,8 @@ Setup reuses fzf when it is already on PATH. Otherwise it installs fzf using
 WinGet if available, or Chocolatey. You can choose a package manager explicitly:
 
 ```powershell
-.\setup-windows.ps1 -PackageManager winget
-.\setup-windows.ps1 -PackageManager choco
+.\install.cmd -PackageManager winget
+.\install.cmd -PackageManager choco
 ```
 
 If neither package manager is available, setup prints the manual install
@@ -369,7 +376,9 @@ Setup adds a managed block to your current
 It backs up an existing profile before changing it, preserves your personal
 settings, and loads `windows.ps1` from this checkout. Repeated setup keeps one
 managed block; rerun it if you move the checkout or use another PowerShell host
-or version. Setup makes `dssh` available immediately and in new sessions.
+or version. After installation through `install.cmd`, open a new Windows
+PowerShell session to use `dssh`. To set up a PowerShell 7 profile, use the
+[mise install task](#repository-tasks) with `DALFTUI_POWERSHELL=pwsh`.
 
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.
@@ -400,15 +409,15 @@ If no settings are found, open Windows Terminal once and rerun setup. For a
 portable installation, pass its settings path explicitly:
 
 ```powershell
-.\setup-windows.ps1 -TerminalSettingsPath 'C:\Tools\Terminal\settings\settings.json'
+.\install.cmd -TerminalSettingsPath 'C:\Tools\Terminal\settings\settings.json'
 ```
 
 Use `-SkipTerminal` to configure only PowerShell and fzf. The tab launcher reads
 this checkout each time, so later Git updates apply to new tabs. Rerun setup
 after moving the checkout or replacing the PowerShell installation used by setup.
 
-If PowerShell reports that scripts are disabled, enable local scripts for your
-user, then rerun setup:
+If a new PowerShell session reports that scripts are disabled when loading
+your profile, enable local scripts for your user, then open a new session:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -607,6 +616,7 @@ needed. Representative layout:
 ├── bridge_protocol.py
 ├── mise.toml
 ├── install
+├── install.cmd
 ├── reload
 ├── shortcuts.py
 ├── ssh-picker.py
@@ -647,11 +657,12 @@ The root paths are deliberate public and compatibility entrypoints:
 | Path | Role |
 | --- | --- |
 | [install](install) | Linux installation CLI |
+| [install.cmd](install.cmd) | Windows installation launcher with a process-scoped execution-policy bypass |
 | [reload](reload) | Linux configuration reload CLI |
 | [shortcuts.py](shortcuts.py) | Shortcut-guide launcher and installed compatibility target |
 | [ssh-picker.py](ssh-picker.py) | Shared SSH launcher |
 | [vscode.py](vscode.py) | Shared editor launcher and remote discovery target |
-| [setup-windows.ps1](setup-windows.ps1) | Windows setup CLI |
+| [setup-windows.ps1](setup-windows.ps1) | Retained Windows PowerShell setup entrypoint |
 | [windows.ps1](windows.ps1) | Existing PowerShell profile-loader target |
 | [windows-terminal.ps1](windows-terminal.ps1) | Existing Terminal-tab launcher target |
 | [windows-terminal.py](windows-terminal.py) | Terminal settings CLI |
