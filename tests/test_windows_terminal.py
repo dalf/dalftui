@@ -1,7 +1,8 @@
 """Terminal settings tests, runnable on Linux and native Windows."""
-import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,9 +11,8 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('terminal_setup', ROOT / 'windows-terminal.py')
-terminal = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(terminal)
+sys.path.insert(0, str(ROOT))
+from dalftui.windows import terminal_settings as terminal
 
 
 class TerminalSetupTests(unittest.TestCase):
@@ -147,6 +147,40 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(command['commandline'], subprocess.list2cmdline([
             shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'windows-terminal.ps1')]))
         self.assertEqual(command['startingDirectory'], '%USERPROFILE%')
+
+    def test_copied_launcher_works_outside_checkout_without_pythonpath_and_is_idempotent(self):
+        checkout = self.root / "copied checkout's unicode \u00e9"
+        implementation = checkout / 'dalftui/windows'
+        implementation.mkdir(parents=True)
+        for relative in ('windows-terminal.py', 'windows-terminal.ps1', 'dalftui/__init__.py',
+                         'dalftui/windows/__init__.py',
+                         'dalftui/windows/terminal_settings.py'):
+            destination = checkout / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, destination)
+        unrelated = self.root / 'unrelated working directory'
+        unrelated.mkdir()
+        self.path.write_text('{"actions":[],"keybindings":[]}', encoding='utf-8')
+        shell = "C:\\PowerShell's unicode \u00e9\\pwsh.exe"
+        environment = os.environ.copy()
+        environment.pop('PYTHONPATH', None)
+        command = [sys.executable, str(checkout / 'windows-terminal.py'),
+                   '--shell', shell, '--settings', str(self.path)]
+
+        result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        installed = self.path.read_bytes()
+        backups = list(self.root.glob('settings.json.dalftui-*.bak'))
+        self.assertEqual(len(backups), 1)
+        action = self.settings(installed.decode())['actions'][0]['command']
+        self.assertEqual(action['commandline'], subprocess.list2cmdline([
+            shell, '-NoLogo', '-NoProfile', '-File', str(checkout / 'windows-terminal.ps1')]))
+
+        result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.path.read_bytes(), installed)
+        self.assertEqual(list(self.root.glob('settings.json.dalftui-*.bak')), backups)
+        self.assertFalse(list(checkout.rglob('__pycache__')))
 
     def test_upgrade_from_picker_only_adds_editor_without_rewriting_picker(self):
         both = self.settings(terminal.updated_settings('{"actions":[],"keybindings":[]}', 'launcher'))
