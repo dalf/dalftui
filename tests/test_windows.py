@@ -175,7 +175,7 @@ class WindowsTests(unittest.TestCase):
 
     def test_tcp_rejects_unauthenticated_requests_and_still_handles_valid_ones(self):
         opened = []
-        with patch.object(vscode, 'launch', side_effect=lambda *args: opened.append(args)):
+        with patch.object(vscode, 'launch', side_effect=lambda *args, **kwargs: opened.append(args)):
             with vscode.EditorBridge('vm-alias', transport='tcp') as bridge:
                 for token in (None, 'wrong', 123, 'é'):
                     with self.subTest(token=token):
@@ -210,8 +210,9 @@ class WindowsTests(unittest.TestCase):
                 with patch.object(vscode.subprocess, 'run', return_value=result) as run:
                     vscode.launch(local_folder, env=dict(env, VSCODE_DEV='1'))
                     with vscode.EditorBridge('alice@vm-alias', env, transport='tcp') as bridge:
-                        vscode.request(f'tcp:127.0.0.1:{bridge.local_port}',
-                                       remote_folder, bridge.token)
+                        with patch.object(bridge, 'run_editor', side_effect=run):
+                            vscode.request(f'tcp:127.0.0.1:{bridge.local_port}',
+                                           remote_folder, bridge.token)
         self.assertEqual(run.call_args_list[0].args[0],
                          [str(app), str(cli), '--new-window', '--folder-uri',
                           vscode.folder_uri(local_folder)])

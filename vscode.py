@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import secrets
 import shutil
@@ -11,11 +12,17 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import quote
 
 SOCKET_ENV = 'DALFTUI_EDITOR_SOCKET'
 TOKEN_ENV = 'DALFTUI_EDITOR_TOKEN'
 MAX_REQUEST = 16384
+REQUEST_TIMEOUT = 3
+RESPONSE_TIMEOUT = 3
+LAUNCH_TIMEOUT = 15
+CLIENT_TIMEOUT = 20
+MAX_CONNECTIONS = 8
 WINDOWS = sys.platform == 'win32'
 WINDOWS_CONFIG = Path('dalftui') / 'config.json'
 
@@ -76,22 +83,31 @@ def code_command(env):
     return [executable]
 
 
-def launch(folder, destination=None, env=None):
+def launch(folder, destination=None, env=None, *, runner=None):
     env = dict(os.environ if env is None else env)
     command = code_command(env)
     for name in ('TMUX', 'TMUX_PANE', 'VSCODE_IPC_HOOK_CLI'):
         env.pop(name, None)
-    result = subprocess.run([*command, '--new-window', '--folder-uri', folder_uri(folder, destination)],
-                            env=env, capture_output=True, text=True, encoding='utf-8',
-                            errors='replace', timeout=15)
+    run = subprocess.run if runner is None else runner
+    result = run([*command, '--new-window', '--folder-uri', folder_uri(folder, destination)],
+                 env=env, capture_output=True, text=True, encoding='utf-8',
+                 errors='replace', timeout=LAUNCH_TIMEOUT)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or 'Could not start VS Code.')
 
 
-def read_message(connection):
+def read_message(connection, *, deadline=None):
+    """Read one bounded JSON line, optionally before an absolute monotonic deadline."""
     data = bytearray()
     while len(data) <= MAX_REQUEST:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Editor request deadline expired.')
+            connection.settimeout(remaining)
         chunk = connection.recv(min(4096, MAX_REQUEST + 1 - len(data)))
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError('Editor request deadline expired.')
         if not chunk:
             break
         data.extend(chunk)
@@ -111,7 +127,12 @@ def send_message(connection, message):
 
 class EditorBridge:
     """One private bridge and fixed destination per SSH window."""
-    def __init__(self, destination, env=None, transport=None):
+    def __init__(self, destination, env=None, transport=None, *,
+                 request_timeout=REQUEST_TIMEOUT, max_connections=MAX_CONNECTIONS):
+        if request_timeout <= 0 or max_connections < 1:
+            raise ValueError('Editor bridge limits must be positive.')
+        self.request_timeout = request_timeout
+        self.max_connections = max_connections
         self.destination = destination
         self.env = dict(os.environ if env is None else env)
         self.transport = transport or ('tcp' if WINDOWS else 'unix')
@@ -147,15 +168,24 @@ class EditorBridge:
             else:
                 self.listener.bind(self.local_socket)
                 os.chmod(self.local_socket, 0o600)
-            self.listener.listen(4)
+            self.listener.listen(self.max_connections)
             self.listener.settimeout(0.2)
             self.stopped = threading.Event()
+            # Admission and process creation share the shutdown lock. There is no
+            # unbounded submission queue, and queued sockets count toward capacity.
+            self.lock = threading.Lock()
+            self.connections = set()
+            self.processes = set()
+            self.pending = queue.Queue(maxsize=self.max_connections)
+            self.workers = []
+            for _ in range(self.max_connections):
+                worker = threading.Thread(target=self.work, daemon=True)
+                worker.start()
+                self.workers.append(worker)
             self.thread = threading.Thread(target=self.serve, daemon=True)
             self.thread.start()
         except BaseException:
-            self.listener.close()
-            if self.directory:
-                self.directory.cleanup()
+            self.__exit__()
             raise
         return self
 
@@ -167,28 +197,108 @@ class EditorBridge:
                 continue
             except OSError:
                 return
-            with connection:
-                connection.settimeout(3)
+            deadline = time.monotonic() + self.request_timeout
+            with self.lock:
+                if self.stopped.is_set() or len(self.connections) >= self.max_connections:
+                    # At most one extra accepted socket exists while being rejected.
+                    connection.close()
+                    continue
+                self.connections.add(connection)
+                self.pending.put_nowait((connection, deadline))
+
+    def work(self):
+        while not self.stopped.is_set():
+            try:
+                connection, deadline = self.pending.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                self.handle(connection, deadline)
+            finally:
+                with self.lock:
+                    connection.close()
+                    self.connections.discard(connection)
+                self.pending.task_done()
+
+    def handle(self, connection, deadline):
+        try:
+            message = read_message(connection, deadline=deadline)
+            if self.token:
+                supplied = message.get('token')
+                if (not isinstance(supplied, str)
+                        or not secrets.compare_digest(supplied.encode(), self.token.encode())):
+                    raise ValueError('Invalid editor request authentication.')
+            if self.stopped.is_set():
+                return
+            launch(message.get('folder'), self.destination, self.env, runner=self.run_editor)
+            response = {'ok': True}
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            response = {'error': str(error)}
+        if not self.stopped.is_set():
+            try:
+                # The request's remaining time must not become the response budget.
+                connection.settimeout(RESPONSE_TIMEOUT)
+                send_message(connection, response)
+            except OSError:
+                pass
+
+    def run_editor(self, command, *, env, timeout, **kwargs):
+        """Start under the shutdown lock; wait outside it so accepts stay independent."""
+        # A file avoids pipe-reader threads or inherited pipes delaying shutdown.
+        with tempfile.TemporaryFile() as stderr:
+            with self.lock:
+                if self.stopped.is_set():
+                    raise RuntimeError('The editor bridge has stopped.')
+                process = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL,
+                                           stderr=stderr)
+                self.processes.add(process)
+            try:
+                returncode = process.wait(timeout=timeout)
+            finally:
                 try:
-                    message = read_message(connection)
-                    if self.token:
-                        supplied = message.get('token')
-                        if (not isinstance(supplied, str)
-                                or not secrets.compare_digest(supplied.encode(), self.token.encode())):
-                            raise ValueError('Invalid editor request authentication.')
-                    launch(message.get('folder'), self.destination, self.env)
-                    response = {'ok': True}
-                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-                    response = {'error': str(error)}
-                try:
-                    send_message(connection, response)
-                except OSError:
-                    pass
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=1)
+                finally:
+                    with self.lock:
+                        self.processes.discard(process)
+            stderr.seek(0)
+            return subprocess.CompletedProcess(command, returncode, '',
+                                               stderr.read().decode('utf-8', errors='replace'))
+
+    @staticmethod
+    def close_socket(connection):
+        # close() alone need not interrupt recv() in another thread on every OS.
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        connection.close()
 
     def __exit__(self, *args):
-        self.stopped.set()
-        self.listener.close()
-        self.thread.join(timeout=18)
+        if hasattr(self, 'lock'):
+            with self.lock:
+                self.stopped.set()
+                self.close_socket(self.listener)
+                for connection in self.connections:
+                    self.close_socket(connection)
+                for process in self.processes:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+            # The accept thread closes a socket accepted just before shutdown if
+            # it had not yet registered it. No admission or launch can follow stop.
+            if hasattr(self, 'thread') and self.thread.ident is not None:
+                self.thread.join()
+            for worker in self.workers:
+                worker.join()
+            while not self.pending.empty():
+                self.pending.get_nowait()
+                self.pending.task_done()
+            self.connections.clear()
+        else:
+            self.listener.close()
         if self.directory:
             self.directory.cleanup()
 
@@ -204,13 +314,13 @@ def request(socket_path, folder, token=None):
             raise RuntimeError('Missing editor bridge token. Reconnect using the dalftui SSH launcher.')
     try:
         with socket.socket(socket.AF_INET if tcp else socket.AF_UNIX) as connection:
-            connection.settimeout(20)
+            connection.settimeout(CLIENT_TIMEOUT)
             connection.connect(('127.0.0.1', int(match[1])) if tcp else socket_path)
             message = {'folder': folder}
             if tcp:
                 message['token'] = token
             send_message(connection, message)
-            response = read_message(connection)
+            response = read_message(connection, deadline=time.monotonic() + CLIENT_TIMEOUT)
     except OSError as error:
         forwarding = 'TCP forwarding' if tcp else 'Unix socket forwarding'
         raise RuntimeError('Cannot reach local VS Code. Reconnect using the dalftui SSH launcher. '

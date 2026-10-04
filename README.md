@@ -231,6 +231,16 @@ the bridge; reconnect with the picker, or run
 `python3 ~/code/dalftui/ssh-picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
 
+Each bridge retains at most eight queued or active requests, handled by eight
+workers; additional connections are closed immediately. A complete request must
+arrive within three seconds of acceptance, even if bytes keep arriving, and must
+fit in 16 KiB. Editor startup has a separate 15-second timeout, response writing
+has a three-second timeout, and the client waits up to 20 seconds for a response.
+Ending the SSH connection closes accepted sockets, cancels running editor CLI
+processes, and waits for the workers before removing the private socket directory.
+These bounds reduce slow-connection denial of service; they do not guarantee
+availability under sustained connection flooding.
+
 ### Connect from Windows
 
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python
@@ -435,7 +445,7 @@ OpenSSH's Tag directive is unavailable; it is not required by server mode.
 The Windows-compatible launcher tests run separately without tmux or curses:
 
 ```sh
-python -m unittest discover -s tests -p test_windows.py -v
+python -m unittest discover -s tests -p "test_windows*.py" -v
 ```
 
 Check the PowerShell setup and profile integration separately:
@@ -448,8 +458,10 @@ GitHub Actions runs native Windows tests with Python 3.11 and 3.14, in
 PowerShell 5.1 and 7. They cover package manager selection and failures,
 profile backups and repeated setup, safe VS Code discovery and portable-path
 configuration, the `dssh` command, real fzf filtering, SSH tag and login
-resolution, TCP authentication, and connection token handling. A harmless
-native executable probe verifies that a project-local `Code.exe` is not run;
+resolution, TCP authentication, and connection token handling. Isolated bridge
+tests also cover slow input deadlines, concurrent requests, capacity rejection
+and recovery, shutdown races, and interruption of readers and editor CLI waits.
+A harmless native executable probe verifies that a project-local `Code.exe` is not run;
 another verifies the configured `Code.exe` + `cli.js` argument list and encoded
 local and remote folder URIs. Linux runs the cross-platform suite and simulated
 Windows launch tests. GUI launches and interactive SSH connections remain
