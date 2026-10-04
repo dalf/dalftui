@@ -1,5 +1,6 @@
 """Windows-compatible connection tests; no curses, tmux, or desktop GUI required."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shutil
@@ -31,6 +32,23 @@ class WindowsTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(prefix='dalftui-windows-')
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name).resolve()
+        self.local_app_data = self.root / 'local application data'
+
+    def make_code_installation(self, name="VS Code with spaces \u00e9"):
+        installation = self.root / name
+        cli = installation / 'resources/app/out/cli.js'
+        cli.parent.mkdir(parents=True)
+        cli.touch()
+        application = installation / 'Code.exe'
+        application.touch()
+        return application, cli
+
+    def configured_editor_env(self, application):
+        config = self.local_app_data / vscode.WINDOWS_CONFIG
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({'code': str(application)}, ensure_ascii=False),
+                          encoding='utf-8')
+        return dict(os.environ, LOCALAPPDATA=str(self.local_app_data))
 
     def test_connect_cli_imports_without_curses(self):
         with patch.dict(sys.modules, {'curses': None}):
@@ -181,28 +199,126 @@ class WindowsTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     vscode.request(endpoint, '/project', 'token')
 
-    def test_windows_cli_avoids_batch_shell_and_preserves_encoded_folder_uri(self):
-        install = self.root / 'VS Code with spaces %percent%'
-        cli = install / 'resources/app/out/cli.js'
-        cli.parent.mkdir(parents=True)
-        cli.touch()
-        app = install / 'Code.exe'
-        app.touch()
-        batch = install / 'bin/code.cmd'
-        batch.parent.mkdir()
-        batch.write_text('@echo off\n')
-        folder = "/home/alice/project.with.dot 'quoted' %PATH% & #?é"
+    def test_configured_windows_cli_preserves_local_and_bridge_uri_arguments(self):
+        app, cli = self.make_code_installation('VS Code with spaces %percent% \u00e9')
+        env = self.configured_editor_env(app)
+        local_folder = str(self.root / "local project's %cash & #?\u00e9")
+        remote_folder = "/home/alice/project.with.dot 'quoted' %PATH% & #?é"
         result = subprocess.CompletedProcess(['Code.exe'], 0, '', '')
         with patch.object(vscode, 'WINDOWS', True):
-            with patch.object(vscode.shutil, 'which', return_value=str(batch)):
+            with patch.object(vscode.shutil, 'which', side_effect=AssertionError('unsafe discovery')):
                 with patch.object(vscode.subprocess, 'run', return_value=result) as run:
-                    vscode.launch(folder, 'alice@vm-alias', {'PATH': 'test', 'VSCODE_DEV': '1'})
-        self.assertEqual(run.call_args.args[0],
+                    vscode.launch(local_folder, env=dict(env, VSCODE_DEV='1'))
+                    with vscode.EditorBridge('alice@vm-alias', env, transport='tcp') as bridge:
+                        vscode.request(f'tcp:127.0.0.1:{bridge.local_port}',
+                                       remote_folder, bridge.token)
+        self.assertEqual(run.call_args_list[0].args[0],
                          [str(app), str(cli), '--new-window', '--folder-uri',
-                          vscode.folder_uri(folder, 'alice@vm-alias')])
+                          vscode.folder_uri(local_folder)])
+        self.assertEqual(run.call_args_list[1].args[0],
+                         [str(app), str(cli), '--new-window', '--folder-uri',
+                          vscode.folder_uri(remote_folder, 'alice@vm-alias')])
         self.assertFalse(run.call_args.kwargs.get('shell', False))
         self.assertEqual(run.call_args.kwargs['env']['ELECTRON_RUN_AS_NODE'], '1')
         self.assertNotIn('VSCODE_DEV', run.call_args.kwargs['env'])
+
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX executable is the simulated Windows probe')
+    def test_simulated_windows_never_executes_project_code_even_with_unsafe_path_entries(self):
+        project = self.root / 'untrusted project'
+        fake_cli = project / 'resources/app/out/cli.js'
+        fake_cli.parent.mkdir(parents=True)
+        fake_cli.touch()
+        attacker_log = self.root / 'attacker-ran'
+        fake_app = project / 'Code.exe'
+        fake_app.write_text(f'#!{sys.executable}\nfrom pathlib import Path\n'
+                            f'Path({str(attacker_log)!r}).touch()\n')
+        fake_app.chmod(0o755)
+
+        app, _ = self.make_code_installation('trusted VS Code \u00e9')
+        editor_log = self.root / 'configured-editor.json'
+        app.write_text(f'#!{sys.executable}\nimport json, os, pathlib, sys\n'
+                       'pathlib.Path(os.environ["EDITOR_TEST_LOG"]).write_text('
+                       'json.dumps(sys.argv[1:]))\n')
+        app.chmod(0o755)
+        env = self.configured_editor_env(app)
+        env.update(PATH=os.pathsep.join(('', '.', 'relative-bin', str(project))),
+                   EDITOR_TEST_LOG=str(editor_log))
+        previous = Path.cwd()
+        os.chdir(project)
+        try:
+            with patch.object(vscode, 'WINDOWS', True):
+                with patch.object(vscode.shutil, 'which',
+                                  side_effect=AssertionError('unsafe discovery')):
+                    vscode.launch(str(project), env=env)
+        finally:
+            os.chdir(previous)
+        self.assertFalse(attacker_log.exists())
+        self.assertEqual(json.loads(editor_log.read_text())[1:],
+                         ['--new-window', '--folder-uri', project.as_uri()])
+
+    def test_missing_or_invalid_windows_configuration_fails_before_execution(self):
+        app, _ = self.make_code_installation()
+        env = self.configured_editor_env(app)
+        app.unlink()
+        with patch.object(vscode, 'WINDOWS', True):
+            with patch.object(vscode.subprocess, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError,
+                                            'configured VS Code installation is missing.*setup-windows.ps1.*VSCodePath'):
+                    vscode.launch(str(self.root), env=env)
+            run.assert_not_called()
+            with self.assertRaisesRegex(RuntimeError, 'VS Code is not configured.*setup-windows.ps1'):
+                vscode.code_command({'LOCALAPPDATA': 'relative'})
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows executable search test')
+    def test_native_windows_cannot_execute_code_from_current_directory(self):
+        project = self.root / 'untrusted project'
+        cli = project / 'resources/app/out/cli.js'
+        cli.parent.mkdir(parents=True)
+        marker = self.root / 'attacker-ran'
+        cli.write_text('var shell = new ActiveXObject("WScript.Shell");\n'
+                       'var fso = new ActiveXObject("Scripting.FileSystemObject");\n'
+                       'fso.CreateTextFile(shell.ExpandEnvironmentStrings('
+                       '"%EDITOR_TEST_LOG%"), true).Close();\n')
+        shutil.copyfile(Path(os.environ['SystemRoot']) / 'System32/cscript.exe',
+                        project / 'Code.exe')
+        ordinary_path = os.environ.get('PATH', '')
+        previous = Path.cwd()
+        os.chdir(project)
+        try:
+            for path in (ordinary_path,
+                         os.pathsep.join(('', '.', 'relative-bin', ordinary_path))):
+                with self.subTest(path=path):
+                    marker.unlink(missing_ok=True)
+                    env = dict(os.environ, PATH=path, LOCALAPPDATA=str(self.local_app_data),
+                               EDITOR_TEST_LOG=str(marker))
+                    with self.assertRaisesRegex(RuntimeError, 'VS Code is not configured'):
+                        vscode.launch(str(project), env=env)
+                    self.assertFalse(marker.exists())
+        finally:
+            os.chdir(previous)
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows executable launch test')
+    def test_native_configured_portable_installation_preserves_uri_arguments(self):
+        app, cli = self.make_code_installation('portable VS Code spaces \u00e9')
+        shutil.copyfile(Path(os.environ['SystemRoot']) / 'System32/cscript.exe', app)
+        log = self.root / 'native editor arguments.txt'
+        cli.write_text('var shell = new ActiveXObject("WScript.Shell");\n'
+                       'var fso = new ActiveXObject("Scripting.FileSystemObject");\n'
+                       'var output = fso.CreateTextFile(shell.ExpandEnvironmentStrings('
+                       '"%EDITOR_TEST_LOG%"), true, true);\n'
+                       'for (var i = 0; i < WScript.Arguments.length; i++) '
+                       'output.WriteLine(WScript.Arguments.Item(i));\n'
+                       'output.Close();\n')
+        env = self.configured_editor_env(app)
+        env['EDITOR_TEST_LOG'] = str(log)
+        cases = [(str(self.root / "local project's é"), None),
+                 ("/home/alice/remote project's é", 'alice@vm-alias')]
+        for folder, destination in cases:
+            with self.subTest(destination=destination):
+                vscode.launch(folder, destination, env)
+                self.assertEqual(log.read_text(encoding='utf-16').splitlines(),
+                                 ['--new-window', '--folder-uri',
+                                  vscode.folder_uri(folder, destination)])
 
     def test_token_setup_sends_secret_on_stdin_and_not_in_process_arguments(self):
         result = subprocess.CompletedProcess(['ssh'], 0)

@@ -235,8 +235,9 @@ If VS Code cannot open, tmux displays the error in its status line.
 
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python
 3.11+, Windows OpenSSH, and Windows VS Code with **Remote - SSH**. The `code`
-command must be on PATH. The host picker also needs fzf and OpenSSH 9.4+ for
-`Tag dalftui`. No local tmux, Alacritty, or curses package is needed.
+command should be on an absolute PATH entry during setup. The host picker also
+needs fzf and OpenSSH 9.4+ for `Tag dalftui`. No local tmux, Alacritty, or
+curses package is needed.
 
 Clone the repository once on Windows, then run setup in PowerShell:
 
@@ -245,6 +246,21 @@ git clone https://github.com/dalf/dalftui.git "$HOME\code\dalftui"
 cd "$HOME\code\dalftui"
 .\setup-windows.ps1
 ```
+
+Setup records the absolute `Code.exe` path in
+`%LOCALAPPDATA%\dalftui\config.json`. Folder launches use only that configured
+installation; they never search the current project. Empty and relative PATH
+entries are ignored during initial discovery. To select an unpackaged or
+portable installation explicitly, pass its directory or executable:
+
+```powershell
+.\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
+# or: .\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable\Code.exe'
+```
+
+If that installation is moved or removed, folder opening fails without trying
+another executable and tells you to rerun setup. Use `-VSCodePath` again when
+moving a portable installation.
 
 Setup reuses fzf when it is already on PATH. Otherwise it installs fzf using
 WinGet if available, or Chocolatey. You can choose a package manager explicitly:
@@ -427,9 +443,13 @@ Check the PowerShell setup and profile integration separately:
 .\tests\test_windows_setup.ps1
 ```
 
-GitHub Actions runs the Windows tests with Python 3.11 and 3.14, in PowerShell
-5.1 and 7. They cover package manager selection and failures, profile backups
-and repeated setup, the `dssh` command, real fzf filtering, SSH tag and login
-resolution, TCP authentication, native VS Code CLI arguments, and connection
-token handling. CI also runs setup using Chocolatey with a disposable profile.
-GUI launches and interactive SSH connections are mocked in automated tests.
+GitHub Actions runs native Windows tests with Python 3.11 and 3.14, in
+PowerShell 5.1 and 7. They cover package manager selection and failures,
+profile backups and repeated setup, safe VS Code discovery and portable-path
+configuration, the `dssh` command, real fzf filtering, SSH tag and login
+resolution, TCP authentication, and connection token handling. A harmless
+native executable probe verifies that a project-local `Code.exe` is not run;
+another verifies the configured `Code.exe` + `cli.js` argument list and encoded
+local and remote folder URIs. Linux runs the cross-platform suite and simulated
+Windows launch tests. GUI launches and interactive SSH connections remain
+mocked; no automated test opens the VS Code GUI or an SSH connection.

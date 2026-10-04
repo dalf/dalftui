@@ -8,11 +8,14 @@ Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts.
 .\setup-windows.ps1 -PackageManager choco
 .EXAMPLE
 .\setup-windows.ps1 -SkipFzf
+.EXAMPLE
+.\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('auto', 'winget', 'choco')][string]$PackageManager = 'auto',
     [switch]$SkipFzf,
+    [string]$VSCodePath,
     [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost,
     [switch]$SkipTerminal,
     [string[]]$TerminalSettingsPath
@@ -21,6 +24,122 @@ param(
 function Find-DalftuiApplication([string]$Name) {
     Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
+}
+
+function Resolve-DalftuiVSCode([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
+        throw 'The VS Code installation path must be absolute.'
+    }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if ([IO.Directory]::Exists($fullPath)) {
+        $application = Join-Path $fullPath 'Code.exe'
+    } else {
+        $name = [IO.Path]::GetFileName($fullPath)
+        if ($name.Equals('Code.exe', [StringComparison]::OrdinalIgnoreCase)) {
+            $application = $fullPath
+        } elseif ($name.Equals('code.cmd', [StringComparison]::OrdinalIgnoreCase) -or
+                  $name.Equals('code.bat', [StringComparison]::OrdinalIgnoreCase)) {
+            $bin = [IO.Directory]::GetParent($fullPath)
+            if (-not $bin -or -not $bin.Parent) {
+                throw "Cannot determine the VS Code installation behind $fullPath."
+            }
+            $application = Join-Path $bin.Parent.FullName 'Code.exe'
+        } else {
+            throw "Select the VS Code installation directory, Code.exe, or its bin\code.cmd: $fullPath"
+        }
+    }
+    $application = [IO.Path]::GetFullPath($application)
+    $cli = Join-Path ([IO.Path]::GetDirectoryName($application)) 'resources\app\out\cli.js'
+    if (-not [IO.File]::Exists($application) -or -not [IO.File]::Exists($cli)) {
+        throw "The VS Code installation must contain Code.exe and resources\app\out\cli.js: $application"
+    }
+    return $application
+}
+
+function Find-DalftuiVSCode([string]$PathValue = $env:PATH) {
+    # Do not use Get-Command or Python's shutil.which here. On Windows those can
+    # search the process working directory even when it is absent from PATH.
+    $currentDirectory = $null
+    $location = Get-Location
+    if ($location.Provider.Name -eq 'FileSystem') {
+        $currentDirectory = [IO.Path]::GetFullPath($location.ProviderPath)
+    }
+    if ([string]::IsNullOrEmpty($PathValue)) { return $null }
+    foreach ($rawEntry in $PathValue.Split([IO.Path]::PathSeparator)) {
+        $entry = $rawEntry.Trim().Trim([char]34)
+        if ([string]::IsNullOrWhiteSpace($entry) -or -not [IO.Path]::IsPathRooted($entry)) {
+            continue
+        }
+        try { $directory = [IO.Path]::GetFullPath($entry) }
+        catch { continue }
+        $comparisonDirectory = [IO.Path]::GetFullPath((Join-Path $directory '.'))
+        if ($currentDirectory) {
+            $comparisonCurrent = [IO.Path]::GetFullPath((Join-Path $currentDirectory '.'))
+            if ($comparisonDirectory.Equals(
+                    $comparisonCurrent, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+        }
+        foreach ($name in @('code.cmd', 'code.bat', 'Code.exe')) {
+            $candidate = Join-Path $directory $name
+            if (-not [IO.File]::Exists($candidate)) { continue }
+            try { return Resolve-DalftuiVSCode $candidate }
+            catch { continue }
+        }
+    }
+    return $null
+}
+
+function Get-DalftuiVSCodeConfigPath {
+    $directory = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($directory) -or -not [IO.Path]::IsPathRooted($directory)) {
+        $directory = [Environment]::GetFolderPath(
+            [Environment+SpecialFolder]::LocalApplicationData)
+    }
+    if ([string]::IsNullOrWhiteSpace($directory) -or -not [IO.Path]::IsPathRooted($directory)) {
+        throw 'Cannot determine the local application-data directory for VS Code configuration.'
+    }
+    return Join-Path $directory 'dalftui\config.json'
+}
+
+function Read-DalftuiVSCodeConfig([string]$ConfigPath) {
+    if (-not [IO.File]::Exists($ConfigPath)) { return $null }
+    try {
+        $config = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($ConfigPath))
+        return Resolve-DalftuiVSCode ([string]$config.code)
+    } catch {
+        throw "The configured VS Code installation in $ConfigPath is invalid: $($_.Exception.Message)"
+    }
+}
+
+function Write-DalftuiVSCodeConfig([string]$ConfigPath, [string]$Application) {
+    $application = Resolve-DalftuiVSCode $Application
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($ConfigPath)) | Out-Null
+    $json = ConvertTo-Json -Compress -InputObject @{code = $application}
+    [IO.File]::WriteAllText($ConfigPath, $json + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+}
+
+function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigPath) {
+    if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+        $ConfigPath = Get-DalftuiVSCodeConfigPath
+    }
+    $application = $null
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $application = Resolve-DalftuiVSCode $RequestedPath
+    } else {
+        try { $application = Read-DalftuiVSCodeConfig $ConfigPath }
+        catch { Write-Warning $_.Exception.Message }
+        if (-not $application) { $application = Find-DalftuiVSCode }
+    }
+    if (-not $application) {
+        Write-Warning ("VS Code was not configured. Install VS Code with its code command on " +
+            "an absolute PATH entry, or rerun setup-windows.ps1 with -VSCodePath for a portable installation.")
+        return $null
+    }
+    Write-DalftuiVSCodeConfig -ConfigPath $ConfigPath -Application $application
+    Write-Host "VS Code configured: $application"
+    return $application
 }
 
 function Update-DalftuiProcessPath {
@@ -144,7 +263,7 @@ function Invoke-DalftuiWindowsSetup {
     [CmdletBinding()]
     param([string]$Preference = 'auto', [switch]$Skip, [string]$TargetProfile,
           [string]$Checkout = $PSScriptRoot, [switch]$NoTerminal,
-          [string[]]$SettingsPaths)
+          [string[]]$SettingsPaths, [string]$SelectedVSCodePath)
     $ErrorActionPreference = 'Stop'
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'This setup script targets Windows. On Linux, use ./install.'
@@ -163,15 +282,13 @@ function Invoke-DalftuiWindowsSetup {
         throw 'Install the Windows OpenSSH client first, then rerun setup.'
     }
     Update-DalftuiProcessPath
+    $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
     $pickerReady = Install-DalftuiFzf -Preference $Preference -Skip:$Skip
     Write-DalftuiProfile -Path $TargetProfile -Checkout $Checkout
     . (Join-Path $Checkout 'windows.ps1')
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
             -Checkout $Checkout -SettingsPaths $SettingsPaths
-    }
-    if (-not (Find-DalftuiApplication 'code')) {
-        Write-Warning 'For Ctrl+Shift+F3, install VS Code with its code command on PATH. Remote folders also need the Remote - SSH extension.'
     }
     Write-Host 'dssh HOST is ready.'
     if ($pickerReady) { Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).' }
@@ -182,7 +299,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     try {
         Invoke-DalftuiWindowsSetup -Preference $PackageManager -Skip:$SkipFzf `
             -TargetProfile $ProfilePath -Checkout $PSScriptRoot `
-            -NoTerminal:$SkipTerminal -SettingsPaths $TerminalSettingsPath
+            -NoTerminal:$SkipTerminal -SettingsPaths $TerminalSettingsPath `
+            -SelectedVSCodePath $VSCodePath
     } catch {
         Write-Error ("Setup failed: " + $_.Exception.Message) -ErrorAction Continue
         exit 1

@@ -23,6 +23,43 @@ try {
         Assert-True (-not $parseErrors) "$file must parse in this PowerShell version"
     }
 
+    # VS Code discovery must inspect only explicit absolute PATH directories.
+    # In particular, neither Windows' implicit current-directory lookup nor an
+    # empty/relative PATH component may select a project-controlled Code.exe.
+    $project = Join-Path $root 'untrusted project'
+    $fakeCli = Join-Path $project 'resources\app\out\cli.js'
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($fakeCli)) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $project 'Code.exe'), '')
+    [IO.File]::WriteAllText($fakeCli, '')
+    $ordinaryBin = Join-Path $root 'ordinary absolute bin'
+    [IO.Directory]::CreateDirectory($ordinaryBin) | Out-Null
+    $portable = Join-Path $root ("portable VS Code spaces " + [char]0xe9)
+    $portableBin = Join-Path $portable 'bin'
+    $portableCli = Join-Path $portable 'resources\app\out\cli.js'
+    [IO.Directory]::CreateDirectory($portableBin) | Out-Null
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($portableCli)) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $portable 'Code.exe'), '')
+    [IO.File]::WriteAllText((Join-Path $portableBin 'code.cmd'), '')
+    [IO.File]::WriteAllText($portableCli, '')
+    Push-Location -LiteralPath $project
+    try {
+        Assert-True ($null -eq (Find-DalftuiVSCode $ordinaryBin)) 'An ordinary absolute PATH must not search the current directory'
+        Assert-True ($null -eq (Find-DalftuiVSCode $project)) 'Even an absolute PATH entry equal to the current project must be excluded'
+        $unsafeEntries = @('', '.', 'relative-bin', $ordinaryBin, '') -join [IO.Path]::PathSeparator
+        Assert-True ($null -eq (Find-DalftuiVSCode $unsafeEntries)) 'Empty and relative PATH entries must not search the current directory'
+        $mixedEntries = @('', '.', 'relative-bin', $ordinaryBin, $portableBin) -join [IO.Path]::PathSeparator
+        $found = Find-DalftuiVSCode $mixedEntries
+        Assert-True ($found -eq (Join-Path $portable 'Code.exe')) 'Discovery must find a valid installation only in an absolute PATH directory'
+    } finally { Pop-Location }
+    Assert-Throws { Resolve-DalftuiVSCode '.\portable' } 'An explicit portable installation must use an absolute path'
+    Assert-True ((Resolve-DalftuiVSCode $portable) -eq (Join-Path $portable 'Code.exe')) 'An explicit portable installation with spaces and Unicode must work'
+    $editorConfig = Join-Path $root 'local app data\dalftui\config.json'
+    Write-DalftuiVSCodeConfig -ConfigPath $editorConfig -Application $portable
+    Assert-True ((Read-DalftuiVSCodeConfig $editorConfig) -eq (Join-Path $portable 'Code.exe')) 'Setup must persist and reuse the absolute Code.exe path'
+    Assert-True ((Set-DalftuiVSCodeConfiguration -ConfigPath $editorConfig) -eq (Join-Path $portable 'Code.exe')) 'Repeated setup must prefer the configured installation over discovery'
+    $configuredJson = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($editorConfig))
+    Assert-True ([IO.Path]::IsPathRooted([string]$configuredJson.code)) 'The persisted VS Code path must be absolute'
+
     $originalFind = (Get-Item Function:\Find-DalftuiApplication).ScriptBlock
     $originalInstall = (Get-Item Function:\Invoke-DalftuiPackageInstall).ScriptBlock
     $originalPath = (Get-Item Function:\Update-DalftuiProcessPath).ScriptBlock

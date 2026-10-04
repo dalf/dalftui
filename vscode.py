@@ -17,6 +17,37 @@ SOCKET_ENV = 'DALFTUI_EDITOR_SOCKET'
 TOKEN_ENV = 'DALFTUI_EDITOR_TOKEN'
 MAX_REQUEST = 16384
 WINDOWS = sys.platform == 'win32'
+WINDOWS_CONFIG = Path('dalftui') / 'config.json'
+
+
+def windows_code_command(env):
+    """Load the absolute VS Code application selected by Windows setup."""
+    recovery = ("Rerun dalftui's setup-windows.ps1. For a portable installation, "
+                "pass -VSCodePath with its directory or Code.exe path.")
+    local_app_data = env.get('LOCALAPPDATA')
+    if not local_app_data or not Path(local_app_data).is_absolute():
+        raise RuntimeError(f'VS Code is not configured. {recovery}')
+    config_path = Path(local_app_data) / WINDOWS_CONFIG
+    try:
+        config = json.loads(config_path.read_text(encoding='utf-8-sig'))
+    except FileNotFoundError:
+        raise RuntimeError(f'VS Code is not configured. {recovery}') from None
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f'Cannot read the VS Code configuration at {config_path}. '
+                           f'{recovery}') from error
+    application_value = config.get('code') if isinstance(config, dict) else None
+    if not isinstance(application_value, str) or '\0' in application_value:
+        raise RuntimeError(f'The VS Code configuration at {config_path} is invalid. {recovery}')
+    application = Path(application_value)
+    if not application.is_absolute() or application.name.lower() != 'code.exe':
+        raise RuntimeError(f'The VS Code configuration at {config_path} is invalid. {recovery}')
+    cli = application.parent / 'resources/app/out/cli.js'
+    if not application.is_file() or not cli.is_file():
+        raise RuntimeError(f'The configured VS Code installation is missing: {application}. '
+                           f'{recovery}')
+    env['ELECTRON_RUN_AS_NODE'] = '1'
+    env.pop('VSCODE_DEV', None)
+    return [str(application), str(cli)]
 
 
 def validate_folder(folder):
@@ -37,19 +68,11 @@ def folder_uri(folder, destination=None):
 
 def code_command(env):
     """Use the native CLI on Windows to preserve URIs without cmd.exe expansion."""
+    if WINDOWS:
+        return windows_code_command(env)
     executable = shutil.which('code', path=env.get('PATH', os.defpath))
     if not executable:
         raise RuntimeError('VS Code was not found. Install its code command on your computer.')
-    if WINDOWS:
-        path = Path(executable).resolve()
-        root = path.parent.parent if path.suffix.lower() in ('.cmd', '.bat') else path.parent
-        application = root / 'Code.exe'
-        cli = root / 'resources/app/out/cli.js'
-        if not application.is_file() or not cli.is_file():
-            raise RuntimeError('Cannot find the Windows VS Code installation behind the code command.')
-        env['ELECTRON_RUN_AS_NODE'] = '1'
-        env.pop('VSCODE_DEV', None)
-        return [str(application), str(cli)]
     return [executable]
 
 
