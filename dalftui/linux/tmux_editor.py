@@ -6,6 +6,21 @@ import subprocess
 from bridge_protocol import SOCKET_ENV, TOKEN_ENV
 
 
+PATH_OUTPUT_PREFIX = '$DALFTUI_PATH:'
+
+
+def decode_path_output(output):
+    # tmux 3.4 escapes dollar signs even in display-message -p/show-options -v.
+    # A literal prefix detects that behavior without altering real backslashes
+    # returned by older, newer, or patched tmux versions.
+    output = output.removesuffix('\n')
+    if output.startswith('\\' + PATH_OUTPUT_PREFIX):
+        return output.removeprefix('\\' + PATH_OUTPUT_PREFIX).replace('\\$', '$')
+    if output.startswith(PATH_OUTPUT_PREFIX):
+        return output.removeprefix(PATH_OUTPUT_PREFIX)
+    raise RuntimeError('Could not read the tmux path.')
+
+
 def client_environment(pid):
     # A persistent tmux server/session can retain another client's old SSH socket.
     # Read the triggering attach client's initial environment instead.
@@ -16,9 +31,10 @@ def client_environment(pid):
 def open_pane(pane, client):
     from .. import vscode
 
-    result = subprocess.run(['tmux', 'display-message', '-p', '-t', pane, '#{pane_current_path}'],
+    result = subprocess.run(['tmux', 'display-message', '-p', '-t', pane,
+                             PATH_OUTPUT_PREFIX + '#{pane_current_path}'],
                             capture_output=True, text=True, check=True, timeout=5)
-    folder = result.stdout.removesuffix('\n')
+    folder = decode_path_output(result.stdout)
     env = client_environment(client)
     if env.get(SOCKET_ENV):
         vscode.request(env[SOCKET_ENV], folder, env.get(TOKEN_ENV))

@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 import dalftui.linux.alacritty_config as alacritty_config
 import dalftui.linux.setup as setup
 import dalftui.linux.shortcuts as shortcuts
+from dalftui.linux import tmux_editor
 
 
 class DependencyTests(unittest.TestCase):
@@ -308,7 +309,9 @@ class TmuxTests(TmuxFixture):
                            if shlex.split(line)[3] == key)
             self.assertIn(filename, binding)
             self.assertIn('@dalftui_root', binding)
-        self.assertEqual(Path(self.tmux('show-options', '-gv', '@dalftui_root')).resolve(), self.repo)
+        root_output = self.tmux('display-message', '-p',
+                                tmux_editor.PATH_OUTPUT_PREFIX + '#{@dalftui_root}')
+        self.assertEqual(Path(tmux_editor.decode_path_output(root_output)).resolve(), self.repo)
 
     def test_runtime_update_and_local_override_require_no_install(self):
         self.start()

@@ -33,7 +33,7 @@ class PaneDispatchTests(unittest.TestCase):
 
     def test_local_pane_dispatch_uses_shared_launch_and_client_environment(self):
         env = {'PATH': 'client-path', 'EDITOR_TEST_LOG': 'client-log'}
-        cwd = subprocess.CompletedProcess([], 0, '/project with # and é\n', '')
+        cwd = subprocess.CompletedProcess([], 0, '$DALFTUI_PATH:/project with # and é\n', '')
         with (self.arguments(),
               patch.object(tmux_editor, 'client_environment', return_value=env) as read_env,
               patch.object(tmux_editor.subprocess, 'run', return_value=cwd) as query,
@@ -41,11 +41,23 @@ class PaneDispatchTests(unittest.TestCase):
               patch.object(vscode, 'request') as request):
             self.assertEqual(vscode.main(), 0)
         query.assert_called_once_with(
-            ['tmux', 'display-message', '-p', '-t', '%7', '#{pane_current_path}'],
+            ['tmux', 'display-message', '-p', '-t', '%7', '$DALFTUI_PATH:#{pane_current_path}'],
             capture_output=True, text=True, check=True, timeout=5)
         read_env.assert_called_once_with(123)
         launch.assert_called_once_with('/project with # and é', env=env)
         request.assert_not_called()
+
+    def test_pane_paths_preserve_dollars_and_backslashes_with_both_tmux_outputs(self):
+        folder = "/project 'quoted' $cash \\$literal #?é"
+        for output in ("$DALFTUI_PATH:/project 'quoted' $cash \\$literal #?é\n",
+                       "\\$DALFTUI_PATH:/project 'quoted' \\$cash \\\\$literal #?é\n"):
+            with self.subTest(output=output):
+                with (patch.object(tmux_editor, 'client_environment', return_value={}),
+                      patch.object(tmux_editor.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess([], 0, output, '')),
+                      patch.object(vscode, 'launch') as launch):
+                    tmux_editor.open_pane('%7', 123)
+                launch.assert_called_once_with(folder, env={})
 
     def test_remote_pane_dispatch_uses_shared_authenticated_request(self):
         with patch.object(vscode, 'launch') as launch:
@@ -56,7 +68,7 @@ class PaneDispatchTests(unittest.TestCase):
                 with (self.arguments(),
                       patch.object(tmux_editor, 'client_environment', return_value=env) as read_env,
                       patch.object(tmux_editor.subprocess, 'run',
-                                   return_value=subprocess.CompletedProcess([], 0, '/project\n', '')),
+                                   return_value=subprocess.CompletedProcess([], 0, '$DALFTUI_PATH:/project\n', '')),
                       patch.object(vscode, 'request', wraps=vscode.request) as request):
                     self.assertEqual(vscode.main(), 0)
                 read_env.assert_called_once_with(123)
@@ -71,7 +83,7 @@ class PaneDispatchTests(unittest.TestCase):
                 with (self.arguments(), redirect_stderr(output),
                       patch.object(tmux_editor, 'client_environment', return_value=env),
                       patch.object(tmux_editor.subprocess, 'run',
-                                   return_value=subprocess.CompletedProcess([], 0, '/project\n', '')) as run,
+                                   return_value=subprocess.CompletedProcess([], 0, '$DALFTUI_PATH:/project\n', '')) as run,
                       patch.object(vscode.socket, 'socket') as socket_factory,
                       patch.object(vscode, 'launch') as launch):
                     self.assertEqual(vscode.main(), 1)
@@ -112,7 +124,7 @@ class PaneDispatchTests(unittest.TestCase):
                       patch.object(tmux_editor, 'client_environment',
                                    side_effect=OSError('client #123 exited')),
                       patch.object(tmux_editor.subprocess, 'run', side_effect=[
-                          subprocess.CompletedProcess([], 0, '/project\n', ''),
+                          subprocess.CompletedProcess([], 0, '$DALFTUI_PATH:/project\n', ''),
                           subprocess.TimeoutExpired('tmux', 5)]) as run):
                     self.assertEqual(vscode.main(), 1)
                 expected = ['tmux', 'display-message', '-d', '8000']
@@ -256,7 +268,7 @@ class EditorTests(DisposableSetup):
                                      vscode.folder_uri('/project', bridge.destination))
 
     def test_old_unix_attachments_fail_closed_with_reconnect_instructions(self):
-        cwd = subprocess.CompletedProcess(['tmux'], 0, '/project\n', '')
+        cwd = subprocess.CompletedProcess(['tmux'], 0, '$DALFTUI_PATH:/project\n', '')
         with vscode.EditorBridge('server', self.editor_env) as bridge:
             env = {vscode.SOCKET_ENV: bridge.local_socket, 'SSH_CONNECTION': 'remote'}
             with patch.object(tmux_editor, 'client_environment', return_value=env):
@@ -322,7 +334,7 @@ class EditorTests(DisposableSetup):
                 self.assertFalse(Path(bridge.remote_directory).exists())
 
     def test_plain_remote_ssh_does_not_try_to_launch_a_remote_gui(self):
-        cwd = subprocess.CompletedProcess(['tmux'], 0, '/home/alice/project\n', '')
+        cwd = subprocess.CompletedProcess(['tmux'], 0, '$DALFTUI_PATH:/home/alice/project\n', '')
         with patch.object(tmux_editor, 'client_environment', return_value={'SSH_CONNECTION': 'remote'}):
             with patch.object(tmux_editor.subprocess, 'run', return_value=cwd):
                 with patch.object(vscode, 'launch') as launch:

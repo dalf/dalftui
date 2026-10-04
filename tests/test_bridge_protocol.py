@@ -256,6 +256,13 @@ class FrozenPeerTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
     def test_root_editor_entrypoint_routes_client_credentials_to_old_laptop(self):
+        self.check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=False)
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
+    def test_tmux_34_path_output_reaches_old_laptop_without_extra_escapes(self):
+        self.check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=True)
+
+    def check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(self, *, escaped):
         with tempfile.TemporaryDirectory(prefix='dalftui-historical-entrypoint-') as directory:
             root = Path(directory).resolve()
             checkout = root / "checkout's $cash ; é"
@@ -273,7 +280,7 @@ class FrozenPeerTests(unittest.TestCase):
             tmux.write_text("#!/bin/sh\n"
                             "[ \"$#\" -eq 5 ] && [ \"$1\" = display-message ] &&\n"
                             "[ \"$2\" = -p ] && [ \"$3\" = -t ] && [ \"$4\" = %7 ] &&\n"
-                            "[ \"$5\" = '#{pane_current_path}' ] || exit 99\n"
+                            "[ \"$5\" = '$DALFTUI_PATH:#{pane_current_path}' ] || exit 99\n"
                             "printf '%s\\n' \"$TEST_PANE_FOLDER\"\n")
             tmux.chmod(0o755)
             endpoint, worker, outcome = self.old_laptop()
@@ -286,7 +293,10 @@ class FrozenPeerTests(unittest.TestCase):
                                        'import sys; sys.stdin.buffer.read()'],
                                       stdin=subprocess.PIPE, env=client_env)
             try:
-                command_env = dict(client_env, PATH=str(binary), TEST_PANE_FOLDER=legacy.FOLDER,
+                path_output = '$DALFTUI_PATH:' + legacy.FOLDER
+                if escaped:
+                    path_output = path_output.replace('$', '\\$')
+                command_env = dict(client_env, PATH=str(binary), TEST_PANE_FOLDER=path_output,
                                    DALFTUI_EDITOR_SOCKET='tcp:127.0.0.1:0',
                                    DALFTUI_EDITOR_TOKEN='wrong-client-token')
                 result = subprocess.run(
