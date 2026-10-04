@@ -769,7 +769,9 @@ Check the PowerShell setup and profile integration separately:
 .\tests\test_windows_setup.ps1
 ```
 
-GitHub Actions runs native Windows tests with Python 3.11 and 3.14, in
+GitHub Actions runs the full Linux suite on Ubuntu with Python 3.11 and 3.14,
+installing tmux, OpenSSH, fzf, Git, and less for the integration tests.
+It also runs native Windows tests with Python 3.11 and 3.14, in
 PowerShell 5.1 and 7. They cover package manager selection and failures,
 profile backups and repeated setup, safe VS Code discovery and portable-path
 configuration, the `dssh` command, real fzf filtering, SSH tag and login
