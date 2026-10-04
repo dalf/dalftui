@@ -98,6 +98,30 @@ class InstallationTests(DisposableSetup):
         self.assertTrue(any(item['key'] == 'T' and item['mods'] == 'Control|Shift' for item in bindings))
         self.assertEqual(self.paths.root.resolve(), self.repo)
 
+    def test_alacritty_starts_the_shared_tmux_session_policy(self):
+        self.install()
+        shell = alacritty_config.load(self.paths.alacritty)['terminal']['shell']
+        self.assertEqual(shell['program'], 'sh')
+        self.assertEqual(shell['args'][0], '-c')
+        self.assertIn('/dalftui/tmux-start.sh', shell['args'][1])
+        binary_dir = self.directory / 'bin'
+        binary_dir.mkdir()
+        command_log = self.directory / 'tmux-command'
+        tmux = binary_dir / 'tmux'
+        tmux.write_text('#!/bin/sh\n'
+                        'if [ "$1" = list-sessions ]; then exit 1; fi\n'
+                        'printf "%s\\n" "$@" > "$TEST_COMMAND_LOG"\n')
+        tmux.chmod(0o755)
+        env = dict(os.environ, HOME=str(self.paths.home_dir),
+                   XDG_CONFIG_HOME=str(self.paths.config_dir),
+                   PATH=str(binary_dir) + os.pathsep + os.defpath,
+                   TEST_COMMAND_LOG=str(command_log))
+        result = subprocess.run([shell['program'], *shell['args']], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(command_log.read_text().splitlines(),
+                         ['new-session', '-A', '-s', '0'])
+
     def test_dry_run_does_not_create_files_or_backups(self):
         self.paths.tmux.write_text('set -g mouse off\n')
         self.install(dry_run=True)

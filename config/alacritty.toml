@@ -31,10 +31,10 @@ magenta = "#e0b3ff"
 cyan = "#b3f4ff"
 white = "#ffffff"
 
-# Create tmux session 0 or attach to it, including when launched from tmux.
+# Attach an unoccupied tmux session or create an independent one.
 [terminal.shell]
-program = "env"
-args = ["-u", "TMUX", "tmux", "new-session", "-A", "-s", "0"]
+program = "sh"
+args = ["-c", 'case ${XDG_CONFIG_HOME-} in /*) config_home=$XDG_CONFIG_HOME ;; *) config_home=$HOME/.config ;; esac; exec sh "$config_home/dalftui/tmux-start.sh"']
 
 # Copy mouse and keyboard selections to the system clipboard automatically.
 [selection]

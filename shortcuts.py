@@ -85,7 +85,7 @@ def render(tmux_only=False):
             ("Ctrl+Shift+F1", "Open this guide"),
             ("Win+Shift+H", "Alternative in Alacritty"),
             ("Ctrl+B → ?", "Open tmux's native key reference"),
-            ("Ctrl+B → d", "Detach; reopen Alacritty to reattach to session 0"),
+            ("Ctrl+B → d", "Detach and leave the tmux session running"),
         ],
         "Editor": [
             ("Ctrl+Shift+F3", "Open the current pane's folder in a new VS Code window"),

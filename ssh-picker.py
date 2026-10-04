@@ -21,28 +21,12 @@ from vscode import EditorBridge, SOCKET_ENV, TOKEN_ENV
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
 
-# Execute with sh so this also works when the remote login shell is fish.
+# Use the same policy for local and remote terminals. Execute with sh so the
+# remote launcher also works when the login shell is fish.
+TMUX_START_SCRIPT = Path(__file__).with_name('tmux-start.sh').read_text()
 REMOTE_SCRIPT = """unset TMUX TMUX_PANE DALFTUI_EDITOR_SOCKET DALFTUI_EDITOR_TOKEN
 {editor_setup}
-if ! command -v tmux >/dev/null 2>&1; then
-    printf '%s\\n' 'tmux is not installed on this host.' >&2
-    exit 127
-fi
-sessions=$(tmux list-sessions -F '#{session_id}' 2>/dev/null)
-run_tmux() {
-if [ -z "$sessions" ]; then
-    tmux new-session -A -s 0
-    return $?
-fi
-set -- $sessions
-if [ "$#" -eq 1 ]; then
-    tmux attach-session -t "$1"
-    return $?
-fi
-tmux attach-session \\; choose-tree -sZ
-}
-run_tmux
-"""
+""" + TMUX_START_SCRIPT
 
 
 def valid_host(value):

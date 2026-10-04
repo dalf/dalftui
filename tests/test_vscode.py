@@ -153,12 +153,15 @@ class EditorTests(DisposableSetup):
         tmux = self.bin / 'tmux'
         tmux.write_text('#!/bin/sh\n'
                         'if [ "$1" = list-sessions ]; then printf "%s" "$TEST_SESSIONS"; exit; fi\n'
+                        'if [ "$1" = has-session ]; then exit 0; fi\n'
                         'printf "%s\\n" "$DALFTUI_EDITOR_SOCKET" > "$TEST_SOCKET_ENV"\n'
                         'printf "%s\\n" "$@" > "$TEST_TMUX_ARGS"\n')
         tmux.chmod(0o755)
-        for sessions, expected in [('', ['new-session', '-A', '-s', '0']),
-                                   ('$5', ['attach-session', '-t', '$5']),
-                                   ('$5\n$9', ['attach-session', ';', 'choose-tree', '-sZ'])]:
+        for sessions, selection, expected in [('', '', ['new-session', '-A', '-s', '0']),
+                                              ('$5 0\n', '', ['attach-session', '-t', '$5']),
+                                              ('$5 1\n', '', ['new-session']),
+                                              ('$5 0\n$9 1\n', '$9\n',
+                                               ['attach-session', '-t', '$9'])]:
             with self.subTest(sessions=sessions):
                 bridge = vscode.EditorBridge('server', self.editor_env)
                 bridge.local_socket = '/tmp/local.sock'
@@ -178,7 +181,8 @@ class EditorTests(DisposableSetup):
                 env = dict(self.editor_env, TEST_SESSIONS=sessions,
                            TEST_SOCKET_ENV=str(self.directory / 'socket-env'),
                            TEST_TMUX_ARGS=str(self.directory / 'tmux-args'))
-                subprocess.run(command, env=env, check=True, timeout=5)
+                subprocess.run(command, env=env, input=selection, text=True, check=True,
+                               capture_output=True, timeout=5)
                 self.assertEqual((self.directory / 'tmux-args').read_text().splitlines(), expected)
                 self.assertEqual((self.directory / 'socket-env').read_text().strip(), str(socket_file))
                 self.assertFalse(socket_file.exists())
