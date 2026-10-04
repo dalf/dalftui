@@ -33,6 +33,7 @@ class SharedLauncherTests(unittest.TestCase):
         for relative in ('ssh-picker.py', 'vscode.py', 'bridge_protocol.py', 'tmux-start.sh',
                          'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py',
                          'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
+                         'dalftui/linux/remote_bootstrap.py', 'dalftui/linux/tmux-start.sh',
                          'dalftui/linux/tmux_editor.py', 'dalftui/windows/__init__.py',
                          'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py'):
             destination = self.checkout / relative
@@ -147,6 +148,49 @@ with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
                           str(self.checkout.resolve() / 'ssh-picker.py'), '--connect', host])
         self.assertTrue(observation['detached'])
         self.assertEqual(observation['tmux'], [])
+
+    def test_windows_generates_remote_programs_without_local_linux_integrations_or_execution(self):
+        program = '''import importlib.abc, shlex, shutil, socket, subprocess, sys
+from types import SimpleNamespace
+from unittest.mock import patch
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+blocked = {'curses', 'dalftui.linux.ssh_picker', 'dalftui.linux.tmux_editor',
+           'dalftui.linux.setup'}
+class BlockPlatformImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise AssertionError('Unexpected platform import: ' + fullname)
+sys.meta_path.insert(0, BlockPlatformImports())
+with patch.object(sys, 'platform', 'win32'), \
+     patch.object(subprocess, 'Popen', side_effect=AssertionError('Local program execution')), \
+     patch.object(socket, 'socket', side_effect=AssertionError('Local socket creation')):
+    from dalftui.linux import remote_bootstrap
+    from dalftui import ssh
+    for transport in ('unix', 'tcp'):
+        bridge = SimpleNamespace(transport=transport,
+                                 remote_directory="/tmp/credentials' $cash ; é",
+                                 remote_owner_file="/tmp/credentials' $cash ; é/claim.owner",
+                                 remote_token_file="/tmp/credentials' $cash ; é/token",
+                                 remote_socket=('/tmp/editor.sock' if transport == 'unix'
+                                                else 'tcp:127.0.0.1:49152'),
+                                 forward_spec='forward-probe')
+        assert remote_bootstrap.prepare_credentials_script(bridge, check_installation=True)
+        assert remote_bootstrap.cleanup_script(bridge)
+        command = ssh.ssh_command('vm-alias', 'alice', bridge)
+        assert shlex.split(command[-1]) == ['sh', '-c', remote_bootstrap.session_script(bridge)]
+        assert '-S' not in command
+    assert remote_bootstrap.session_script()
+assert not blocked.intersection(sys.modules)
+'''
+        # Remove the local shell forwarder to make the generator's independence
+        # from that entrypoint explicit, even in a copied Windows checkout.
+        (self.checkout / 'tmux-start.sh').unlink()
+        result = subprocess.run([sys.executable, '-I', '-c', program, str(self.checkout)],
+                                cwd=self.outside, env=dict(self.env, PATH=''),
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, '')
 
 
 class WindowsTests(unittest.TestCase):

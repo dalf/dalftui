@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -18,12 +19,114 @@ sys.path.insert(0, str(ROOT))
 
 import bridge_protocol as protocol
 from dalftui import vscode
+from dalftui.linux import remote_bootstrap
 from dalftui.windows import vscode as windows_vscode
 
 spec = importlib.util.spec_from_file_location(
     'frozen_bridge_protocol_v1', Path(__file__).parent / 'fixtures/bridge_protocol_v1.py')
 legacy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(legacy)
+
+bootstrap_spec = importlib.util.spec_from_file_location(
+    'frozen_ssh_bootstrap_v1', Path(__file__).parent / 'fixtures/ssh_bootstrap_v1.py')
+historical_bootstrap = importlib.util.module_from_spec(bootstrap_spec)
+bootstrap_spec.loader.exec_module(historical_bootstrap)
+
+
+@unittest.skipIf(sys.platform == 'win32', 'Remote bootstrap executes in a POSIX shell')
+class BootstrapCompatibilityTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix='dalftui-bootstrap-compatibility-')
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+        self.home = self.directory / "remote home's $cash ; é"
+        self.home.mkdir()
+        self.bin = self.directory / 'bin'
+        self.bin.mkdir()
+        for command in ('sh', 'stat', 'id', 'mkdir', 'cat', 'rm', 'rmdir'):
+            (self.bin / command).symlink_to(shutil.which(command))
+        (self.bin / 'python3').symlink_to(sys.executable)
+        tmux = self.bin / 'tmux'
+        tmux.write_text('#!/bin/sh\nexit 0\n')
+        tmux.chmod(0o755)
+        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME='', PATH=str(self.bin))
+
+    def run_script(self, script, *, token=None):
+        return subprocess.run([str(self.bin / 'sh'), '-c', script],
+                              input=token, env=self.env, cwd=self.directory,
+                              capture_output=True, text=True, timeout=5)
+
+    def bridge(self, transport):
+        directory = self.directory / (transport + " credentials' $cash ; é")
+        # No bridge object or current protocol helpers construct this peer.
+        return SimpleNamespace(transport=transport, remote_directory=str(directory),
+                               remote_owner_file=str(directory / 'claim.owner'),
+                               remote_token_file=str(directory / 'token'),
+                               remote_socket=(str(directory / 'editor.sock') if transport == 'unix'
+                                              else 'tcp:127.0.0.1:49152'))
+
+    def install_historical(self):
+        checkout = self.directory / 'historical root checkout'
+        (checkout / 'config').mkdir(parents=True)
+        # The frozen historical editor occupies the old public root path. The
+        # probe requires readable integration files and a standalone declaration.
+        shutil.copy2(Path(__file__).parent / 'fixtures/bridge_protocol_v1.py',
+                     checkout / 'vscode.py')
+        (checkout / 'config/tmux.conf').write_text('# Historical editor integration\n')
+        (checkout / 'bridge_protocol.py').write_text(historical_bootstrap.PROTOCOL_DECLARATION)
+        installed = self.home / '.config/dalftui'
+        installed.parent.mkdir()
+        installed.symlink_to(checkout, target_is_directory=True)
+        return checkout
+
+    def test_frozen_old_desktop_probe_recognizes_current_remote_installation(self):
+        for config_home in ('', 'relative-config', str(self.directory / "custom config's $cash ; é")):
+            with self.subTest(config_home=config_home):
+                self.env['XDG_CONFIG_HOME'] = config_home
+                config = Path(config_home) if config_home.startswith('/') else self.home / '.config'
+                installed = config / 'dalftui'
+                installed.parent.mkdir(parents=True, exist_ok=True)
+                if not installed.is_symlink():
+                    installed.symlink_to(ROOT, target_is_directory=True)
+                result = self.run_script(historical_bootstrap.REMOTE_EDITOR_CHECK)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout + result.stderr, '')
+
+    def test_current_desktop_probe_and_setup_recognize_supported_historical_root_installation(self):
+        self.install_historical()
+        for transport in ('unix', 'tcp'):
+            with self.subTest(transport=transport):
+                bridge = self.bridge(transport)
+                result = self.run_script(remote_bootstrap.prepare_credentials_script(
+                    bridge, check_installation=True), token=legacy.TOKEN + '\n')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout + result.stderr, '')
+                self.assertEqual(Path(bridge.remote_token_file).read_text(), legacy.TOKEN + '\n')
+                self.assertTrue(Path(bridge.remote_owner_file).is_file())
+                cleanup = self.run_script(remote_bootstrap.cleanup_script(bridge))
+                self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+                self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_current_desktop_refuses_credentials_without_a_supported_readable_declaration(self):
+        checkout = self.install_historical()
+        declaration = checkout / 'bridge_protocol.py'
+        cases = (('undeclared', None), ('unreadable', None),
+                 ('unsupported', 'print(999)\n'), ('malformed', 'print("unknown")\n'),
+                 ('failed', 'raise SystemExit(1)\n'))
+        for name, content in cases:
+            declaration.unlink(missing_ok=True)
+            if name == 'unreadable':
+                declaration.symlink_to(checkout / 'missing-declaration.py')
+            elif content is not None:
+                declaration.write_text(content)
+            for transport in ('unix', 'tcp'):
+                with self.subTest(declaration=name, transport=transport):
+                    bridge = self.bridge(transport)
+                    result = self.run_script(remote_bootstrap.prepare_credentials_script(
+                        bridge, check_installation=True), token=legacy.TOKEN + '\n')
+                    self.assertEqual(result.returncode, 4, result.stderr)
+                    self.assertEqual(result.stdout + result.stderr, '')
+                    self.assertFalse(Path(bridge.remote_directory).exists())
 
 
 class MemoryConnection:

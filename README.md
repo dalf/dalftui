@@ -586,6 +586,14 @@ delivery, or bootstrap behavior. A version bump is required when a previously
 supported remote/desktop pairing can no longer perform a valid operation
 correctly, even if the JSON field names are unchanged.
 
+[dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py) generates
+the Linux server's shell programs from portable Python, including on Windows
+desktops. [dalftui/ssh.py](dalftui/ssh.py) runs SSH and manages the desktop bridge.
+The generator embeds [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh)
+so remote tmux startup works without a dalftui installation. The root
+[tmux-start.sh](tmux-start.sh) forwards local startup to that canonical policy;
+existing Alacritty configuration and installed checkout links keep working.
+
 Check both older remote clients with the current desktop bridge and current
 remote clients with supported older desktop bridges. The frozen historical peer
 in [tests/fixtures/bridge_protocol_v1.py](tests/fixtures/bridge_protocol_v1.py)
@@ -595,6 +603,10 @@ new versions. Refactoring and logging usually do not need a bump. An optional
 field avoids a bump only when old peers safely ignore it and new peers accept
 its absence. [AGENTS.md](AGENTS.md) requires agents to record that compatibility
 assessment and add a test for affected historical behavior.
+The frozen installation probe in
+[tests/fixtures/ssh_bootstrap_v1.py](tests/fixtures/ssh_bootstrap_v1.py) also checks
+older desktops against the current installed layout, while current bootstrap
+tests check supported historical root layouts before delivering credentials.
 
 ## Verification
 

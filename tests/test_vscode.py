@@ -341,7 +341,8 @@ class RemoteCredentialsTests(unittest.TestCase):
         self.bin.mkdir()
         tmux = self.bin / 'tmux'
         tmux.write_text(f'#!{sys.executable}\nimport hashlib, json, os, pathlib, sys, time\n'
-                        'if sys.argv[1] == "list-sessions": sys.exit(0)\n'
+                        'if sys.argv[1] == "list-sessions":\n'
+                        '    print(os.environ.get("TEST_SESSION_ROWS", ""), end=""); sys.exit(0)\n'
                         'pathlib.Path(os.environ["TEST_ATTACH"]).write_text(json.dumps({\n'
                         '"endpoint": os.environ["DALFTUI_EDITOR_SOCKET"],\n'
                         '"digest": hashlib.sha256(os.environ["DALFTUI_EDITOR_TOKEN"].encode()).hexdigest(),\n'
@@ -414,6 +415,34 @@ class RemoteCredentialsTests(unittest.TestCase):
                                              'token_file_exists': False})
                 self.assertNotIn(bridge.token.encode(), result.stdout + result.stderr)
                 self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_cancel_and_eof_clean_up_credentials_for_both_transports(self):
+        for transport in ('unix', 'tcp'):
+            for selection, status in ((b'q\n', 0), (b'', 1)):
+                with self.subTest(transport=transport, selection=selection):
+                    bridge = self.bridge(transport)
+                    self.prepare(bridge)
+                    if transport == 'unix':
+                        with socket.socket(socket.AF_UNIX) as forwarded:
+                            forwarded.bind(bridge.remote_socket)
+                    result = self.real_run(
+                        shlex.split(picker.ssh_command('server', bridge=bridge)[-1]),
+                        env=dict(self.env, TEST_SESSION_ROWS='$5 0\n$9 1\n'),
+                        input=selection, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, status, result.stderr)
+                    self.assertNotIn(bridge.token.encode(), result.stdout + result.stderr)
+                    self.assertFalse(Path(self.env['TEST_ATTACH']).exists())
+                    self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_fallback_cleanup_isolates_resources_for_both_transports(self):
+        bridges = [self.bridge(transport) for transport in ('unix', 'tcp')]
+        for bridge in bridges:
+            self.prepare(bridge)
+        self.cleanup(bridges[0])
+        self.assertFalse(Path(bridges[0].remote_directory).exists())
+        self.assertEqual(Path(bridges[1].remote_token_file).read_text(), bridges[1].token + '\n')
+        self.cleanup(bridges[1])
+        self.assertFalse(Path(bridges[1].remote_directory).exists())
 
     def test_setup_and_cleanup_refuse_preexisting_directories_files_and_symlinks(self):
         for kind in ('directory', 'file', 'symlink'):

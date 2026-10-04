@@ -119,11 +119,13 @@ class SshAutoTests(unittest.TestCase):
         self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
-    def test_installed_picker_dispatches_and_embeds_its_copied_root_policy(self):
+    def test_installed_picker_dispatches_and_embeds_its_copied_canonical_policy(self):
         checkout = self.directory / "checkout's $cash ; é"
         shutil.copytree(ROOT, checkout, ignore=shutil.ignore_patterns('.git', '__pycache__'))
-        policy = checkout / 'tmux-start.sh'
+        policy = checkout / 'dalftui/linux/tmux-start.sh'
         policy.write_text("printf '%s\\n' copied-policy > \"$TEST_POLICY_LOG\"\n" + policy.read_text())
+        # The remote command must embed the policy, never the local forwarder.
+        (checkout / 'tmux-start.sh').write_text('#!/bin/sh\nexit 99\n')
         self.install(checkout=checkout)
         installed = self.home / '.config/dalftui'
         self.assertEqual(installed.resolve(), checkout.resolve())
@@ -139,15 +141,22 @@ if '-G' in sys.argv:
 if '-T' in sys.argv:
     # Model a remote host without editor integration, without opening SSH.
     sys.exit(3)
+# Script generation has finished. Hide the disposable desktop policy and run
+# with an empty remote home, so a reference to either checkout cannot work.
+os.rename(os.environ['TEST_CANONICAL_POLICY'], os.environ['TEST_CANONICAL_POLICY'] + '.unavailable')
+os.environ['HOME'] = os.environ['TEST_REMOTE_HOME']
+os.environ['XDG_CONFIG_HOME'] = ''
 os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
 ''')
         ssh.chmod(0o755)
         self.tmux.write_text(self.tmux.read_text() + 'exit 23\n')
         outside = self.directory / 'unrelated directory'
         outside.mkdir()
+        remote_home = self.directory / 'remote without dalftui'
+        remote_home.mkdir()
         env = dict(self.env, TEST_SSH_LOG=str(ssh_log), TEST_POLICY_LOG=str(policy_log),
-                   TEST_SH=str(self.bin / 'sh'))
-        env.pop('PYTHONPATH', None)
+                   TEST_SH=str(self.bin / 'sh'), TEST_CANONICAL_POLICY=str(policy),
+                   TEST_REMOTE_HOME=str(remote_home), PYTHONPATH=str(ROOT))
         host = "alice@prod-é;$(probe)'"
         result = self.real_run([sys.executable, str(installed / 'ssh-picker.py'),
                                 '--connect', host, '--bridge', 'tcp'],
@@ -162,6 +171,8 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
             self.assertEqual(command[command.index('--') + 1], host)
         self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
         self.assertEqual(policy_log.read_text(), 'copied-policy\n')
+        self.assertFalse(policy.exists())
+        self.assertFalse((remote_home / '.config/dalftui').exists())
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_installed_dalftui_prepares_credentials_before_starting_a_listener(self):
