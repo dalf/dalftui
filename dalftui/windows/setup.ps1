@@ -130,7 +130,7 @@ function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigP
     }
     if (-not $application) {
         Write-Warning ("VS Code was not configured. Install VS Code with its code command on " +
-            "an absolute PATH entry, or rerun setup-windows.ps1 with -VSCodePath for a portable installation.")
+            "an absolute PATH entry, or rerun install.cmd with -VSCodePath for a portable installation.")
         return $null
     }
     Write-DalftuiVSCodeConfig -ConfigPath $ConfigPath -Application $application
@@ -194,7 +194,7 @@ function Install-DalftuiFzf([string]$Preference = 'auto', [switch]$Skip) {
 
 function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
     $Path = [IO.Path]::GetFullPath($Path)
-    $loader = Join-Path $Checkout 'windows.ps1'
+    $loader = Join-Path $Checkout 'bin/profile.ps1'
     if (-not (Test-Path -LiteralPath $loader -PathType Leaf)) {
         throw "The Windows command loader is missing: $loader"
     }
@@ -249,7 +249,7 @@ function Set-DalftuiTerminalShortcut {
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
     $shellPath = Join-Path $PSHOME $shellName
-    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'windows-terminal.py'), '--shell', $shellPath)
+    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'), '--shell', $shellPath)
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
     & $Python @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal shortcut setup failed; see the message above. dssh is already configured in PowerShell.' }
@@ -286,7 +286,7 @@ function Invoke-DalftuiWindowsSetup {
     $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
     $pickerReady = Install-DalftuiFzf -Preference $Preference -Skip:$Skip
     Write-DalftuiProfile -Path $TargetProfile -Checkout $Checkout
-    . (Join-Path $Checkout 'windows.ps1')
+    . (Join-Path $Checkout 'bin/profile.ps1')
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
             -Checkout $Checkout -SettingsPaths $SettingsPaths

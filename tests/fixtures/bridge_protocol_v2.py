@@ -1,3 +1,4 @@
+# Frozen at the bin/ command-layout migration. Do not update this peer.
 """The shared contract between a remote pane and its local VS Code bridge.
 
 Version 1: one UTF-8 JSON object followed by a newline, at most 16384 bytes

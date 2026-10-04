@@ -76,7 +76,7 @@ class InstallationTests(DisposableSetup):
         saved_guide = backup / originals[str(guide)]['backup']
         self.assertEqual(os.readlink(saved_guide), '/a/previous/guide.py')
         self.assertEqual(self.paths.root.resolve(), self.repo)
-        self.assertEqual(guide.resolve(), self.repo / 'shortcuts.py')
+        self.assertEqual(guide.resolve(), self.repo / 'bin/shortcuts.py')
 
     def test_repeat_install_preserves_local_settings_and_file_timestamps(self):
         self.install()
@@ -105,7 +105,7 @@ class InstallationTests(DisposableSetup):
         shell = alacritty_config.load(self.paths.alacritty)['terminal']['shell']
         self.assertEqual(shell['program'], 'sh')
         self.assertEqual(shell['args'][0], '-c')
-        self.assertIn('/dalftui/tmux-start.sh', shell['args'][1])
+        self.assertIn('/dalftui/bin/tmux-start.sh', shell['args'][1])
         binary_dir = self.directory / 'bin'
         binary_dir.mkdir()
         command_log = self.directory / 'tmux-command'
@@ -238,7 +238,7 @@ class RelocationTests(DisposableSetup):
     def test_installed_shortcut_launcher_works_outside_checkout_without_pythonpath(self):
         environment, outside = self.install_from_copied_checkout()
         guide = self.paths.config_dir / 'tmux/shortcuts.py'
-        self.assertEqual(guide.resolve(), self.repo / 'shortcuts.py')
+        self.assertEqual(guide.resolve(), self.repo / 'bin/shortcuts.py')
         result = subprocess.run([sys.executable, str(guide), '--tmux-only', '--print'], cwd=outside,
                                 env=environment, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -249,7 +249,7 @@ class RelocationTests(DisposableSetup):
     def test_reload_entrypoint_works_outside_checkout(self):
         environment, outside = self.install_from_copied_checkout()
         socket = self.directory / "socket 'quoted' $tmux"
-        result = subprocess.run([str(self.repo / 'reload'), '--socket', str(socket)], cwd=outside,
+        result = subprocess.run([str(self.repo / 'bin/reload'), '--socket', str(socket)], cwd=outside,
                                 env=environment, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('tmux is not running', result.stdout)
@@ -304,7 +304,7 @@ class TmuxTests(TmuxFixture):
         rendered = self.tmux('display-message', '-p', '#{E:@claude_tab_active_strip}')
         self.assertIn('#[fg=#1565c0]⬤', rendered)
         self.assertIn('bg=#e5e7eb', self.tmux('show-options', '-gv', 'window-status-current-format'))
-        for key, filename in [('F1', 'shortcuts.py'), ('F2', 'ssh-picker.py')]:
+        for key, filename in [('F1', 'bin/shortcuts.py'), ('F2', 'bin/ssh_picker.py')]:
             binding = next(line for line in self.tmux('list-keys', '-T', 'prefix').splitlines()
                            if shlex.split(line)[3] == key)
             self.assertIn(filename, binding)
@@ -432,10 +432,10 @@ class ServerTmuxTests(TmuxFixture):
         self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'tmux-only')
         bindings = self.prefix_bindings()
         self.assertNotIn('F2', bindings)
-        self.assertIn('shortcuts.py --tmux-only', bindings['F1'])
+        self.assertIn('bin/shortcuts.py --tmux-only', bindings['F1'])
         self.assertFalse(self.paths.alacritty.parent.exists())
         env = dict(self.env, TMUX=f'{self.socket},{self.tmux("display-message", "-p", "#{pid}")},0')
-        result = subprocess.run([sys.executable, str(self.repo / 'shortcuts.py'), '--tmux-only', '--print'],
+        result = subprocess.run([sys.executable, str(self.repo / 'bin/shortcuts.py'), '--tmux-only', '--print'],
                                 capture_output=True, text=True, env=env, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('LIVE TMUX BINDINGS', result.stdout)
@@ -447,7 +447,7 @@ class ServerTmuxTests(TmuxFixture):
         self.assertNotIn('F2', self.prefix_bindings())
         self.install(profile='desktop')
         self.do_reload()
-        self.assertIn('ssh-picker.py', self.prefix_bindings()['F2'])
+        self.assertIn('bin/ssh_picker.py', self.prefix_bindings()['F2'])
         self.install(profile='tmux-only')
         self.do_reload()
         self.assertNotIn('F2', self.prefix_bindings())

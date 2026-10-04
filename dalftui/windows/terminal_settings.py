@@ -207,7 +207,7 @@ def main():
     parser.add_argument('--shell', required=True)
     parser.add_argument('--settings', action='append', type=Path)
     args = parser.parse_args()
-    launcher = CHECKOUT_ROOT / 'windows-terminal.ps1'
+    launcher = CHECKOUT_ROOT / 'bin/ssh-tab.ps1'
     commandline = subprocess.list2cmdline([
         args.shell, '-NoLogo', '-NoProfile', '-File', str(launcher)])
     paths = args.settings or settings_paths(os.environ.get('LOCALAPPDATA', ''))

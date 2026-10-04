@@ -63,12 +63,13 @@ class SshAutoTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             setup.install(paths, checkout, profile='tmux-only')
 
-    def install_historical_checkout(self, protocol_version=None):
+    def install_test_checkout(self, protocol_version=None):
         # Use independent files: the real installation symlinks to ROOT, which
         # must never be modified to simulate an old or incompatible server.
         checkout = self.home / '.config/dalftui'
         (checkout / 'config').mkdir(parents=True)
-        (checkout / 'vscode.py').touch()
+        (checkout / 'bin').mkdir()
+        (checkout / 'bin/vscode.py').touch()
         (checkout / 'config/tmux.conf').touch()
         if protocol_version is not None:
             (checkout / 'bridge_protocol.py').write_text(
@@ -125,7 +126,7 @@ class SshAutoTests(unittest.TestCase):
         policy = checkout / 'dalftui/linux/tmux-start.sh'
         policy.write_text("printf '%s\\n' copied-policy > \"$TEST_POLICY_LOG\"\n" + policy.read_text())
         # The remote command must embed the policy, never the local forwarder.
-        (checkout / 'tmux-start.sh').write_text('#!/bin/sh\nexit 99\n')
+        (checkout / 'bin/tmux-start.sh').write_text('#!/bin/sh\nexit 99\n')
         self.install(checkout=checkout)
         installed = self.home / '.config/dalftui'
         self.assertEqual(installed.resolve(), checkout.resolve())
@@ -158,7 +159,7 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
                    TEST_SH=str(self.bin / 'sh'), TEST_CANONICAL_POLICY=str(policy),
                    TEST_REMOTE_HOME=str(remote_home), PYTHONPATH=str(ROOT))
         host = "alice@prod-é;$(probe)'"
-        result = self.real_run([sys.executable, str(installed / 'ssh-picker.py'),
+        result = self.real_run([sys.executable, str(installed / 'bin/ssh_picker.py'),
                                 '--connect', host, '--bridge', 'tcp'],
                                cwd=outside, env=env, input='', capture_output=True,
                                text=True, timeout=5)
@@ -218,15 +219,15 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_unversioned_remote_dalftui_suggests_github_update_and_keeps_tmux(self):
-        self.install_historical_checkout()
+        self.install_test_checkout()
         self.assert_update_suggestion_without_bridge()
 
     def test_unsupported_remote_protocol_suggests_github_update_and_keeps_tmux(self):
-        self.install_historical_checkout(999)
+        self.install_test_checkout(999)
         self.assert_update_suggestion_without_bridge()
 
     def test_malformed_remote_protocol_suggests_github_update_and_keeps_tmux(self):
-        self.install_historical_checkout('unknown')
+        self.install_test_checkout('unknown')
         self.assert_update_suggestion_without_bridge()
 
     def test_missing_remote_python_skips_bridge_and_keeps_tmux(self):

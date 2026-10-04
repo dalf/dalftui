@@ -32,6 +32,17 @@ bootstrap_spec = importlib.util.spec_from_file_location(
 historical_bootstrap = importlib.util.module_from_spec(bootstrap_spec)
 bootstrap_spec.loader.exec_module(historical_bootstrap)
 
+v2_spec = importlib.util.spec_from_file_location(
+    'frozen_bridge_protocol_v2', Path(__file__).parent / 'fixtures/bridge_protocol_v2.py')
+frozen_v2 = importlib.util.module_from_spec(v2_spec)
+sys.modules[v2_spec.name] = frozen_v2
+v2_spec.loader.exec_module(frozen_v2)
+
+bootstrap_v2_spec = importlib.util.spec_from_file_location(
+    'frozen_ssh_bootstrap_v2', Path(__file__).parent / 'fixtures/ssh_bootstrap_v2.py')
+bootstrap_v2 = importlib.util.module_from_spec(bootstrap_v2_spec)
+bootstrap_v2_spec.loader.exec_module(bootstrap_v2)
+
 
 @unittest.skipIf(sys.platform == 'win32', 'Remote bootstrap executes in a POSIX shell')
 class BootstrapCompatibilityTests(unittest.TestCase):
@@ -65,21 +76,23 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                                remote_socket=(str(directory / 'editor.sock') if transport == 'unix'
                                               else 'tcp:127.0.0.1:49152'))
 
-    def install_historical(self):
+    def install_historical(self, *, version=1):
         checkout = self.directory / 'historical root checkout'
         (checkout / 'config').mkdir(parents=True)
-        # The frozen historical editor occupies the old public root path. The
-        # probe requires readable integration files and a standalone declaration.
-        shutil.copy2(Path(__file__).parent / 'fixtures/bridge_protocol_v1.py',
-                     checkout / 'vscode.py')
+        # Each fixture keeps its version's deployed command path and declaration.
+        editor = checkout / ('vscode.py' if version == 1 else 'bin/vscode.py')
+        editor.parent.mkdir(parents=True, exist_ok=True)
+        fixture = 'bridge_protocol_v1.py' if version == 1 else 'bridge_protocol_v2.py'
+        shutil.copy2(Path(__file__).parent / 'fixtures' / fixture, editor)
         (checkout / 'config/tmux.conf').write_text('# Historical editor integration\n')
-        (checkout / 'bridge_protocol.py').write_text(historical_bootstrap.PROTOCOL_DECLARATION)
+        declaration = historical_bootstrap if version == 1 else bootstrap_v2
+        (checkout / 'bridge_protocol.py').write_text(declaration.PROTOCOL_DECLARATION)
         installed = self.home / '.config/dalftui'
         installed.parent.mkdir()
         installed.symlink_to(checkout, target_is_directory=True)
         return checkout
 
-    def test_frozen_old_desktop_probe_recognizes_current_remote_installation(self):
+    def test_frozen_v1_desktop_probe_rejects_current_bin_installation(self):
         for config_home in ('', 'relative-config', str(self.directory / "custom config's $cash ; é")):
             with self.subTest(config_home=config_home):
                 self.env['XDG_CONFIG_HOME'] = config_home
@@ -89,11 +102,22 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 if not installed.is_symlink():
                     installed.symlink_to(ROOT, target_is_directory=True)
                 result = self.run_script(historical_bootstrap.REMOTE_EDITOR_CHECK)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.returncode, 3, result.stderr)
                 self.assertEqual(result.stdout + result.stderr, '')
 
-    def test_current_desktop_probe_and_setup_recognize_supported_historical_root_installation(self):
+    def test_current_desktop_refuses_credentials_for_historical_root_installation(self):
         self.install_historical()
+        for transport in ('unix', 'tcp'):
+            with self.subTest(transport=transport):
+                bridge = self.bridge(transport)
+                result = self.run_script(remote_bootstrap.prepare_credentials_script(
+                    bridge, check_installation=True), token=legacy.TOKEN + '\n')
+                self.assertEqual(result.returncode, 4, result.stderr)
+                self.assertEqual(result.stdout + result.stderr, '')
+                self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_current_desktop_probe_and_setup_recognize_frozen_v2_bin_installation(self):
+        self.install_historical(version=2)
         for transport in ('unix', 'tcp'):
             with self.subTest(transport=transport):
                 bridge = self.bridge(transport)
@@ -107,8 +131,16 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
                 self.assertFalse(Path(bridge.remote_directory).exists())
 
+    def test_frozen_v2_desktop_probe_recognizes_current_bin_installation(self):
+        installed = self.home / '.config/dalftui'
+        installed.parent.mkdir()
+        installed.symlink_to(ROOT, target_is_directory=True)
+        result = self.run_script(bootstrap_v2.REMOTE_EDITOR_CHECK)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, '')
+
     def test_current_desktop_refuses_credentials_without_a_supported_readable_declaration(self):
-        checkout = self.install_historical()
+        checkout = self.install_historical(version=2)
         declaration = checkout / 'bridge_protocol.py'
         cases = (('undeclared', None), ('unreadable', None),
                  ('unsupported', 'print(999)\n'), ('malformed', 'print("unknown")\n'),
@@ -256,18 +288,18 @@ class FrozenPeerTests(unittest.TestCase):
         self.assertEqual(outcome['message']['protocol_version'], 1)
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
-    def test_root_editor_entrypoint_routes_client_credentials_to_old_laptop(self):
-        self.check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=False)
+    def test_bin_editor_entrypoint_routes_client_credentials_to_old_laptop(self):
+        self.check_bin_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=False)
 
     @unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
     def test_tmux_34_path_output_reaches_old_laptop_without_extra_escapes(self):
-        self.check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=True)
+        self.check_bin_editor_entrypoint_routes_client_credentials_to_old_laptop(escaped=True)
 
-    def check_root_editor_entrypoint_routes_client_credentials_to_old_laptop(self, *, escaped):
+    def check_bin_editor_entrypoint_routes_client_credentials_to_old_laptop(self, *, escaped):
         with tempfile.TemporaryDirectory(prefix='dalftui-historical-entrypoint-') as directory:
             root = Path(directory).resolve()
             checkout = root / "checkout's $cash ; é"
-            for relative in ('vscode.py', 'bridge_protocol.py', 'dalftui/__init__.py',
+            for relative in ('bin/vscode.py', 'bridge_protocol.py', 'dalftui/__init__.py',
                              'dalftui/vscode.py', 'dalftui/linux/__init__.py',
                              'dalftui/linux/tmux_editor.py'):
                 destination = checkout / relative
@@ -301,7 +333,7 @@ class FrozenPeerTests(unittest.TestCase):
                                    DALFTUI_EDITOR_SOCKET='tcp:127.0.0.1:0',
                                    DALFTUI_EDITOR_TOKEN='wrong-client-token')
                 result = subprocess.run(
-                    [sys.executable, str(checkout / 'vscode.py'), '--pane', '%7',
+                    [sys.executable, str(checkout / 'bin/vscode.py'), '--pane', '%7',
                      '--client', str(client.pid), '--client-tty', '/dev/pts/probe'],
                     cwd=outside, env=command_env, capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -351,9 +383,10 @@ class FrozenPeerTests(unittest.TestCase):
 
 
 class ContractTests(unittest.TestCase):
-    def test_version_and_credential_environment_names_are_deployed_v1(self):
-        self.assertEqual(protocol.PROTOCOL_VERSION, 1)
-        self.assertEqual(protocol.SUPPORTED_PROTOCOL_VERSIONS, frozenset({1}))
+    def test_v2_layout_keeps_v1_messages_and_credential_environment_names(self):
+        self.assertEqual(protocol.PROTOCOL_VERSION, 2)
+        self.assertEqual(protocol.MESSAGE_PROTOCOL_VERSION, 1)
+        self.assertEqual(protocol.SUPPORTED_PROTOCOL_VERSIONS, frozenset({1, 2}))
         self.assertEqual(protocol.SOCKET_ENV, 'DALFTUI_EDITOR_SOCKET')
         self.assertEqual(protocol.TOKEN_ENV, 'DALFTUI_EDITOR_TOKEN')
         self.assertEqual(protocol.SOCKET_ENV, legacy.SOCKET_ENV)
@@ -363,7 +396,7 @@ class ContractTests(unittest.TestCase):
         result = subprocess.run([sys.executable, '-I', str(ROOT / 'bridge_protocol.py'), '--version'],
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, '1\n')
+        self.assertEqual(result.stdout, '2\n')
         self.assertEqual(result.stderr, '')
 
     def test_historical_request_and_responses_remain_readable(self):
@@ -397,22 +430,36 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises((AttributeError, TypeError)):
             request.folder = '/mutated'
 
+    def test_v2_messages_are_understood_by_independent_frozen_v2_codec(self):
+        message = protocol.request_message(legacy.FOLDER, legacy.TOKEN, protocol_version=2)
+        connection = MemoryConnection()
+        protocol.send_message(connection, message)
+        request = frozen_v2.parse_request(frozen_v2.read_message(MemoryConnection(connection.sent)))
+        self.assertEqual((request.folder, request.token, request.protocol_version),
+                         (legacy.FOLDER, legacy.TOKEN, 2))
+        current = protocol.parse_request(frozen_v2.request_message(
+            legacy.FOLDER, legacy.TOKEN, protocol_version=2))
+        self.assertEqual((current.folder, current.token, current.protocol_version),
+                         (legacy.FOLDER, legacy.TOKEN, 2))
+        frozen_v2.parse_response({'protocol_version': 2, 'ok': True})
+        protocol.parse_response({'protocol_version': 2, 'ok': True})
+
     def test_unsupported_or_malformed_request_versions_fail_closed(self):
-        for version in (0, 2, -1, 999, True, False, '1', 1.0, None, [], {}):
+        for version in (0, 3, -1, 999, True, False, '1', 1.0, None, [], {}):
             with self.subTest(version=version):
                 with self.assertRaises(protocol.IncompatibleProtocolError):
                     protocol.parse_request({'folder': legacy.FOLDER, 'token': legacy.TOKEN,
                                             'protocol_version': version})
 
     def test_unsupported_or_malformed_response_versions_fail_closed(self):
-        for version in (0, 2, -1, 999, True, False, '1', 1.0, None, [], {}):
+        for version in (0, 3, -1, 999, True, False, '1', 1.0, None, [], {}):
             for response in ({'ok': True}, {'error': 'Editor failed.'}):
                 with self.subTest(version=version, response=response):
                     with self.assertRaises(protocol.IncompatibleProtocolError):
                         protocol.parse_response(dict(response, protocol_version=version))
 
     def test_legacy_and_versioned_response_semantics(self):
-        for metadata in ({}, {'protocol_version': 1}):
+        for metadata in ({}, {'protocol_version': 1}, {'protocol_version': 2}):
             with self.subTest(metadata=metadata):
                 self.assertIsNone(protocol.parse_response(dict(metadata, ok=True,
                                                               future_optional_field='ignored')))

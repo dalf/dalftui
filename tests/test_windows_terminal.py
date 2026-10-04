@@ -36,7 +36,7 @@ class TerminalSetupTests(unittest.TestCase):
         {"command": "copy", "keys": "ctrl+shift+c"}, // my binding
     ], /* leave this here */
 }'''
-        updated = terminal.updated_settings(personal, 'powershell.exe -File "repo path\\windows-terminal.ps1"')
+        updated = terminal.updated_settings(personal, 'powershell.exe -File "repo path\\bin/ssh-tab.ps1"')
         for line in ('// Keep my defaults and shortcuts.', '// my binding', '/* leave this here */',
                      '"theme": "\u00e9 // not a comment"', '"url": "https://example.org/*not a comment*/"'):
             self.assertIn(line, updated)
@@ -140,19 +140,19 @@ class TerminalSetupTests(unittest.TestCase):
     def test_cli_uses_explicit_settings_path_and_native_commandline_quoting(self):
         self.path.write_text('{}', encoding='utf-8')
         shell = "C:\\PowerShell's unicode \u00e9\\pwsh.exe"
-        result = subprocess.run([sys.executable, str(ROOT / 'windows-terminal.py'),
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'),
                                  '--shell', shell, '--settings', str(self.path)], capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         command = self.settings(self.path.read_text(encoding='utf-8'))['actions'][0]['command']
         self.assertEqual(command['commandline'], subprocess.list2cmdline([
-            shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'windows-terminal.ps1')]))
+            shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'bin/ssh-tab.ps1')]))
         self.assertEqual(command['startingDirectory'], '%USERPROFILE%')
 
     def test_copied_launcher_works_outside_checkout_without_pythonpath_and_is_idempotent(self):
         checkout = self.root / "copied checkout's unicode \u00e9"
         implementation = checkout / 'dalftui/windows'
         implementation.mkdir(parents=True)
-        for relative in ('windows-terminal.py', 'windows-terminal.ps1', 'dalftui/__init__.py',
+        for relative in ('bin/terminal_settings.py', 'bin/ssh-tab.ps1', 'dalftui/__init__.py',
                          'dalftui/windows/__init__.py',
                          'dalftui/windows/terminal_settings.py'):
             destination = checkout / relative
@@ -164,7 +164,7 @@ class TerminalSetupTests(unittest.TestCase):
         shell = "C:\\PowerShell's unicode \u00e9\\pwsh.exe"
         environment = os.environ.copy()
         environment.pop('PYTHONPATH', None)
-        command = [sys.executable, str(checkout / 'windows-terminal.py'),
+        command = [sys.executable, str(checkout / 'bin/terminal_settings.py'),
                    '--shell', shell, '--settings', str(self.path)]
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
@@ -175,7 +175,7 @@ class TerminalSetupTests(unittest.TestCase):
         action = self.settings(installed.decode())['actions'][0]['command']
         # Windows temp paths may use an 8.3 alias; the launcher resolves it.
         self.assertEqual(action['commandline'], subprocess.list2cmdline([
-            shell, '-NoLogo', '-NoProfile', '-File', str(checkout.resolve() / 'windows-terminal.ps1')]))
+            shell, '-NoLogo', '-NoProfile', '-File', str(checkout.resolve() / 'bin/ssh-tab.ps1')]))
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)

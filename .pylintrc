@@ -46,8 +46,8 @@ disable =
     unidiomatic-typecheck
 
 [BASIC]
-# Keep naming checks, with the two historical root command exceptions.
-module-rgx = ^([a-z_][a-z0-9_]*|ssh-picker|windows-terminal)$
+# Python modules and launchers use snake_case names.
+module-rgx = ^[a-z_][a-z0-9_]*$
 
 [CLASSES]
 # The bridge creates its sockets and worker state when entering its context.

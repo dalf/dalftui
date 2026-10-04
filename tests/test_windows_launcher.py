@@ -30,7 +30,7 @@ class SharedLauncherTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name).resolve()
         self.checkout = self.root / "checkout's $cash ; & é"
-        for relative in ('ssh-picker.py', 'vscode.py', 'bridge_protocol.py', 'tmux-start.sh',
+        for relative in ('bin/ssh_picker.py', 'bin/vscode.py', 'bridge_protocol.py', 'bin/tmux-start.sh',
                          'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py',
                          'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
                          'dalftui/linux/remote_bootstrap.py', 'dalftui/linux/tmux-start.sh',
@@ -52,38 +52,38 @@ class SharedLauncherTests(unittest.TestCase):
 
     def test_copied_commands_import_and_validate_arguments_outside_checkout(self):
         for script, description in (
-                ('ssh-picker.py', 'Pick an SSH host'),
-                ('vscode.py', "Open a pane's folder")):
+                ('bin/ssh_picker.py', 'Pick an SSH host'),
+                ('bin/vscode.py', "Open a pane's folder")):
             with self.subTest(script=script):
                 result = self.command(script, '--help')
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f'usage: {script} ', result.stdout)
+                self.assertIn(f'usage: {Path(script).name} ', result.stdout)
                 self.assertIn(description, result.stdout)
                 self.assertEqual(result.stderr, '')
         cases = (
-            ('ssh-picker.py', ('--pick', '--list'), 'not allowed with argument'),
-            ('ssh-picker.py', ('--connect', 'host', '--list'), 'not allowed with argument'),
-            ('ssh-picker.py', ('--bridge', 'invalid'), 'invalid choice'),
-            ('vscode.py', (), 'required'),
-            ('vscode.py', ('--pane', '%7'), '--client is required with --pane'),
-            ('vscode.py', ('--pane', '%7', '--client', 'invalid'), 'invalid int value'),
-            ('vscode.py', ('--pane', '%7', '--folder', str(self.outside)),
+            ('bin/ssh_picker.py', ('--pick', '--list'), 'not allowed with argument'),
+            ('bin/ssh_picker.py', ('--connect', 'host', '--list'), 'not allowed with argument'),
+            ('bin/ssh_picker.py', ('--bridge', 'invalid'), 'invalid choice'),
+            ('bin/vscode.py', (), 'required'),
+            ('bin/vscode.py', ('--pane', '%7'), '--client is required with --pane'),
+            ('bin/vscode.py', ('--pane', '%7', '--client', 'invalid'), 'invalid int value'),
+            ('bin/vscode.py', ('--pane', '%7', '--folder', str(self.outside)),
              'not allowed with argument'),
         )
         for script, args, message in cases:
             with self.subTest(script=script, args=args):
                 result = self.command(script, *args)
                 self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertIn(f'usage: {script} ', result.stderr)
+                self.assertIn(f'usage: {Path(script).name} ', result.stderr)
                 self.assertIn(message, result.stderr)
         self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
 
     def test_launchers_dispatch_to_their_own_package_and_propagate_status(self):
         cases = (
-            ('ssh-picker.py', 'ssh', ('--connect', "alice@prod-é;$host'", '--bridge', 'tcp'), 17),
-            ('ssh-picker.py', 'ssh', ('--pick', '--bridge', 'unix'), 17),
-            ('vscode.py', 'vscode', ('--folder', str(self.outside / "project's $cash & é")), 23),
-            ('vscode.py', 'vscode', ('--pane', '%7', '--client', '123',
+            ('bin/ssh_picker.py', 'ssh', ('--connect', "alice@prod-é;$host'", '--bridge', 'tcp'), 17),
+            ('bin/ssh_picker.py', 'ssh', ('--pick', '--bridge', 'unix'), 17),
+            ('bin/vscode.py', 'vscode', ('--folder', str(self.outside / "project's $cash & é")), 23),
+            ('bin/vscode.py', 'vscode', ('--pane', '%7', '--client', '123',
                                    '--client-tty', '/dev/pts/7'), 23),
         )
         for script, module, args, status in cases:
@@ -111,7 +111,7 @@ class SharedLauncherTests(unittest.TestCase):
                 self.assertEqual(result.stderr, '')
         self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
 
-    def test_alacritty_launches_the_copied_root_picker_as_separate_arguments(self):
+    def test_alacritty_launches_the_copied_bin_picker_as_separate_arguments(self):
         host = "alice@prod-é;$host'"
         program = '''import json, subprocess, sys
 from unittest.mock import patch
@@ -126,7 +126,7 @@ with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
         with patch.object(ssh_picker, 'curses') as curses:
             curses.wrapper.return_value = host
             with patch.object(picker, 'target_hosts', return_value=[host]):
-                with patch.object(sys, 'platform', 'linux'), patch.object(sys, 'argv', ['ssh-picker.py']):
+                with patch.object(sys, 'platform', 'linux'), patch.object(sys, 'argv', ['bin/ssh_picker.py']):
                     assert picker.main() == 0
             curses.wrapper.assert_called_once_with(ssh_picker.pick, [host])
         args, kwargs = start.call_args
@@ -145,7 +145,7 @@ with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
         observation = json.loads(result.stdout)
         self.assertEqual(observation['args'],
                          ['alacritty-probe', '--title', f'SSH · {host}', '-e', sys.executable,
-                          str(self.checkout.resolve() / 'ssh-picker.py'), '--connect', host])
+                          str(self.checkout.resolve() / 'bin/ssh_picker.py'), '--connect', host])
         self.assertTrue(observation['detached'])
         self.assertEqual(observation['tmux'], [])
 
@@ -185,7 +185,7 @@ assert not blocked.intersection(sys.modules)
 '''
         # Remove the local shell forwarder to make the generator's independence
         # from that entrypoint explicit, even in a copied Windows checkout.
-        (self.checkout / 'tmux-start.sh').unlink()
+        (self.checkout / 'bin/tmux-start.sh').unlink()
         result = subprocess.run([sys.executable, '-I', '-c', program, str(self.checkout)],
                                 cwd=self.outside, env=dict(self.env, PATH=''),
                                 capture_output=True, text=True, timeout=5)
@@ -238,7 +238,7 @@ with patch.object(picker, 'connect', return_value=17) as connect, \
      patch.object(picker, 'target_hosts', return_value=['vm-alias']), \
      patch.object(picker.shutil, 'which', return_value='harmless-probe'):
     if case in ('folder', 'windows-folder'):
-        sys.argv = ['vscode.py', '--folder', folder]
+        sys.argv = ['bin/vscode.py', '--folder', folder]
         with patch.object(vscode, 'WINDOWS', case == 'windows-folder'), \
              patch.object(vscode.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
             status = vscode.main()
@@ -252,7 +252,7 @@ with patch.object(picker, 'connect', return_value=17) as connect, \
     else:
         arguments = {'connect': ['--connect', 'vm-alias'], 'list': ['--list'],
                      'pick': ['--pick'], 'windows': []}[case]
-        sys.argv = ['ssh-picker.py', *arguments]
+        sys.argv = ['bin/ssh_picker.py', *arguments]
         with patch.object(picker.sys, 'platform', 'win32' if case == 'windows' else 'linux'), \
              patch.object(picker.subprocess, 'run',
                           return_value=subprocess.CompletedProcess([], 0, 'vm-alias\\n')) as run:
@@ -378,7 +378,7 @@ raise SystemExit(status)
 
     def test_local_editor_cli_does_not_require_tmux_and_reports_failures_locally(self):
         folder = str(self.root)
-        with patch.object(sys, 'argv', ['vscode.py', '--folder', folder]):
+        with patch.object(sys, 'argv', ['bin/vscode.py', '--folder', folder]):
             with patch.object(vscode, 'launch') as launch:
                 self.assertEqual(vscode.main(), 0)
                 launch.assert_called_once_with(folder)
@@ -392,7 +392,7 @@ raise SystemExit(status)
             with patch.object(picker, 'pick_fzf', return_value='vm-alias') as choose:
                 with patch.object(picker, 'connect', return_value=17) as connect:
                     with patch.dict(sys.modules, {'dalftui.linux.ssh_picker': None}):
-                        with patch.object(sys, 'argv', ['ssh-picker.py']):
+                        with patch.object(sys, 'argv', ['bin/ssh_picker.py']):
                             self.assertEqual(picker.main(), 17)
         choose.assert_called_once_with()
         connect.assert_called_once_with('vm-alias', None)
@@ -400,7 +400,7 @@ raise SystemExit(status)
     def test_cancelled_picker_does_not_open_ssh(self):
         with patch.object(picker, 'pick_fzf', return_value=None):
             with patch.object(picker, 'connect') as connect:
-                with patch.object(sys, 'argv', ['ssh-picker.py', '--pick']):
+                with patch.object(sys, 'argv', ['bin/ssh_picker.py', '--pick']):
                     self.assertEqual(picker.main(), 0)
         connect.assert_not_called()
 
@@ -433,7 +433,7 @@ raise SystemExit(status)
 
     def test_missing_fzf_or_empty_host_list_has_actionable_error(self):
         with patch.object(picker.shutil, 'which', return_value=None):
-            with self.assertRaisesRegex(RuntimeError, 'setup-windows.ps1'):
+            with self.assertRaisesRegex(RuntimeError, 'install.cmd'):
                 picker.pick_fzf(['server'])
         with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
             with self.assertRaisesRegex(RuntimeError, 'Tag dalftui'):
@@ -588,7 +588,7 @@ raise SystemExit(status)
                         config.unlink()
                     else:
                         config.write_bytes(content)
-                    with self.assertRaisesRegex(RuntimeError, message + '.*setup-windows.ps1'):
+                    with self.assertRaisesRegex(RuntimeError, message + '.*install.cmd'):
                         vscode.launch('relative-folder', env=env)
                     run.assert_not_called()
             self.configured_editor_env(app)
@@ -638,10 +638,10 @@ raise SystemExit(status)
         with patch.object(vscode, 'WINDOWS', True):
             with patch.object(vscode.subprocess, 'run') as run:
                 with self.assertRaisesRegex(RuntimeError,
-                                            'configured VS Code installation is missing.*setup-windows.ps1.*VSCodePath'):
+                                            'configured VS Code installation is missing.*install.cmd.*VSCodePath'):
                     vscode.launch(str(self.root), env=env)
             run.assert_not_called()
-            with self.assertRaisesRegex(RuntimeError, 'VS Code is not configured.*setup-windows.ps1'):
+            with self.assertRaisesRegex(RuntimeError, 'VS Code is not configured.*install.cmd'):
                 vscode.code_command({'LOCALAPPDATA': 'relative'})
 
     @unittest.skipUnless(sys.platform == 'win32', 'native Windows executable search test')

@@ -7,7 +7,7 @@ WINDOWS_CONFIG = Path('dalftui') / 'config.json'
 
 def windows_code_command(env):
     """Load the absolute VS Code application selected by Windows setup."""
-    recovery = ("Rerun dalftui's setup-windows.ps1. For a portable installation, "
+    recovery = ("Rerun dalftui's install.cmd. For a portable installation, "
                 "pass -VSCodePath with its directory or Code.exe path.")
     local_app_data = env.get('LOCALAPPDATA')
     if not local_app_data or not Path(local_app_data).is_absolute():

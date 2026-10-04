@@ -1,6 +1,6 @@
 #requires -Version 5.1
-# Existing Terminal actions target this stable public entrypoint.
-$dalftuiWindowsCheckout = [IO.Path]::GetFullPath($PSScriptRoot)
+# Launch a Windows Terminal SSH tab from this checkout.
+$dalftuiWindowsCheckout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 & (Join-Path $dalftuiWindowsCheckout 'dalftui\windows\ssh-tab.ps1') `
     -Checkout $dalftuiWindowsCheckout
 exit $LASTEXITCODE

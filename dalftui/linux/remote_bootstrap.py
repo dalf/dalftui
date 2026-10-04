@@ -17,8 +17,8 @@ case ${XDG_CONFIG_HOME:-} in
     /*) dalftui_config=$XDG_CONFIG_HOME ;;
     *) dalftui_config=$HOME/.config ;;
 esac
-[ -r "$dalftui_config/dalftui/vscode.py" ] &&
 [ -r "$dalftui_config/dalftui/config/tmux.conf" ] || exit 3
+[ -r "$dalftui_config/dalftui/bin/vscode.py" ] &&
 [ -r "$dalftui_config/dalftui/bridge_protocol.py" ] || exit 4
 command -v python3 >/dev/null 2>&1 || exit 4
 remote_protocol=$(python3 "$dalftui_config/dalftui/bridge_protocol.py" --version 2>/dev/null) || exit 4

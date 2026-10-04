@@ -18,7 +18,7 @@ Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
 cd ~/code/dalftui
 ./install --dry-run
 ./install
-./reload
+./bin/reload
 ```
 
 Optional [mise tasks](#repository-tasks) provide named shortcuts for installation,
@@ -34,7 +34,7 @@ The installer creates these connections:
 | `~/.config/dalftui` | Symlink to this checkout |
 | `~/.config/alacritty/alacritty.toml` | Desktop mode: imports shared Alacritty settings, then personal overrides |
 | `~/.tmux.conf` | Sources shared tmux settings, then personal overrides |
-| `~/.config/tmux/shortcuts.py` | Compatibility link to the shortcut guide |
+| `~/.config/tmux/shortcuts.py` | Link to `bin/shortcuts.py` |
 
 `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when they contain absolute
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
@@ -52,7 +52,7 @@ Clone this repository to a stable directory on the server, then run:
 cd ~/code/dalftui
 ./install --tmux-only --dry-run
 ./install --tmux-only
-./reload
+./bin/reload
 ```
 
 Server requirements are **Python 3.11+, tmux 3.2+, Git, and `less`**. Alacritty
@@ -79,7 +79,7 @@ remote tmux. An SSH connection started inside a local tmux pane creates nested
 sessions, where the local tmux may handle those shortcuts first.
 
 The installation mode is recorded in the private `~/.tmux.conf` loader and
-survives Git updates. Both `./reload` and a repeated `./install` recognize it,
+survives Git updates. Both `./bin/reload` and a repeated `./install` recognize it,
 so you do not need to repeat the flag after installation. Use `./install --desktop`
 or `./install --tmux-only` to explicitly switch modes. Mode changes back up the
 previous loader and preserve personal overrides. Older desktop loaders are
@@ -89,29 +89,33 @@ To receive later configuration updates on the server:
 
 ```sh
 git pull --ff-only
-./reload
+./bin/reload
 ```
 
 ## Update without reinstalling
+
+When updating from the previous root command layout, rerun `./install` on each
+Linux machine or `.\install.cmd` on Windows once; see
+[Layout and entrypoints](#layout-and-entrypoints). Later updates use the commands below.
 
 After a Git remote is configured:
 
 ```sh
 cd ~/code/dalftui
 git pull --ff-only
-./reload
+./bin/reload
 ```
 
 The symlink makes new repository files available immediately. The helper
-scripts read their configuration whenever you open them. `./reload` requests
+scripts read their configuration whenever you open them. `./bin/reload` requests
 an Alacritty refresh in desktop mode and sources tmux's configuration again without ending
 sessions or restarting running programs. It rewrites the Alacritty loader in
 place because file replacements from Git or an editor may not trigger a reload.
 
 Settings that affect terminal startup apply to new Alacritty windows. If tmux
-is not running, `./reload` leaves it stopped; the next server loads the updated
+is not running, `./bin/reload` leaves it stopped; the next server loads the updated
 configuration. From inside tmux, reload targets the current server. Outside tmux,
-it targets the default server. Use `./reload --socket /path/to/socket` for another
+it targets the default server. Use `./bin/reload --socket /path/to/socket` for another
 server.
 
 Terminal capability entries occupy fixed tmux array slots (`[100]`), so repeated
@@ -141,7 +145,7 @@ Or put this in `local.conf` to change the history limit for new panes:
 set -g history-limit 50000
 ```
 
-Run `./reload` after editing either file. Alacritty merges imported tables and
+Run `./bin/reload` after editing either file. Alacritty merges imported tables and
 appends arrays, including keyboard bindings; tmux executes local settings last.
 Keep personal changes in these files so repository updates remain easy to pull.
 The small generated loader files are managed by the installer.
@@ -231,7 +235,7 @@ the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
 VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
 
-Update dalftui and run `./reload` on both machines. Reconnect older SSH windows
+Update dalftui and run `./bin/reload` on both machines. Reconnect older SSH windows
 through the dalftui launcher (the picker or `--connect HOST`): attachments without
 credentials cannot use F3, even if their old Unix socket is still reachable.
 Local folder opening continues to work without bridge credentials.
@@ -248,7 +252,7 @@ The bridge follows the tmux client that pressed F3, including when several
 clients attach to the same session. Your SSH server must allow Unix socket
 forwarding (`AllowStreamLocalForwarding`). A plain `ssh host` connection lacks
 the bridge; reconnect with the picker, or run
-`python3 ~/code/dalftui/ssh-picker.py --connect HOST` from your local terminal.
+`python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
 
 Both Unix and TCP bridges require a fresh, random 32-byte token for every SSH
@@ -293,32 +297,39 @@ availability under sustained connection flooding.
 
 ### Bridge version compatibility
 
-The desktop checks the remote protocol with
+The desktop checks for `bin/vscode.py` and checks the remote protocol with
 `python3 ~/.config/dalftui/bridge_protocol.py --version` before creating
-credentials or starting forwarding. A supported protocol is sufficient; the
-desktop and server do not need identical Git revisions. Old installations
-without a readable protocol declaration, and installations declaring an
-unsupported version, keep normal tmux login but skip the VS Code bridge. The
-launcher suggests updating dalftui from [GitHub](https://github.com/dalf/dalftui)
-on that server. It does not download or deploy the desktop checkout. Servers
-without tmux or without dalftui still connect silently as described above.
+credentials or starting forwarding. The desktop and server need the `bin/`
+command layout and a supported protocol declaration; they do not need identical
+Git revisions. Installations with the previous root command layout, without a
+readable protocol declaration, or declaring an unsupported version keep normal
+tmux login but skip the VS Code bridge. The launcher suggests updating dalftui
+from [GitHub](https://github.com/dalf/dalftui) on that server. It does not download
+or deploy the desktop checkout. Servers without tmux or without dalftui still
+connect silently as described above.
 
 Update from the server's existing checkout, then reconnect:
 
 ```sh
 git pull --ff-only
-./reload
+./install
+./bin/reload
 ```
 
-This checks compatibility, not whether GitHub has a newer release. It makes no
-freshness request to GitHub on login. Protocol version 1 retains the historical
-authenticated wire format: older requests and responses without the optional
-`protocol_version` field are interpreted as v1. Current peers include that
-field when it fits the existing 16 KiB limit; v1 messages at that boundary omit
-the optional metadata to preserve previously valid payloads. Unsupported declared
-versions are rejected before launching VS Code.
-Recognizing an old wire message does not make an undeclared remote installation
-eligible for bridge setup.
+Protocol version 2 records the move to `bin/`, including the remote editor's
+discovery path. Update both desktop and server checkouts and rerun installation
+before reconnecting. An old desktop cannot discover a new server's moved editor;
+a new desktop refuses bridge credentials for a server using the old root layout.
+On Windows, rerun `.\install.cmd` to regenerate the profile and Terminal actions.
+
+The check makes no freshness request to GitHub on login. The authenticated v1
+wire format remains supported: requests and responses without the optional
+`protocol_version` field are interpreted as v1. Current peers still emit v1
+messages, with metadata when it fits the existing 16 KiB limit. At that boundary,
+they omit the optional metadata to preserve valid payloads. The decoder also
+accepts v2 metadata with the same message semantics. Unsupported declared
+versions are rejected before launching VS Code. Recognizing an old wire message
+does not make an old root-layout or undeclared installation eligible for setup.
 
 ### Connect from Windows
 
@@ -336,7 +347,7 @@ cd "$HOME\code\dalftui"
 .\install.cmd
 ```
 
-`install.cmd` runs the existing `setup-windows.ps1` entrypoint in Windows
+`install.cmd` runs `install.ps1` in Windows
 PowerShell 5.1 with `-NoProfile -ExecutionPolicy Bypass`. The bypass applies only
 to the installer process. The wrapper forwards options and returns the
 installer's exit status; it also works from Command Prompt.
@@ -374,7 +385,7 @@ Chocolatey installations may require an administrator PowerShell.
 Setup adds a managed block to your current
 [PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles).
 It backs up an existing profile before changing it, preserves your personal
-settings, and loads `windows.ps1` from this checkout. Repeated setup keeps one
+settings, and loads `bin/profile.ps1` from this checkout. Repeated setup keeps one
 managed block; rerun it if you move the checkout or use another PowerShell host
 or version. After installation through `install.cmd`, open a new Windows
 PowerShell session to use `dssh`. To set up a PowerShell 7 profile, use the
@@ -454,8 +465,8 @@ Without PowerShell setup, including from Command Prompt, you can run the
 launcher directly:
 
 ```powershell
-py -3 "$HOME\code\dalftui\ssh-picker.py" --pick
-py -3 "$HOME\code\dalftui\ssh-picker.py" --connect my-vm
+py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --pick
+py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --connect my-vm
 ```
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
@@ -548,12 +559,13 @@ Update and reload dalftui on the VM before connecting from Windows:
 ```sh
 cd ~/code/dalftui
 git pull --ff-only
-./reload
+./bin/reload
 ```
 
 For later Windows updates, run `git pull --ff-only` in the Windows checkout,
 reload your profile with `. $PROFILE` or open a new PowerShell session, and start
-a new connection. The profile follows the checkout; no reinstall is needed.
+a new connection. After the one-time `bin/` layout migration, the profile follows
+the checkout; no reinstall is needed for later updates.
 
 You can also open a remote folder directly from your **local** terminal:
 
@@ -578,7 +590,7 @@ indicators for Claude running there.
 ## Repository
 
 On a new machine, clone your repository to a stable path and run `./install`
-and `./reload`, adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
+and `./bin/reload`, adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
 repository and connect it once:
 
 ```sh
@@ -617,15 +629,16 @@ needed. Representative layout:
 ├── mise.toml
 ├── install
 ├── install.cmd
-├── reload
-├── shortcuts.py
-├── ssh-picker.py
-├── vscode.py
-├── setup-windows.ps1
-├── windows.ps1
-├── windows-terminal.ps1
-├── windows-terminal.py
-├── tmux-start.sh
+├── install.ps1
+├── bin/
+│   ├── reload
+│   ├── shortcuts.py
+│   ├── ssh_picker.py
+│   ├── vscode.py
+│   ├── terminal_settings.py
+│   ├── profile.ps1
+│   ├── ssh-tab.ps1
+│   └── tmux-start.sh
 ├── config/
 ├── tests/
 │   ├── test_windows_launcher.py
@@ -635,7 +648,9 @@ needed. Representative layout:
 │   ├── test_remote_bootstrap.py
 │   └── fixtures/
 │       ├── bridge_protocol_v1.py
-│       └── ssh_bootstrap_v1.py
+│       ├── bridge_protocol_v2.py
+│       ├── ssh_bootstrap_v1.py
+│       └── ssh_bootstrap_v2.py
 └── vendor/
     └── catppuccin/
 ```
@@ -649,36 +664,41 @@ portable helpers can be imported on other operating systems.
 In particular, [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py)
 generates Linux-server shell programs from portable Python and is also used by
 Windows desktops. [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) is
-the canonical startup policy: the root script forwards local startup, while
+the canonical startup policy: `bin/tmux-start.sh` forwards local startup, while
 remote execution embeds the canonical policy directly.
 
-The root paths are deliberate public and compatibility entrypoints:
+Installation entrypoints stay at the root; runtime and maintenance commands
+live in `bin/`:
 
 | Path | Role |
 | --- | --- |
 | [install](install) | Linux installation CLI |
 | [install.cmd](install.cmd) | Windows installation launcher with a process-scoped execution-policy bypass |
-| [reload](reload) | Linux configuration reload CLI |
-| [shortcuts.py](shortcuts.py) | Shortcut-guide launcher and installed compatibility target |
-| [ssh-picker.py](ssh-picker.py) | Shared SSH launcher |
-| [vscode.py](vscode.py) | Shared editor launcher and remote discovery target |
-| [setup-windows.ps1](setup-windows.ps1) | Retained Windows PowerShell setup entrypoint |
-| [windows.ps1](windows.ps1) | Existing PowerShell profile-loader target |
-| [windows-terminal.ps1](windows-terminal.ps1) | Existing Terminal-tab launcher target |
-| [windows-terminal.py](windows-terminal.py) | Terminal settings CLI |
-| [tmux-start.sh](tmux-start.sh) | Existing local terminal startup target |
+| [install.ps1](install.ps1) | Windows PowerShell installation CLI |
+| [bin/reload](bin/reload) | Linux configuration reload CLI |
+| [bin/shortcuts.py](bin/shortcuts.py) | Shortcut-guide launcher |
+| [bin/ssh_picker.py](bin/ssh_picker.py) | Shared SSH launcher |
+| [bin/vscode.py](bin/vscode.py) | Shared editor launcher and remote discovery target |
+| [bin/profile.ps1](bin/profile.ps1) | PowerShell profile loader |
+| [bin/ssh-tab.ps1](bin/ssh-tab.ps1) | Terminal SSH-tab launcher |
+| [bin/terminal_settings.py](bin/terminal_settings.py) | Terminal settings CLI |
+| [bin/tmux-start.sh](bin/tmux-start.sh) | Local terminal startup target |
 | [bridge_protocol.py](bridge_protocol.py) | Canonical standalone contract and version declaration |
 
-Existing profile entries, tmux bindings, Alacritty configuration, installed paths,
-and historical SSH probes depend on these locations. Keep them stable.
-`bridge_protocol.py` contains the actual contract and version declaration;
-it is not a forwarding wrapper.
+Each launcher resolves the checkout and forwards to the package implementation.
+No pip installation or particular working directory is required. The previous
+root runtime paths have been removed. After updating from that layout, rerun
+`./install` and `./bin/reload` on Linux, or `.\install.cmd` on Windows, to
+regenerate links, profile entries, and Terminal actions. `bridge_protocol.py`
+contains the actual contract and version declaration; it is not a forwarding
+wrapper.
 
 ### Filename conventions
 
 These conventions apply to filenames, directories, and placement:
 
 - Importable Python modules and package directories use `snake_case`.
+- Python command launchers in `bin/` also use `snake_case`.
 - Shell and PowerShell script filenames use lowercase words, with hyphens when
   needed. Prefer purpose-specific names such as `profile.ps1`, `ssh-tab.ps1`,
   and `terminal_settings.py`.
@@ -687,9 +707,8 @@ These conventions apply to filenames, directories, and placement:
 - Tests stay flat and use `test_<feature>.py`. Windows-focused launcher and
   integration suites may use `test_windows_<feature>.py`; shared bridge tests
   use feature names without a Windows label.
-- Historical fixtures keep their versioned names and remain frozen. Existing
-  root command names are compatibility exceptions; vendored upstream filenames
-  remain unchanged.
+- Historical fixtures keep their versioned names and remain frozen. Vendored
+  upstream filenames remain unchanged.
 
 Keep `config/`, `vendor/`, and the flat test layout. Apply these rules when adding
 or moving files; they do not call for renaming functions, classes, variables,
@@ -709,9 +728,9 @@ correctly, even if the JSON field names are unchanged.
 the Linux server's shell programs from portable Python, including on Windows
 desktops. [dalftui/ssh.py](dalftui/ssh.py) runs SSH and manages the desktop bridge.
 The generator embeds [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh)
-so remote tmux startup works without a dalftui installation. The root
-[tmux-start.sh](tmux-start.sh) forwards local startup to that canonical policy;
-existing Alacritty configuration and installed checkout links keep working.
+so remote tmux startup works without a dalftui installation.
+[bin/tmux-start.sh](bin/tmux-start.sh) forwards local startup to that canonical
+policy; Alacritty invokes it through the installed checkout link.
 
 Check both older remote clients with the current desktop bridge and current
 remote clients with supported older desktop bridges. The frozen historical peer
@@ -724,8 +743,10 @@ its absence. [AGENTS.md](AGENTS.md) requires agents to record that compatibility
 assessment and add a test for affected historical behavior.
 The frozen installation probe in
 [tests/fixtures/ssh_bootstrap_v1.py](tests/fixtures/ssh_bootstrap_v1.py) also checks
-older desktops against the current installed layout, while current bootstrap
-tests check supported historical root layouts before delivering credentials.
+the deliberate rejection of the new layout by older desktops, while the frozen
+v2 probe in [tests/fixtures/ssh_bootstrap_v2.py](tests/fixtures/ssh_bootstrap_v2.py)
+checks the new installed layout. Current bootstrap tests refuse credentials for
+old root-only installations and exercise the frozen v2 layout.
 
 ## Repository tasks
 
@@ -750,8 +771,8 @@ mise tasks
 | `mise run test:bridge` | Shared bridge lifecycle and historical compatibility tests |
 | `mise run test:powershell` | Windows setup and profile integration |
 | `mise run install:linux` | Linux installation through `./install` |
-| `mise run install:windows` | Windows installation through `setup-windows.ps1` |
-| `mise run reload:linux` | Reload Linux settings through `./reload` |
+| `mise run install:windows` | Windows installation through `install.ps1` |
+| `mise run reload:linux` | Reload Linux settings through `./bin/reload` |
 | `mise run ssh:list` | List SSH picker hosts without opening a connection |
 
 `mise run` defaults to `check`. Use installation and reload tasks on their target
@@ -772,8 +793,8 @@ mise run test:powershell
 mise run install:windows -- -PackageManager choco -VSCodePath 'C:\Tools\VS Code Portable'
 ```
 
-Setup updates the profile for the selected PowerShell host. The root scripts
-remain available for direct use. GitHub Actions uses these same tasks while
+Setup updates the profile for the selected PowerShell host. The installers and
+`bin/` launchers remain available for direct use. GitHub Actions uses these same tasks while
 selecting Python and PowerShell versions through its existing matrix.
 
 ## Verification
@@ -794,7 +815,7 @@ environment automatically.
 
 `mise run pylint` runs Pylint 4.1.2 through uv using the current platform's
 `python3` or `python` interpreter and [.pylintrc](.pylintrc). It checks `dalftui/`,
-the Python root entrypoints (including `install` and `reload`), the standalone
+the Python command entrypoints (including `install` and `bin/reload`), the standalone
 bridge contract, and `tests/`. Vendored code and frozen historical fixtures are
 excluded. The configuration targets Python 3.11, disables docstring requirements,
 line-length and size heuristics, and recognizes the checkout's import/bootstrap

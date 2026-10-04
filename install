@@ -26,7 +26,7 @@ def main():
         return 1
     if not args.dry_run:
         target = 'tmux' if profile == 'tmux-only' else 'Alacritty and tmux'
-        print(f'Run ./reload to apply the configuration to running {target}.')
+        print(f'Run ./bin/reload to apply the configuration to running {target}.')
     return 0
 
 

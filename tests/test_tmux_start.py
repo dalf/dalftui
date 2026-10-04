@@ -9,7 +9,7 @@ import unittest
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-STARTER = ROOT / 'tmux-start.sh'
+STARTER = ROOT / 'bin/tmux-start.sh'
 
 
 @unittest.skipIf(sys.platform == 'win32', 'The tmux entrypoint runs in a POSIX shell')
@@ -92,7 +92,8 @@ class TmuxStartTests(unittest.TestCase):
         checkout = self.directory / "checkout's $cash ; & é $(probe)"
         policy = checkout / 'dalftui/linux/tmux-start.sh'
         policy.parent.mkdir(parents=True)
-        shutil.copy2(STARTER, checkout / 'tmux-start.sh')
+        (checkout / 'bin').mkdir()
+        shutil.copy2(STARTER, checkout / 'bin/tmux-start.sh')
         shutil.copy2(ROOT / 'dalftui/linux/tmux-start.sh', policy)
         policy.write_text('printf "%s\\0" "$@" > "$TEST_FORWARD_ARGS"\n' + policy.read_text())
         installed = self.directory / 'home/.config/dalftui'
@@ -103,7 +104,7 @@ class TmuxStartTests(unittest.TestCase):
         argument_log = self.directory / 'forward-arguments'
         arguments = ['with spaces', '', "apostrophe's", '$cash ; & é $(probe)', '*?[]']
         env = dict(self.env, TEST_FORWARD_ARGS=str(argument_log), TEST_TMUX_STATUS='23')
-        for entrypoint in (checkout / 'tmux-start.sh', installed / 'tmux-start.sh'):
+        for entrypoint in (checkout / 'bin/tmux-start.sh', installed / 'bin/tmux-start.sh'):
             with self.subTest(entrypoint=entrypoint):
                 result = subprocess.run(['/bin/sh', str(entrypoint), *arguments],
                                         cwd=outside, env=env, capture_output=True,

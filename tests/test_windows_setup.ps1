@@ -2,7 +2,7 @@
 # Standalone assertions: no Pester, package installations, or personal profiles.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-. (Join-Path $repo 'setup-windows.ps1')
+. (Join-Path $repo 'install.ps1')
 $root = Join-Path ([IO.Path]::GetTempPath()) ('dalftui-setup-test-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $checks = 0
@@ -17,8 +17,8 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 }
 function Copy-DalftuiWindowsCheckout([string]$Source, [string]$Destination) {
     [IO.Directory]::CreateDirectory((Join-Path $Destination 'dalftui\windows')) | Out-Null
-    foreach ($file in @('setup-windows.ps1', 'windows.ps1', 'windows-terminal.ps1',
-                         'windows-terminal.py', 'dalftui\__init__.py',
+    foreach ($file in @('install.cmd', 'install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
+                         'bin/terminal_settings.py', 'dalftui\__init__.py',
                          'dalftui\windows\__init__.py', 'dalftui\windows\setup.ps1',
                          'dalftui\windows\profile.ps1', 'dalftui\windows\ssh-tab.ps1',
                          'dalftui\windows\terminal_settings.py')) {
@@ -34,9 +34,9 @@ try {
     foreach ($function in @('Find-DalftuiApplication', 'Write-DalftuiProfile',
                              'Set-DalftuiTerminalShortcut', 'Invoke-DalftuiWindowsSetup')) {
         Assert-True (Test-Path -LiteralPath ("Function:\" + $function)) `
-            "Dot-sourcing root setup-windows.ps1 must expose $function without running setup"
+            "Dot-sourcing root install.ps1 must expose $function without running setup"
     }
-    foreach ($file in @('setup-windows.ps1', 'windows.ps1', 'windows-terminal.ps1',
+    foreach ($file in @('install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
                          'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1',
                          'dalftui\windows\ssh-tab.ps1')) {
         $parseErrors = $null
@@ -66,6 +66,7 @@ function Invoke-DalftuiWindowsSetup {
         NoTerminal = [bool]$NoTerminal
         SettingsPaths = @($SettingsPaths)
         SelectedVSCodePath = $SelectedVSCodePath
+        ProcessPolicy = (Get-ExecutionPolicy -Scope Process).ToString()
     }
     [IO.File]::WriteAllText($env:DALFTUI_SETUP_PROBE,
         (ConvertTo-Json -Compress -Depth 3 -InputObject $result),
@@ -83,7 +84,7 @@ function Invoke-DalftuiWindowsSetup {
     $settingsOne = Join-Path $root 'Terminal stable settings.json'
     $settingsTwo = Join-Path $root ("Terminal preview's " + [char]0xe9 + '.json')
     $wrapperLiteral = ConvertTo-DalftuiSingleQuotedLiteral `
-        (Join-Path $forwardingCheckout 'setup-windows.ps1')
+        (Join-Path $forwardingCheckout 'install.ps1')
     # Group concatenations so commas separate lines instead of joining operands.
     $runnerLines = @(
         '$ErrorActionPreference = ''Stop''',
@@ -142,6 +143,38 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True (($failureOutput | Out-String).Contains('Setup failed: probe failure')) `
         'A setup implementation failure must retain the Setup failed message'
     Remove-Item Env:\DALFTUI_SETUP_PROBE_FAIL
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        # Exercise the CMD installer through the renamed PowerShell entrypoint
+        # in a copied checkout, without touching any real profile or packages.
+        $cmdInstaller = Join-Path $forwardingCheckout 'install.cmd'
+        Push-Location -LiteralPath $unrelated
+        try {
+            $null = & $cmdInstaller -PackageManager choco -SkipFzf `
+                -VSCodePath $selectedCode -ProfilePath $targetProfile -SkipTerminal `
+                -TerminalSettingsPath $settingsOne
+            Assert-True ($LASTEXITCODE -eq 0) 'install.cmd must preserve successful setup status'
+            $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
+            Assert-True ($forwarded.Checkout -eq $forwardingCheckout -and
+                         $forwarded.Preference -eq 'choco' -and $forwarded.Skip -and
+                         $forwarded.TargetProfile -eq $targetProfile -and $forwarded.NoTerminal -and
+                         $forwarded.SelectedVSCodePath -eq $selectedCode -and
+                         $forwarded.SettingsPaths[0] -eq $settingsOne) `
+                'install.cmd must locate install.ps1 and preserve options from another directory'
+            Assert-True ($forwarded.ProcessPolicy -eq 'Bypass') `
+                'install.cmd must set the bypass policy for its child process'
+            $env:DALFTUI_SETUP_PROBE_FAIL = '1'
+            $ErrorActionPreference = 'Continue'
+            $failureOutput = & $cmdInstaller 2>&1
+            $failureExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+            Remove-Item Env:\DALFTUI_SETUP_PROBE_FAIL -ErrorAction SilentlyContinue
+            Pop-Location
+        }
+        Assert-True ($failureExitCode -eq 1) 'install.cmd must preserve failed setup status'
+        Assert-True (($failureOutput | Out-String).Contains('Setup failed: probe failure')) `
+            'install.cmd must retain the setup failure message'
+    }
     Remove-Item Env:\DALFTUI_SETUP_PROBE
 
     # Check Windows qualification semantics on every platform; IsPathRooted
@@ -366,11 +399,11 @@ function Invoke-DalftuiWindowsSetup {
     Assert-Throws { Write-DalftuiProfile -Path $profile -Checkout $checkout } 'An incomplete block must not be overwritten'
     Assert-True ([IO.File]::ReadAllText($profile) -eq '# >>> dalftui >>>') 'Malformed profile must remain untouched'
 
-    # Exercise a pre-refactor profile entry -> root wrapper -> moved profile
-    # implementation without rerunning setup, SSH, or a GUI.
-    [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
+    # Exercise the installed profile -> bin launcher -> profile implementation
+    # without SSH or a GUI.
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
     $connectionProfile = Join-Path $root 'connection-profile.ps1'
-    $existingLoader = ". '" + (Join-Path $checkout 'windows.ps1').Replace("'", "''") + "'"
+    $existingLoader = ". '" + (Join-Path $checkout 'bin/profile.ps1').Replace("'", "''") + "'"
     [IO.File]::WriteAllText($connectionProfile, $existingLoader + [Environment]::NewLine,
         [Text.UTF8Encoding]::new($true))
     . $connectionProfile
@@ -382,14 +415,14 @@ function Invoke-DalftuiWindowsSetup {
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
-    [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(0)')
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(0)')
     . $connectionProfile
     $null = dssh
     Assert-True ($LASTEXITCODE -eq 0) 'Repeated profile loading must not capture or reuse an old exit status'
-    [IO.File]::WriteAllText((Join-Path $checkout 'ssh-picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
     # Run the local editor callback with a fake Python backend. The folder is
     # passed as one argument, including drive letters and shell metacharacters.
-    [IO.File]::WriteAllText((Join-Path $checkout 'vscode.py'), 'import json, sys; print(json.dumps(sys.argv[1:]))')
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/vscode.py'), 'import json, sys; print(json.dumps(sys.argv[1:]))')
     $editorFolder = Join-Path $root ("project's %cash & " + [char]0xe9)
     [IO.Directory]::CreateDirectory($editorFolder) | Out-Null
     Push-Location -LiteralPath $editorFolder
@@ -404,17 +437,16 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
     $handler = $handlers | Where-Object { $_.Key -in @('Shift+Ctrl+F3', 'Ctrl+Shift+F3') }
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Native Ctrl+Shift+F3 must also work at a PowerShell prompt'
-    # Exercise a pre-refactor Terminal action target in a fresh process before
-    # regenerating settings. The retained root launcher must reach the moved
-    # implementation without a personal PowerShell profile.
+    # Exercise the bin Terminal launcher in a fresh process without a personal
+    # PowerShell profile before generating settings.
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
     $terminalShell = Join-Path $PSHOME $shellName
-    $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'windows-terminal.ps1')
+    $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'bin/ssh-tab.ps1')
     $arguments = ConvertFrom-Json -InputObject $argumentJson
-    Assert-True (($arguments -join ' ') -eq '--pick') 'An existing Terminal action must still forward --pick without a personal profile'
-    Assert-True ($LASTEXITCODE -eq 17) 'An existing Terminal action must preserve SSH/picker exit status'
+    Assert-True (($arguments -join ' ') -eq '--pick') 'The Terminal launcher must forward --pick without a personal profile'
+    Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
 
     $settingsPath = Join-Path $root 'terminal-settings.json'
     [IO.File]::WriteAllText($settingsPath, '{"actions":[],"keybindings":[]}')
@@ -432,15 +464,15 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True ($settings.keybindings[1].keys -eq 'ctrl+shift+f3') 'Setup must install Ctrl+Shift+F3'
     Assert-True ($settings.actions[1].command.input -eq ([char]2 + [string][char]27 + 'OR')) 'Editor shortcut must send the existing tmux F3 sequence'
     Assert-True ($settings.actions[0].command.commandline.Contains(
-                    (Join-Path $checkout 'windows-terminal.ps1'))) `
-        'Generated Terminal actions must continue targeting the retained root launcher'
+                    (Join-Path $checkout 'bin/ssh-tab.ps1'))) `
+        'Generated Terminal actions must target the bin launcher'
     $installedSettings = [IO.File]::ReadAllBytes($settingsPath)
     $terminalBackups = @(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak')
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath)
     Assert-True ([Convert]::ToBase64String($installedSettings) -eq
                  [Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath))) `
-        'Relocation alone must not rewrite an already configured Terminal action'
+        'An unchanged setup must not rewrite an already configured Terminal action'
     Assert-True (@(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak').Count -eq
                  $terminalBackups.Count) `
         'An idempotent Terminal rerun must not create another backup'

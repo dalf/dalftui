@@ -6,7 +6,7 @@ param(
 # A new Terminal tab runs this file without depending on a personal profile.
 $ErrorActionPreference = 'Stop'
 try {
-    . (Join-Path $Checkout 'windows.ps1')
+    . (Join-Path $Checkout 'bin/profile.ps1')
     dssh
     exit $LASTEXITCODE
 } catch {

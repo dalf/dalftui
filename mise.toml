@@ -17,8 +17,8 @@ run = "uvx codespell==2.4.3"
 [tasks.pylint]
 description = "Check Python source, entrypoints, and tests with Pylint"
 alias = "lint"
-run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install reload shortcuts.py ssh-picker.py vscode.py windows-terminal.py"
-run_windows = "uvx --python python pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install reload shortcuts.py ssh-picker.py vscode.py windows-terminal.py"
+run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py"
+run_windows = "uvx --python python pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py"
 
 [tasks.test]
 description = "Run all tests for the current platform"
@@ -55,15 +55,15 @@ run = "./install"
 [tasks."install:windows"]
 description = "Set up Windows PowerShell, fzf, and Terminal integration"
 raw_args = true
-run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./setup-windows.ps1"
+run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./install.ps1"
 
 [tasks."reload:linux"]
 description = "Reload Linux configuration (accepts --socket PATH)"
 raw_args = true
-run = "./reload"
+run = "./bin/reload"
 
 [tasks."ssh:list"]
 description = "List SSH picker hosts without opening a connection"
 raw_args = true
-run = "python3 ssh-picker.py --list"
-run_windows = "python ssh-picker.py --list"
+run = "python3 bin/ssh_picker.py --list"
+run_windows = "python bin/ssh_picker.py --list"

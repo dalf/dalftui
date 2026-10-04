@@ -52,7 +52,7 @@ not establish compatibility when their meaning or bootstrap behavior changes.
 - [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py) is portable
   Python generating Linux-server shell programs, also used by Windows desktops.
   [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) owns the canonical
-  startup policy. Root `tmux-start.sh` forwards local startup; remote execution
+  startup policy. `bin/tmux-start.sh` forwards local startup; remote execution
   embeds the canonical policy directly.
 - The package runs from the checkout without pip installation. Keep `config/`,
   `vendor/`, and the flat `tests/` layout; do not add speculative platform directories.
@@ -67,20 +67,22 @@ not establish compatibility when their meaning or bootstrap behavior changes.
 - Tests use `test_<feature>.py`; Windows-focused launcher/integration suites may
   use `test_windows_<feature>.py`. Shared bridge tests have feature names without
   a Windows label. Historical fixtures retain versioned names and remain frozen.
-- Existing root command names are compatibility exceptions. Vendored upstream
+- Python command launchers in `bin/` also use `snake_case`. Vendored upstream
   filenames remain unchanged. These conventions concern filenames, directories,
   and placement, not global renaming of functions, classes, variables, or clear files.
 
-Keep the intentional root entrypoints: `install` and `reload` are Linux CLIs;
-`shortcuts.py` launches the guide and remains an installed compatibility target;
-`ssh-picker.py` and `vscode.py` launch shared SSH/editor code, with `vscode.py`
-also serving remote discovery. `setup-windows.ps1` is the Windows setup CLI;
-`windows.ps1` and `windows-terminal.ps1` remain the profile-loader and Terminal-tab
-targets; `windows-terminal.py` is the Terminal settings CLI; `tmux-start.sh` is
-the local startup target. Existing profiles, tmux bindings, Alacritty configuration,
-installed paths, and historical SSH probes depend on these locations.
+Keep installation entrypoints at the root: `install` is the Linux installer;
+`install.cmd` invokes the Windows installer `install.ps1` with a process-scoped
+execution-policy bypass. Runtime and maintenance launchers belong in `bin/`:
+`reload`, `shortcuts.py`, `ssh_picker.py`, `vscode.py`, `terminal_settings.py`,
+`profile.ps1`, `ssh-tab.ps1`, and `tmux-start.sh`. They forward to implementations
+under `dalftui/` and resolve the checkout independently of the working directory.
+Python launchers resolve symlinks before finding the checkout.
+The previous root runtime paths were deliberately removed; do not add aliases
+for them. Regenerate installed links, profiles, and Terminal actions by rerunning
+installation when changing these paths. Remote discovery requires `bin/vscode.py`.
 Root `bridge_protocol.py` contains the actual standalone contract and version
-declaration; it is not a forwarding wrapper. Do not remove or rename these paths.
+declaration; it remains importable without platform integrations.
 
 ## Verification
 
@@ -108,7 +110,7 @@ mise run pylint
 
 This invokes Pylint 4.1.2 through uv, using the existing platform Python and
 [.pylintrc](.pylintrc). It checks the package, Python entrypoints (including
-`install` and `reload`), standalone bridge contract, and tests; vendored code and
+`install` and `bin/reload`), standalone bridge contract, and tests; vendored code and
 frozen historical fixtures are excluded. Documentation and size/layout rules
 are relaxed while correctness checks remain enabled. Both CI workflows use this
 task. Fix useful diagnostics; keep any additional suppression narrow and explain

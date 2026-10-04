@@ -4,7 +4,7 @@ param(
 )
 
 # Loaded by the PowerShell profile; the implementation follows this checkout.
-$dalftuiPickerPath = Join-Path $Checkout 'ssh-picker.py'
+$dalftuiPickerPath = Join-Path $Checkout 'bin/ssh_picker.py'
 $dalftuiCommand = {
     [CmdletBinding()]
     param([Parameter(Position = 0)][ValidateNotNullOrEmpty()][string]$HostName)
@@ -31,7 +31,7 @@ Set-Item -Path Function:\global:dssh -Value $dalftuiCommand
 
 # Terminal sends the same Ctrl+B, F3 sequence used by remote tmux. PSReadLine
 # handles it at a local prompt without inserting or executing command-line text.
-$dalftuiEditorPath = Join-Path $Checkout 'vscode.py'
+$dalftuiEditorPath = Join-Path $Checkout 'bin/vscode.py'
 $dalftuiOpenFolder = {
     $location = Get-Location
     if ($location.Provider.Name -ne 'FileSystem') {

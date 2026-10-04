@@ -176,7 +176,7 @@ class DesktopPickerTests(unittest.TestCase):
                     return self.choose([key], hosts)[0]
 
                 with (patch.object(sys, 'platform', 'linux'),
-                      patch.object(sys, 'argv', ['ssh-picker.py']),
+                      patch.object(sys, 'argv', ['bin/ssh_picker.py']),
                       patch.object(picker, 'target_hosts', return_value=['server']) as hosts,
                       patch.object(ssh_picker.curses, 'wrapper', side_effect=wrapper),
                       patch.object(ssh_picker, 'open_window') as window):
@@ -193,7 +193,7 @@ class DesktopPickerTests(unittest.TestCase):
             with self.subTest(error=error):
                 output = io.StringIO()
                 with (patch.object(sys, 'platform', 'linux'),
-                      patch.object(sys, 'argv', ['ssh-picker.py']),
+                      patch.object(sys, 'argv', ['bin/ssh_picker.py']),
                       patch.object(picker, 'target_hosts', return_value=['server']),
                       patch.object(ssh_picker.curses, 'wrapper', side_effect=error),
                       patch('builtins.input', side_effect=EOFError) as prompt,
@@ -207,7 +207,7 @@ class DesktopWindowTests(unittest.TestCase):
     def test_default_desktop_without_curses_keeps_the_cli_error(self):
         output = io.StringIO()
         with (patch.object(sys, 'platform', 'linux'),
-              patch.object(sys, 'argv', ['ssh-picker.py']),
+              patch.object(sys, 'argv', ['bin/ssh_picker.py']),
               patch.object(ssh_picker, 'curses', None),
               patch.object(picker, 'target_hosts') as hosts,
               redirect_stderr(output)):

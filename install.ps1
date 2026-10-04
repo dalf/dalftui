@@ -3,13 +3,13 @@
 .SYNOPSIS
 Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts.
 .EXAMPLE
-.\setup-windows.ps1
+.\install.ps1
 .EXAMPLE
-.\setup-windows.ps1 -PackageManager choco
+.\install.ps1 -PackageManager choco
 .EXAMPLE
-.\setup-windows.ps1 -SkipFzf
+.\install.ps1 -SkipFzf
 .EXAMPLE
-.\setup-windows.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
+.\install.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
 #>
 [CmdletBinding()]
 param(

@@ -98,7 +98,7 @@ def pick_fzf(hosts=None):
     """Use the native Windows fzf picker, also available with --pick on Linux."""
     executable = shutil.which('fzf')
     if not executable:
-        raise RuntimeError('fzf was not found. Run setup-windows.ps1, or install fzf '
+        raise RuntimeError('fzf was not found. Run install.cmd, or install fzf '
                            'with winget or Chocolatey. Use --connect HOST to connect directly.')
     hosts = target_hosts() if hosts is None else hosts
     if not hosts:

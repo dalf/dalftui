@@ -159,7 +159,7 @@ class EditorTests(DisposableSetup):
         env.pop('PYTHONPATH', None)
         folder = self.directory / "project's $cash ; é"
         folder.mkdir()
-        result = subprocess.run([sys.executable, str(self.paths.root / 'vscode.py'),
+        result = subprocess.run([sys.executable, str(self.paths.root / 'bin/vscode.py'),
                                  '--folder', str(folder)], cwd=self.paths.home_dir,
                                 env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)

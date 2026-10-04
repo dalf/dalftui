@@ -97,7 +97,7 @@ def open_window(host):
     env.pop('TMUX_PANE', None)
     # -e overrides the normal local-tmux startup command for this new OS window.
     args = [alacritty, '--title', f'SSH · {host}', '-e', sys.executable,
-            str(ssh.CHECKOUT_ROOT / 'ssh-picker.py'), '--connect', host]
+            str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host]
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(args, env=env, start_new_session=True,
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)

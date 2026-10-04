@@ -162,7 +162,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
         (paths.root, Snapshot('link', str(repo))),
         (paths.tmux, Snapshot('file', tmux)),
         (paths.config_dir / 'tmux/shortcuts.py',
-         Snapshot('link', str(paths.root / 'shortcuts.py'))),
+         Snapshot('link', str(paths.root / 'bin/shortcuts.py'))),
     ]
     if profile == 'desktop':
         desired.append((paths.alacritty, Snapshot('file', alacritty)))

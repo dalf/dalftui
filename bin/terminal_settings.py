@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Compatibility launcher for SSH host selection and connections."""
+"""Command launcher for Windows Terminal configuration."""
 from pathlib import Path
 import sys
 
 sys.dont_write_bytecode = True
-CHECKOUT = Path(__file__).resolve().parent
+CHECKOUT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CHECKOUT))
 
-from dalftui.ssh import main
+from dalftui.windows.terminal_settings import main
 
 
 if __name__ == '__main__':
