@@ -265,6 +265,52 @@ function Invoke-DalftuiWindowsSetup {
     $configuredJson = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($editorConfig))
     Assert-True (Test-DalftuiFullyQualifiedPath ([string]$configuredJson.code)) 'The persisted VS Code path must be fully qualified'
 
+    [IO.File]::WriteAllText((Join-Path $portableBin 'code'), '')
+    Assert-True ((Resolve-DalftuiVSCode (Join-Path $portableBin 'code')) -eq (Join-Path $portable 'Code.exe')) 'The Git Bash launcher must resolve to the installation executable'
+    if ([IO.Path]::DirectorySeparatorChar -eq [char]92) {
+        $bashPath = '/' + $portable.Substring(0, 1).ToLowerInvariant() +
+            $portable.Substring(2).Replace('\', '/') + '/bin/code'
+        Assert-True (-not (Test-DalftuiFullyQualifiedWindowsPath $bashPath)) 'Git Bash syntax must not relax PATH discovery rules'
+        Assert-True ((Set-DalftuiVSCodeConfiguration -RequestedPath $bashPath -ConfigPath $editorConfig) -eq
+            (Join-Path $portable 'Code.exe')) 'An explicit Git Bash path must configure the selected installation'
+        $configuredJson = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($editorConfig))
+        Assert-True ($configuredJson.code -eq (Join-Path $portable 'Code.exe')) 'Git Bash paths must be persisted as fully qualified Windows executable paths'
+        Assert-Throws { Set-DalftuiVSCodeConfiguration -RequestedPath '/bin/code' -ConfigPath $editorConfig } 'Current-drive-rooted paths must still be rejected'
+    }
+
+    # Model an update leaving both a flat tree and multiple version directories.
+    $versioned = Join-Path $root 'versioned VS Code'
+    $versionedApp = Join-Path $versioned 'Code.exe'
+    $versionedBin = Join-Path $versioned 'bin'
+    [IO.Directory]::CreateDirectory($versionedBin) | Out-Null
+    [IO.File]::WriteAllText($versionedApp, '')
+    $versionedLauncher = Join-Path $versionedBin 'code.cmd'
+    foreach ($version in @('', '04c0d99f4f', '07f806f999')) {
+        $versionCli = Join-Path (Join-Path $versioned $version) 'resources\app\out\cli.js'
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($versionCli)) | Out-Null
+        [IO.File]::WriteAllText($versionCli, '')
+    }
+    foreach ($version in @('04c0d99f4f', '07f806f999')) {
+        $versionCli = Join-Path (Join-Path $versioned $version) 'resources\app\out\cli.js'
+        $launcherText = '@echo off' + [Environment]::NewLine +
+            '"%~dp0..\Code.exe" "%~dp0..\' + $version + '\resources\app\out\cli.js" %*'
+        [IO.File]::WriteAllText($versionedLauncher, $launcherText)
+        Assert-True ((Get-DalftuiVSCodeCli $versionedApp) -eq $versionCli) 'The installed launcher must select the active CLI, including after an update'
+        Assert-True ((Find-DalftuiVSCode $versionedBin) -eq $versionedApp) 'PATH discovery must support versioned installations'
+        Assert-True ((Set-DalftuiVSCodeConfiguration -RequestedPath $versionedApp -ConfigPath $editorConfig) -eq $versionedApp) 'Setup must accept versioned installations'
+    }
+    [IO.File]::Delete($versionCli)
+    Assert-Throws { Resolve-DalftuiVSCode $versionedApp } 'A missing active CLI must not fall back to an old flat tree or another version'
+    Assert-True ($null -eq (Find-DalftuiVSCode $versionedBin)) 'Discovery must reject an installation with a missing active CLI'
+
+    $outsideCli = Join-Path $root 'resources\app\out\cli.js'
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($outsideCli)) | Out-Null
+    [IO.File]::WriteAllText($outsideCli, '')
+    [IO.File]::Delete((Join-Path $versioned 'resources\app\out\cli.js'))
+    [IO.File]::WriteAllText($versionedLauncher,
+        '"%~dp0..\Code.exe" "%~dp0..\..\resources\app\out\cli.js" %*')
+    Assert-Throws { Resolve-DalftuiVSCode $versionedApp } 'The launcher must not select CLI paths outside the installation'
+
     $originalFind = (Get-Item Function:\Find-DalftuiApplication).ScriptBlock
     $originalInstall = (Get-Item Function:\Invoke-DalftuiPackageInstall).ScriptBlock
     $originalPath = (Get-Item Function:\Update-DalftuiProcessPath).ScriptBlock

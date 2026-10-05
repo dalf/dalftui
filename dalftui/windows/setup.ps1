@@ -22,6 +22,23 @@ function Test-DalftuiFullyQualifiedPath([string]$Path) {
     return [IO.Path]::IsPathRooted($Path)
 }
 
+function Get-DalftuiVSCodeCli([string]$Application) {
+    $installation = [IO.Path]::GetDirectoryName($Application)
+    $launcher = Join-Path $installation 'bin\code.cmd'
+    if ([IO.File]::Exists($launcher)) {
+        # Read the active version from the installed launcher without executing
+        # batch code or guessing among directories left behind by an update.
+        $pattern = '(?im)^\s*"%~dp0\.\.[\\/]Code\.exe"\s+"%~dp0\.\.[\\/]' +
+            '(?<cli>(?:[0-9a-f]+[\\/])?resources[\\/]app[\\/]out[\\/]cli\.js)"'
+        $match = [regex]::Match([IO.File]::ReadAllText($launcher), $pattern)
+        if ($match.Success) {
+            $relativeCli = $match.Groups['cli'].Value.Replace('\', [IO.Path]::DirectorySeparatorChar)
+            return Join-Path $installation $relativeCli
+        }
+    }
+    return Join-Path $installation 'resources\app\out\cli.js'
+}
+
 function Resolve-DalftuiVSCode([string]$Path) {
     if (-not (Test-DalftuiFullyQualifiedPath $Path)) {
         throw 'The VS Code installation path must be a fully qualified absolute path.'
@@ -33,7 +50,8 @@ function Resolve-DalftuiVSCode([string]$Path) {
         $name = [IO.Path]::GetFileName($fullPath)
         if ($name.Equals('Code.exe', [StringComparison]::OrdinalIgnoreCase)) {
             $application = $fullPath
-        } elseif ($name.Equals('code.cmd', [StringComparison]::OrdinalIgnoreCase) -or
+        } elseif ($name.Equals('code', [StringComparison]::OrdinalIgnoreCase) -or
+                  $name.Equals('code.cmd', [StringComparison]::OrdinalIgnoreCase) -or
                   $name.Equals('code.bat', [StringComparison]::OrdinalIgnoreCase)) {
             $bin = [IO.Directory]::GetParent($fullPath)
             if (-not $bin -or -not $bin.Parent) {
@@ -41,13 +59,13 @@ function Resolve-DalftuiVSCode([string]$Path) {
             }
             $application = Join-Path $bin.Parent.FullName 'Code.exe'
         } else {
-            throw "Select the VS Code installation directory, Code.exe, or its bin\code.cmd: $fullPath"
+            throw "Select the VS Code installation directory, Code.exe, or its bin\code launcher: $fullPath"
         }
     }
     $application = [IO.Path]::GetFullPath($application)
-    $cli = Join-Path ([IO.Path]::GetDirectoryName($application)) 'resources\app\out\cli.js'
+    $cli = Get-DalftuiVSCodeCli $application
     if (-not [IO.File]::Exists($application) -or -not [IO.File]::Exists($cli)) {
-        throw "The VS Code installation must contain Code.exe and resources\app\out\cli.js: $application"
+        throw "The VS Code installation must contain Code.exe and its active cli.js: $application (CLI: $cli)"
     }
     return $application
 }
@@ -122,6 +140,12 @@ function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigP
     }
     $application = $null
     if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        # Convert only explicit Git Bash drive paths, never PATH/config entries
+        # or current-drive-rooted paths such as /bin.
+        if ([IO.Path]::DirectorySeparatorChar -eq [char]92 -and
+            $RequestedPath -match '\A/([A-Za-z])/(.*)\z') {
+            $RequestedPath = $Matches[1] + ':/' + $Matches[2]
+        }
         $application = Resolve-DalftuiVSCode $RequestedPath
     } else {
         try { $application = Read-DalftuiVSCodeConfig $ConfigPath }

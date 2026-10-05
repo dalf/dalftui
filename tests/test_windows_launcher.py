@@ -200,13 +200,19 @@ class WindowsTests(unittest.TestCase):
         self.root = Path(directory.name).resolve()
         self.local_app_data = self.root / 'local application data'
 
-    def make_code_installation(self, name="VS Code with spaces \u00e9"):
+    def make_code_installation(self, name="VS Code with spaces \u00e9", *, version=''):
         installation = self.root / name
-        cli = installation / 'resources/app/out/cli.js'
-        cli.parent.mkdir(parents=True)
+        cli = installation / version / 'resources/app/out/cli.js'
+        cli.parent.mkdir(parents=True, exist_ok=True)
         cli.touch()
         application = installation / 'Code.exe'
         application.touch()
+        if version:
+            launcher = installation / 'bin/code.cmd'
+            launcher.parent.mkdir(exist_ok=True)
+            launcher.write_text('@echo off\nset ELECTRON_RUN_AS_NODE=1\n'
+                                f'"%~dp0..\\Code.exe" "%~dp0..\\{version}\\resources\\app\\out\\cli.js" %*\n',
+                                encoding='utf-8')
         return application, cli
 
     def configured_editor_env(self, application):
@@ -563,6 +569,53 @@ raise SystemExit(status)
         self.assertEqual(windows_vscode.windows_code_command(env), [str(app), str(cli)])
         self.assertEqual(env['ELECTRON_RUN_AS_NODE'], '1')
         self.assertNotIn('VSCODE_DEV', env)
+
+    def test_versioned_windows_cli_follows_active_launcher_across_updates(self):
+        # A flat tree and a staged update may coexist with the running version.
+        app, _ = self.make_code_installation()
+        self.make_code_installation(version='07f806f999')
+        env = self.configured_editor_env(app)
+        folder = "/home/alice/project 'quoted' %PATH% & #?\u00e9"
+        result = subprocess.CompletedProcess(['Code.exe'], 0, '', '')
+        with (patch.object(vscode, 'WINDOWS', True),
+              patch.object(vscode.shutil, 'which', side_effect=AssertionError('unsafe discovery')),
+              patch.object(vscode.subprocess, 'run', return_value=result) as run):
+            for version in ('04c0d99f4f', '07f806f999'):
+                with self.subTest(version=version):
+                    _, cli = self.make_code_installation(version=version)
+                    vscode.launch(folder, 'alice@vm-alias', env=env)
+                    self.assertEqual(run.call_args.args[0],
+                                     [str(app), str(cli), '--new-window', '--folder-uri',
+                                      vscode.folder_uri(folder, 'alice@vm-alias')])
+                    self.assertFalse(run.call_args.kwargs.get('shell', False))
+
+    def test_versioned_windows_cli_missing_active_version_never_uses_leftovers(self):
+        self.make_code_installation()
+        self.make_code_installation(version='07f806f999')
+        app, cli = self.make_code_installation(version='04c0d99f4f')
+        cli.unlink()
+        env = self.configured_editor_env(app)
+        with (patch.object(vscode, 'WINDOWS', True),
+              patch.object(vscode.subprocess, 'run') as run):
+            with self.assertRaisesRegex(RuntimeError, 'configured VS Code installation is missing'):
+                vscode.launch(str(self.root), env=env)
+            run.assert_not_called()
+
+    def test_versioned_windows_cli_does_not_follow_paths_outside_installation(self):
+        app, cli = self.make_code_installation(version='04c0d99f4f')
+        outside = self.root / 'resources/app/out/cli.js'
+        outside.parent.mkdir(parents=True)
+        outside.touch()
+        launcher = app.parent / 'bin/code.cmd'
+        launcher.write_text('"%~dp0..\\Code.exe" '
+                            '"%~dp0..\\..\\resources\\app\\out\\cli.js" %*\n', encoding='utf-8')
+        env = self.configured_editor_env(app)
+        self.assertTrue(cli.is_file())
+        with (patch.object(vscode, 'WINDOWS', True),
+              patch.object(vscode.subprocess, 'run') as run):
+            with self.assertRaisesRegex(RuntimeError, 'configured VS Code installation is missing'):
+                vscode.launch(str(self.root), env=env)
+            run.assert_not_called()
 
     def test_invalid_windows_configuration_never_executes_or_discovers_an_alternative(self):
         app, cli = self.make_code_installation()

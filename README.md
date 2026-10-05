@@ -366,6 +366,17 @@ portable installation explicitly, pass its directory or executable:
 # or: .\install.cmd -VSCodePath 'C:\Tools\VS Code Portable\Code.exe'
 ```
 
+Explicit `-VSCodePath` values also accept the installation's `bin/code` or
+`bin/code.cmd` launcher. From Git Bash, `/c/...` drive paths are supported:
+
+```sh
+mise run install:windows -- -VSCodePath '/c/Users/Your Name/AppData/Local/Programs/Microsoft VS Code/bin/code'
+```
+
+Setup and folder launches support both flat and versioned VS Code installations.
+For versioned installations, the installed `bin/code.cmd` identifies the active
+CLI; updates can switch versions without changing the saved `Code.exe` path.
+
 If that installation is moved or removed, folder opening fails without trying
 another executable and tells you to rerun setup. Use `-VSCodePath` again when
 moving a portable installation.
