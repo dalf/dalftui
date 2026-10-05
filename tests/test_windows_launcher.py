@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -114,7 +115,7 @@ class SharedLauncherTests(unittest.TestCase):
         self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
 
     def test_alacritty_launches_the_copied_bin_picker_as_separate_arguments(self):
-        host = "alice@prod-é;$host'"
+        host = "alice@prod-é;$host'\"\\🛰"
         program = '''import json, subprocess, sys
 from unittest.mock import patch
 sys.dont_write_bytecode = True
@@ -145,8 +146,11 @@ with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         observation = json.loads(result.stdout)
-        self.assertEqual(observation['args'],
-                         ['alacritty-probe', '--title', f'SSH · {host}', '-e', sys.executable,
+        self.assertEqual(observation['args'][:2], ['alacritty-probe', '--option'])
+        self.assertEqual(tomllib.loads('\n'.join(observation['args'][2:4])),
+                         {'window': {'title': f'SSH · {host}', 'dynamic_title': True}})
+        self.assertEqual(observation['args'][4:],
+                         ['-e', sys.executable,
                           str(self.checkout.resolve() / 'bin/ssh_picker.py'), '--connect', host])
         self.assertTrue(observation['detached'])
         self.assertEqual(observation['tmux'], [])

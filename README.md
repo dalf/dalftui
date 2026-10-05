@@ -224,6 +224,10 @@ The cache lives at `%LOCALAPPDATA%\dalftui\hosts-cache.json` on Windows, or
 A configured `User`, including one supplied through a wildcard or included
 configuration, is used automatically. Otherwise the new window asks for the
 login. A destination such as `user@host` already provides its username.
+On Linux and Windows, the launcher then sets the window or tab title to
+`username@host-alias`, even when remote tmux supplies no title. Remote applications
+can still update it. Linux SSH windows enable Alacritty's dynamic titles for this
+window only; redirected command output contains no title escape sequences.
 
 ## Remote tmux
 
@@ -436,6 +440,9 @@ The shortcut works while the current tab is in SSH, tmux, or another program.
 It uses Terminal's
 [new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
 and keeps your default profile and appearance.
+After choosing a host, the launcher sets the tab title to `username@host-alias`
+using the effective SSH username (or the login you enter). This also works when
+remote tmux does not set a terminal title; remote applications can still update it.
 
 **Ctrl+Shift+F3** opens the current directory in a new VS Code window:
 

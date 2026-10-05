@@ -1,8 +1,11 @@
-"""Native Windows OpenSSH selection and temporary configuration ACLs."""
+"""Native Windows SSH console integration and temporary configuration ACLs."""
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 
 def ssh_executable():
@@ -15,6 +18,22 @@ def host_cache_path():
     if not directory or not Path(directory).is_absolute():
         return None
     return Path(directory) / 'dalftui/hosts-cache.json'
+
+
+def set_terminal_title(title):
+    """Set an interactive console's title even when remote tmux emits none."""
+    if not sys.stdout.isatty():
+        return
+    # Use the Unicode console API without depending on VT output mode. The
+    # Windows-only windll loader is unavailable to Pylint running on Linux.
+    try:
+        set_title = ctypes.windll.kernel32.SetConsoleTitleW  # pylint: disable=no-member
+        set_title.argtypes = [wintypes.LPCWSTR]
+        set_title.restype = wintypes.BOOL
+        set_title(''.join(char for char in title if char.isprintable()))
+    except OSError:
+        # A missing console must not prevent the SSH connection.
+        pass
 
 
 def secure_ssh_directory(path):

@@ -334,13 +334,19 @@ def connect(host, transport=None):
     env.pop(TOKEN_ENV, None)
     try:
         login = None
-        if configured_login(host) is None:
+        user = configured_login(host)
+        if user is None:
             while not login:
                 value = input(f'SSH login for {host}: ').strip()
                 if valid_host(value) and '@' not in value and '/' not in value:
                     login = value
                 else:
                     print('Enter a username, such as alice.')
+        if sys.platform == 'win32':
+            from .windows import ssh as terminal
+        else:
+            from .linux import ssh_picker as terminal
+        terminal.set_terminal_title(f'{login or user}@{host.rsplit("@", 1)[-1]}')
         print(f'Connecting to {host} …', flush=True)
         destination = f'{login}@{host}' if login else host
         bridge = EditorBridge(destination, env, transport)

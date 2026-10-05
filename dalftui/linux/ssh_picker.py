@@ -3,6 +3,7 @@ try:
     import curses
 except ImportError:
     curses = None
+import json
 import os
 from pathlib import Path
 import shutil
@@ -16,6 +17,19 @@ def host_cache_path():
     if not directory.is_absolute():
         directory = Path.home() / '.cache'
     return directory / 'dalftui/hosts-cache.json'
+
+
+def set_terminal_title(title):
+    """Set the outer terminal title before starting the remote shell or tmux."""
+    if not sys.stdout.isatty():
+        return
+    title = ''.join(char for char in title if char.isprintable())
+    try:
+        sys.stdout.write(f'\x1b]2;{title}\x07')
+        sys.stdout.flush()
+    except (OSError, UnicodeError):
+        # An unsupported terminal or output encoding must not block SSH.
+        pass
 
 
 def pick(screen, hosts):
@@ -104,7 +118,11 @@ def open_window(host):
     env.pop('TMUX', None)
     env.pop('TMUX_PANE', None)
     # -e overrides the normal local-tmux startup command for this new OS window.
-    args = [alacritty, '--title', f'SSH · {host}', '-e', sys.executable,
+    # --title fixes the title in place, ignoring the connecting process's update.
+    # JSON quoting also produces a TOML basic string for this printable host.
+    title = json.dumps(f'SSH · {host}', ensure_ascii=False)
+    args = [alacritty, '--option', f'window.title={title}', 'window.dynamic_title=true',
+            '-e', sys.executable,
             str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host]
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(args, env=env, start_new_session=True,
