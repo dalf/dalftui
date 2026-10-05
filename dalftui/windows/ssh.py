@@ -10,6 +10,13 @@ def ssh_executable():
     return str(native) if native.is_file() else 'ssh'
 
 
+def host_cache_path():
+    directory = os.environ.get('LOCALAPPDATA', '')
+    if not directory or not Path(directory).is_absolute():
+        return None
+    return Path(directory) / 'dalftui/hosts-cache.json'
+
+
 def secure_ssh_directory(path):
     """Give temporary Windows configs an ACL that Windows OpenSSH accepts."""
     # Python 3.13+ uses an OWNER RIGHTS ACE for private temporary directories.

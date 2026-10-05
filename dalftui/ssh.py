@@ -2,6 +2,8 @@
 """Pick an SSH host, using remote tmux and a VS Code bridge when installed."""
 import argparse
 import glob
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -18,6 +20,7 @@ from .vscode import EditorBridge
 
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
+HOST_CACHE_VERSION = 1
 
 CHECKOUT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,41 +37,143 @@ def ssh_executable():
     return 'ssh'
 
 
-def configured_hosts(path=SSH_CONFIG):
-    """Collect explicit aliases, including Include files; wildcard rules are not hosts."""
+def host_config_snapshot(path):
+    """Collect aliases and fingerprint dependencies we can track without OpenSSH."""
     hosts, visited = [], set()
+    dependencies = []
+    cacheable = True
 
     def read(config, depth=0):
+        nonlocal cacheable
         config = config.expanduser().resolve()
-        if config in visited or depth >= 16:
+        if depth >= 16:
+            cacheable = False
+            return
+        if config in visited:
             return
         visited.add(config)
         try:
-            lines = config.read_text().splitlines()
+            contents = config.read_text()
         except (OSError, UnicodeError):
+            cacheable = False
             return
-        for line in lines:
+        dependencies.append([str(config), hashlib.sha256(contents.encode('utf-8')).hexdigest()])
+        for line in contents.splitlines():
             match = re.match(r'\s*(\w+)(?:\s*=\s*|\s+)(.*)', line)
             if not match:
+                if line.strip() and not line.lstrip().startswith('#'):
+                    cacheable = False
                 continue
             keyword, value = match.groups()
+            keyword = keyword.lower()
             try:
                 words = shlex.split(value, comments=True)
             except ValueError:
+                cacheable = False
                 continue
-            if keyword.lower() == 'host':
+            # Environment expansion and unsupported include syntax can hide
+            # dependencies. Keep using OpenSSH, but do not reuse its results.
+            if '${' in value or (keyword in ('hostname', 'tag') and '%' in value):
+                cacheable = False
+            if keyword == 'match' and not static_host_match(words):
+                cacheable = False
+            if keyword == 'host':
                 hosts.extend(word for word in words if valid_host(word)
                              and not any(char in word for char in '*?!'))
-            elif keyword.lower() == 'include':
+            elif keyword == 'include':
+                if any(char in value for char in ('%', '$', '\\')):
+                    cacheable = False
                 for pattern in words:
                     include = Path(os.path.expanduser(pattern))
+                    if str(include).startswith('~'):
+                        cacheable = False
                     if not include.is_absolute():
                         include = SSH_CONFIG.parent / include
-                    for filename in sorted(glob.glob(str(include))):
+                    filenames = sorted(glob.glob(str(include)))
+                    dependencies.append([str(include), filenames])
+                    for filename in filenames:
                         read(Path(filename), depth + 1)
 
     read(path)
-    return list(dict.fromkeys(hosts))
+    digest = hashlib.sha256(json.dumps(dependencies).encode('utf-8')).hexdigest() if cacheable else None
+    return list(dict.fromkeys(hosts)), digest
+
+
+def static_host_match(words):
+    """Unknown or externally evaluated Match conditions must bypass the cache."""
+    index = 0
+    while index < len(words):
+        criterion = words[index].lower().lstrip('!')
+        index += 1
+        if criterion in ('all', 'canonical', 'final'):
+            continue
+        if criterion not in ('host', 'originalhost', 'tagged') or index == len(words):
+            return False
+        index += 1
+    return bool(words)
+
+
+def configured_hosts(path=SSH_CONFIG):
+    """Collect explicit aliases, including Include files; wildcard rules are not hosts."""
+    return host_config_snapshot(path)[0]
+
+
+def host_cache_path():
+    if sys.platform == 'win32':
+        from .windows import ssh as windows_ssh
+        return windows_ssh.host_cache_path()
+    from .linux import ssh_picker
+    return ssh_picker.host_cache_path()
+
+
+def host_cache_key(digest):
+    if digest is None:
+        return None
+    executable = shutil.which(ssh_executable())
+    if not executable:
+        return None
+    try:
+        executable = Path(executable).resolve()
+        info = executable.stat()
+    except OSError:
+        return None
+    return {'version': HOST_CACHE_VERSION, 'config': digest, 'tag': PICKER_TAG,
+            'ssh': [str(executable), info.st_size, info.st_mtime_ns, info.st_ctime_ns]}
+
+
+def read_host_cache(path, key, aliases):
+    try:
+        cached = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(cached, dict) or cached.get('key') != key:
+        return None
+    hosts = cached.get('hosts')
+    if (not isinstance(hosts, list) or
+            any(not isinstance(host, str) or host not in aliases for host in hosts) or
+            hosts != [host for host in aliases if host in hosts]):
+        return None
+    return hosts
+
+
+def write_host_cache(path, key, hosts):
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix=path.name + '.', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump({'key': key, 'hosts': hosts}, stream)
+        os.replace(temporary, path)
+    except OSError:
+        # A read-only/unavailable cache must not prevent opening the picker.
+        pass
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def configured_tag(host):
@@ -92,18 +197,31 @@ def configured_tag(host):
                  if line.startswith('tag ')), '')
 
 
-def target_hosts():
-    return [host for host in configured_hosts(SSH_CONFIG)
-            if configured_tag(host) == PICKER_TAG]
+def target_hosts(*, refresh=False):
+    aliases, digest = host_config_snapshot(SSH_CONFIG)
+    key = host_cache_key(digest)
+    path = host_cache_path() if key is not None else None
+    if path is not None and not refresh:
+        cached = read_host_cache(path, key, aliases)
+        if cached is not None:
+            return cached
+    hosts = [host for host in aliases if configured_tag(host) == PICKER_TAG]
+    if path is not None:
+        # Do not publish a mixed result if files/client changed during probing.
+        _, after = host_config_snapshot(SSH_CONFIG)
+        if host_cache_key(after) == key:
+            write_host_cache(path, key, hosts)
+    return hosts
 
 
-def pick_fzf(hosts=None):
+def pick_fzf(hosts=None, *, refresh=False):
     """Use the native Windows fzf picker, also available with --pick on Linux."""
     executable = shutil.which('fzf')
     if not executable:
         raise RuntimeError('fzf was not found. Run install.cmd, or install fzf '
                            'with winget or Chocolatey. Use --connect HOST to connect directly.')
-    hosts = target_hosts() if hosts is None else hosts
+    if hosts is None:
+        hosts = target_hosts(refresh=True) if refresh else target_hosts()
     if not hosts:
         raise RuntimeError(f'No hosts enabled in {SSH_CONFIG}. Add Tag dalftui '
                            'to the SSH Host entries you want in the picker.')
@@ -260,19 +378,24 @@ def main():
     action.add_argument('--pick', action='store_true',
                         help='Use fzf to choose a host and connect in this terminal (Windows default)')
     action.add_argument('--list', action='store_true', help='Print the host list without connecting')
+    parser.add_argument('--refresh-hosts', action='store_true',
+                        help='Recompute the picker host list instead of using its cache')
     parser.add_argument('--bridge', choices=('unix', 'tcp'),
                         help='Editor bridge transport (default: TCP on Windows, Unix socket on Linux)')
     args = parser.parse_args()
     if sys.version_info < (3, 11):
         parser.error('Python 3.11 or newer is required.')
+    if args.connect and args.refresh_hosts:
+        parser.error('--refresh-hosts cannot be used with --connect')
+    refresh_options = {'refresh': True} if args.refresh_hosts else {}
     if args.connect:
         return connect(args.connect, args.bridge)
     if args.list:
-        print('\n'.join(target_hosts()))
+        print('\n'.join(target_hosts(**refresh_options)))
         return 0
     if sys.platform == 'win32' or args.pick:
         try:
-            host = pick_fzf()
+            host = pick_fzf(**refresh_options)
             return connect(host, args.bridge) if host else 0
         except KeyboardInterrupt:
             return 130
@@ -280,7 +403,7 @@ def main():
             print(f'Could not choose an SSH host: {error}', file=sys.stderr)
             return 1
     from .linux import ssh_picker
-    return ssh_picker.run_picker(parser)
+    return ssh_picker.run_picker(parser, **refresh_options)
 
 
 if __name__ == '__main__':

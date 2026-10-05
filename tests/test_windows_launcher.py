@@ -63,6 +63,8 @@ class SharedLauncherTests(unittest.TestCase):
         cases = (
             ('bin/ssh_picker.py', ('--pick', '--list'), 'not allowed with argument'),
             ('bin/ssh_picker.py', ('--connect', 'host', '--list'), 'not allowed with argument'),
+            ('bin/ssh_picker.py', ('--connect', 'host', '--refresh-hosts'),
+             '--refresh-hosts cannot be used with --connect'),
             ('bin/ssh_picker.py', ('--bridge', 'invalid'), 'invalid choice'),
             ('bin/vscode.py', (), 'required'),
             ('bin/vscode.py', ('--pane', '%7'), '--client is required with --pane'),
@@ -199,6 +201,7 @@ class WindowsTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name).resolve()
         self.local_app_data = self.root / 'local application data'
+        self.enterContext(patch.object(picker, 'host_cache_path', return_value=self.root / 'hosts-cache.json'))
 
     def make_code_installation(self, name="VS Code with spaces \u00e9", *, version=''):
         installation = self.root / name
@@ -462,6 +465,8 @@ raise SystemExit(status)
         config.write_text(f'Include "{included.as_posix()}"\n')
         with patch.object(picker, 'SSH_CONFIG', config):
             self.assertEqual(picker.target_hosts(), ['vm-alias'])
+            with patch.object(picker.subprocess, 'run', side_effect=AssertionError('Cached listing started SSH')):
+                self.assertEqual(picker.target_hosts(), ['vm-alias'])
             self.assertEqual(picker.configured_login('vm-alias'), 'alice')
 
     def test_picker_lists_alias_tags_without_canonical_dns_and_keeps_final_matches(self):

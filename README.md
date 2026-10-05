@@ -203,6 +203,24 @@ wait for DNS lookups, including when a VPN or private DNS is unavailable. Put
 DNS-expanded hostname do not apply to the list. Actual connections retain your
 configured hostname canonicalization.
 
+The filtered list is cached between picker launches. Each launch checks the
+contents of the configuration and recursively included files, including new or
+deleted files matching `Include` patterns. It runs OpenSSH again when those
+inputs, the SSH executable, or the cache format change. The first launch and a
+launch after edits still rebuild the list.
+
+Configurations with dynamic or unsupported `Match` conditions, environment
+expansion, or include paths the scanner cannot track bypass caching. Static
+`Match host`, `originalhost`, `tagged`, `all`, `canonical`, and `final` rules can
+use the cache. Missing, unreadable, or corrupt caches fall back to discovery;
+failed SSH evaluations are never cached. SSH connections still read live settings.
+
+The cache lives at `%LOCALAPPDATA%\dalftui\hosts-cache.json` on Windows, or
+`$XDG_CACHE_HOME/dalftui/hosts-cache.json` on Linux (defaulting to
+`~/.cache/dalftui/hosts-cache.json`). To force a rebuild, run
+`mise run ssh:list -- --refresh-hosts`, or add `--refresh-hosts` when launching
+`bin/ssh_picker.py --pick`.
+
 A configured `User`, including one supplied through a wildcard or included
 configuration, is used automatically. Otherwise the new window asks for the
 login. A destination such as `user@host` already provides its username.

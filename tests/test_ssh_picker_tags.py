@@ -58,6 +58,7 @@ class TagConfig(unittest.TestCase):
         source = patch.object(picker, 'SSH_CONFIG', self.config)
         source.start()
         self.addCleanup(source.stop)
+        self.enterContext(patch.object(picker, 'host_cache_path', return_value=self.root / 'hosts-cache.json'))
 
 
 @unittest.skipUnless(supports_ssh_tag(), 'OpenSSH 9.4+ is required for SSH tags')

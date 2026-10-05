@@ -4,10 +4,18 @@ try:
 except ImportError:
     curses = None
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+
+
+def host_cache_path():
+    directory = Path(os.environ.get('XDG_CACHE_HOME', ''))
+    if not directory.is_absolute():
+        directory = Path.home() / '.cache'
+    return directory / 'dalftui/hosts-cache.json'
 
 
 def pick(screen, hosts):
@@ -110,13 +118,14 @@ def open_window(host):
             raise RuntimeError(log.read().decode(errors='replace').strip() or 'Could not open Alacritty')
 
 
-def run_picker(parser):
+def run_picker(parser, *, refresh=False):
     from .. import ssh
 
     if curses is None:
         parser.error('Use --connect HOST on Windows; the interactive host picker requires curses.')
     try:
-        host = curses.wrapper(pick, ssh.target_hosts())
+        hosts = ssh.target_hosts(refresh=True) if refresh else ssh.target_hosts()
+        host = curses.wrapper(pick, hosts)
         if host:
             open_window(host)
     except (OSError, RuntimeError, curses.error) as error:
