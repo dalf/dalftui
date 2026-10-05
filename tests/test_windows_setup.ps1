@@ -61,7 +61,6 @@ function Invoke-DalftuiWindowsSetup {
         Preference = $Preference
         Skip = [bool]$Skip
         TargetProfile = $TargetProfile
-        DefaultProfileMatched = $TargetProfile -eq $PROFILE.CurrentUserCurrentHost
         Checkout = $Checkout
         NoTerminal = [bool]$NoTerminal
         SettingsPaths = @($SettingsPaths)
@@ -125,9 +124,9 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True ($LASTEXITCODE -eq 0) 'The public setup wrapper must forward defaults successfully'
     $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
     Assert-True ($forwarded.Preference -eq 'auto' -and -not $forwarded.Skip -and
-                 -not $forwarded.NoTerminal -and $forwarded.DefaultProfileMatched -and
+                 -not $forwarded.NoTerminal -and -not $forwarded.TargetProfile -and
                  $forwarded.Checkout -eq $forwardingCheckout) `
-        'The public setup wrapper must preserve effective defaults'
+        'The public setup wrapper must leave profile discovery to the installer by default'
     $env:DALFTUI_SETUP_PROBE_FAIL = '1'
     # Windows PowerShell 5.1 turns captured native stderr into error records.
     # Allow the expected failure output while still checking its exit status.
@@ -163,7 +162,8 @@ function Invoke-DalftuiWindowsSetup {
                 'install.cmd must locate install.ps1 and preserve options from another directory'
             Assert-True ($forwarded.ProcessPolicy -eq 'Bypass') `
                 'install.cmd must set the bypass policy for its child process'
-            Assert-True ($env:PSModulePath -eq $modulePathBefore) `
+            # An empty environment value can become absent across CMD on Windows.
+            Assert-True ([string]$env:PSModulePath -eq [string]$modulePathBefore) `
                 'install.cmd must preserve the calling shell module paths'
             $env:DALFTUI_SETUP_PROBE_FAIL = '1'
             $ErrorActionPreference = 'Continue'
@@ -375,6 +375,51 @@ function Invoke-DalftuiWindowsSetup {
     Set-Item Function:\Find-DalftuiApplication $originalFind
     Set-Item Function:\Update-DalftuiProcessPath $originalPath
 
+    # Profile discovery is read-only, even when both real shells are installed.
+    $nativeProfiles = @(Get-DalftuiProfilePaths)
+    Assert-True ($nativeProfiles -contains $PROFILE.CurrentUserCurrentHost) `
+        'Default setup must include the shell running the installer'
+    $otherShellName = 'pwsh'
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $otherShellName = 'powershell' }
+    if (Find-DalftuiApplication $otherShellName) {
+        Assert-True ($nativeProfiles.Count -eq 2) `
+            'Default setup must discover both installed PowerShell profiles'
+    }
+    $otherProfile = Join-Path $root ("redirected Documents's " + [char]0xe9 + '/PowerShell/Microsoft.PowerShell_profile.ps1')
+    $fakeShell = Join-Path $root 'profile-shell.ps1'
+    $shellProbe = @(
+        'param([switch]$NoLogo, [switch]$NoProfile, [switch]$NonInteractive, [string]$Command)',
+        'if (-not ($NoLogo -and $NoProfile -and $NonInteractive)) { throw ''Profile discovery must not load profiles or prompt.'' }',
+        'if ($env:PSModulePath) { throw ''Profile discovery must reset inherited module paths.'' }',
+        ('[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(' + (ConvertTo-DalftuiSingleQuotedLiteral $otherProfile) + '))'),
+        '$global:LASTEXITCODE = 0'
+    )
+    [IO.File]::WriteAllLines($fakeShell, $shellProbe, [Text.UTF8Encoding]::new($true))
+    & {
+        function Find-DalftuiApplication([string]$Name) { throw 'Explicit profiles must skip shell discovery.' }
+        $explicit = @(Get-DalftuiProfilePaths -TargetProfile $otherProfile)
+        Assert-True ($explicit.Count -eq 1 -and $explicit[0] -eq $otherProfile) `
+            'An explicit ProfilePath must target only that file'
+        function Find-DalftuiApplication([string]$Name) { return $null }
+        $single = @(Get-DalftuiProfilePaths)
+        Assert-True ($single.Count -eq 1 -and $single[0] -eq $PROFILE.CurrentUserCurrentHost) `
+            'Setup must work when only its own PowerShell version is installed'
+        function Find-DalftuiApplication([string]$Name) {
+            Assert-True ($Name -eq $otherShellName) 'Discovery must query the other PowerShell version'
+            return [pscustomobject]@{Source = $fakeShell}
+        }
+        $modulePathBefore = $env:PSModulePath
+        $discovered = @(Get-DalftuiProfilePaths)
+        Assert-True ($discovered.Count -eq 2 -and $discovered[1] -eq $otherProfile) `
+            'Discovery must preserve redirected profile paths with spaces, apostrophes, and Unicode'
+        Assert-True ([string]$env:PSModulePath -eq [string]$modulePathBefore) `
+            'Profile discovery must restore the installer module paths'
+        [IO.File]::WriteAllText($fakeShell, '$global:LASTEXITCODE = 17')
+        Assert-Throws { Get-DalftuiProfilePaths } 'A failed profile query must fail setup visibly'
+        Assert-True ([string]$env:PSModulePath -eq [string]$modulePathBefore) `
+            'A failed profile query must still restore module paths'
+    }
+
     # The moved implementation must derive its default checkout from its own
     # package location when callers invoke the setup function directly.
     $pythonCommand = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
@@ -407,6 +452,29 @@ function Invoke-DalftuiWindowsSetup {
             }
             Invoke-DalftuiWindowsSetup -Skip -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
+
+            # Run default installation twice against disposable profiles. Keep
+            # real discovery separate so these tests never edit personal files.
+            Remove-Item Function:\Write-DalftuiProfile
+            $defaultWindowsProfile = Join-Path $root 'WindowsPowerShell/Microsoft.PowerShell_profile.ps1'
+            $defaultPwshProfile = Join-Path $root 'PowerShell/Microsoft.PowerShell_profile.ps1'
+            function Get-DalftuiProfilePaths([string]$TargetProfile) {
+                Assert-True (-not $TargetProfile) 'Default setup must not restrict discovery to its own profile'
+                return @($defaultWindowsProfile, $defaultPwshProfile)
+            }
+            Invoke-DalftuiWindowsSetup -Skip -NoTerminal -WarningAction SilentlyContinue
+            Invoke-DalftuiWindowsSetup -Skip -NoTerminal -WarningAction SilentlyContinue
+            foreach ($installedProfile in @($defaultWindowsProfile, $defaultPwshProfile)) {
+                $installedText = [IO.File]::ReadAllText($installedProfile)
+                Assert-True ([regex]::Matches($installedText, '(?m)^# >>> dalftui >>>').Count -eq 1) `
+                    'Default installation must configure each PowerShell profile exactly once'
+                . $installedProfile
+                $editorHandlers = @(Get-PSReadLineKeyHandler | Where-Object { $_.Function -eq 'DalftuiOpenFolderInCode' })
+                Assert-True ($editorHandlers.Count -eq 2) `
+                    'Each installed profile must load the native and translated Ctrl+Shift+F3 handlers'
+                Assert-True (@(Get-ChildItem -LiteralPath (Split-Path $installedProfile) -Filter '*.bak').Count -eq 0) `
+                    'Repeating default setup must leave configured profiles unchanged'
+            }
         }
     } finally {
         $env:SystemRoot = $previousSystemRoot

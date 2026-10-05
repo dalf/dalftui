@@ -72,10 +72,13 @@ def configured_hosts(path=SSH_CONFIG):
 
 
 def configured_tag(host):
-    """Ask OpenSSH for the effective tag, including matching Host/Match/Include rules."""
+    """Evaluate an alias's tag without DNS hostname canonicalization."""
     if not valid_host(host):
         raise ValueError('Invalid SSH destination')
-    args = [ssh_executable(), '-G', '-F', str(SSH_CONFIG), '--', host]
+    # ssh -G still performs canonicalization when enabled in the user's config.
+    # Listing aliases must not wait for DNS on every host (e.g. outside a VPN).
+    args = [ssh_executable(), '-G', '-o', 'CanonicalizeHostname=no',
+            '-F', str(SSH_CONFIG), '--', host]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as error:

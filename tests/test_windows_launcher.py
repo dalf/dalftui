@@ -464,6 +464,30 @@ raise SystemExit(status)
             self.assertEqual(picker.target_hosts(), ['vm-alias'])
             self.assertEqual(picker.configured_login('vm-alias'), 'alice')
 
+    def test_picker_lists_alias_tags_without_canonical_dns_and_keeps_final_matches(self):
+        if not shutil.which(picker.ssh_executable()):
+            self.skipTest('OpenSSH is not installed')
+        probe = subprocess.run([picker.ssh_executable(), '-G', '-F', os.devnull,
+                                '-o', 'Tag=dalftui', '--', 'localhost'],
+                               capture_output=True, text=True, timeout=10)
+        if probe.returncode:
+            self.skipTest('OpenSSH 9.4+ is required for SSH tags')
+        if sys.platform == 'win32':
+            windows_ssh.secure_ssh_directory(self.root)
+        config = self.root / 'config'
+        config.write_text('CanonicalizeHostname always\n'
+                          'CanonicalDomains dalftui.invalid\n'
+                          'CanonicalizeFallbackLocal no\n'
+                          'Host vm-alias final-alias git-service\n'
+                          'Host vm-alias\n Tag dalftui\n'
+                          'Host git-service\n Tag git\n'
+                          'Match final originalhost final-alias\n Tag dalftui\n')
+        with patch.object(picker, 'SSH_CONFIG', config):
+            self.assertEqual(picker.target_hosts(), ['vm-alias', 'final-alias'])
+        # Only listing disables canonicalization; connections retain the user's
+        # SSH configuration so short aliases still work with private DNS.
+        self.assertNotIn('CanonicalizeHostname=no', picker.ssh_command('vm-alias'))
+
     def test_native_fzf_filters_unicode_hosts_using_picker_options(self):
         if not shutil.which('fzf'):
             self.skipTest('fzf is not installed')

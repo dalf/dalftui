@@ -216,6 +216,39 @@ function Install-DalftuiFzf([string]$Preference = 'auto', [switch]$Skip) {
     return $true
 }
 
+function Get-DalftuiProfilePaths([string]$TargetProfile) {
+    if (-not [string]::IsNullOrWhiteSpace($TargetProfile)) {
+        return $TargetProfile
+    }
+    $paths = @($PROFILE.CurrentUserCurrentHost)
+    # mise and install.cmd can run in 5.1 while Terminal uses PowerShell 7.
+    # Ask the other installed shell for its path, including redirected Documents.
+    $otherName = 'pwsh'
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $otherName = 'powershell' }
+    $otherShell = Find-DalftuiApplication $otherName
+    if ($otherShell) {
+        $previousModulePath = $env:PSModulePath
+        try {
+            # Windows PowerShell must not inherit PowerShell 7's module paths.
+            $env:PSModulePath = $null
+            # Base64 avoids native output encoding differences between shells.
+            $encoded = & $otherShell.Source -NoLogo -NoProfile -NonInteractive -Command `
+                '[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($PROFILE.CurrentUserCurrentHost))'
+            if ($LASTEXITCODE -ne 0) { throw "$otherName exited with status $LASTEXITCODE." }
+            $path = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded))
+            if (-not (Test-DalftuiFullyQualifiedPath $path)) {
+                throw 'The shell did not return an absolute profile path.'
+            }
+            $paths += $path
+        } catch {
+            throw "Cannot determine the $otherName profile: $($_.Exception.Message) Use -ProfilePath to select a profile explicitly."
+        } finally {
+            $env:PSModulePath = $previousModulePath
+        }
+    }
+    return $paths | Select-Object -Unique
+}
+
 function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
     $Path = [IO.Path]::GetFullPath($Path)
     $loader = Join-Path $Checkout 'bin/profile.ps1'
@@ -293,6 +326,7 @@ function Invoke-DalftuiWindowsSetup {
     if (-not (Test-DalftuiWindowsPlatform)) {
         throw 'This setup script targets Windows. On Linux, use ./install.'
     }
+    $profilePaths = @(Get-DalftuiProfilePaths -TargetProfile $TargetProfile)
     $python = Find-DalftuiApplication 'py'
     $pythonArguments = @('-3')
     if (-not $python) {
@@ -309,13 +343,16 @@ function Invoke-DalftuiWindowsSetup {
     Update-DalftuiProcessPath
     $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
     $pickerReady = Install-DalftuiFzf -Preference $Preference -Skip:$Skip
-    Write-DalftuiProfile -Path $TargetProfile -Checkout $Checkout
+    foreach ($profilePath in $profilePaths) {
+        Write-DalftuiProfile -Path $profilePath -Checkout $Checkout
+    }
     . (Join-Path $Checkout 'bin/profile.ps1')
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
             -Checkout $Checkout -SettingsPaths $SettingsPaths
     }
     Write-Host 'dssh HOST is ready.'
+    Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'
     if ($pickerReady) { Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).' }
     else { Write-Host 'Install fzf to enable the picker, or rerun setup without -SkipFzf.' }
 }

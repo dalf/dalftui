@@ -197,6 +197,12 @@ connect. **Esc** cancels. OpenSSH resolves tags, so wildcard, `Match`, and inclu
 settings apply. Wildcard rules are not individual hosts. You can type a full
 hostname covered by a tagged wildcard rule and press Enter to connect.
 
+Picker tag checks disable `CanonicalizeHostname` so building the list does not
+wait for DNS lookups, including when a VPN or private DNS is unavailable. Put
+`Tag dalftui` on the original alias or a matching rule; tags that require a
+DNS-expanded hostname do not apply to the list. Actual connections retain your
+configured hostname canonicalization.
+
 A configured `User`, including one supplied through a wildcard or included
 configuration, is used automatically. Otherwise the new window asks for the
 login. A destination such as `user@host` already provides its username.
@@ -395,14 +401,16 @@ without installing fzf. The package commands are
 [documented by fzf](https://junegunn.github.io/fzf/installation/).
 Chocolatey installations may require an administrator PowerShell.
 
-Setup adds a managed block to your current
+Setup adds a managed block to the current user's console profiles for Windows
+PowerShell 5.1 and PowerShell 7 when installed, regardless of which version runs
+the installer. It discovers each shell's
 [PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles).
 It backs up an existing profile before changing it, preserves your personal
 settings, and loads `bin/profile.ps1` from this checkout. Repeated setup keeps one
-managed block; rerun it if you move the checkout or use another PowerShell host
-or version. After installation through `install.cmd`, open a new Windows
-PowerShell session to use `dssh`. To set up a PowerShell 7 profile, use the
-[mise install task](#repository-tasks) with `DALFTUI_POWERSHELL=pwsh`.
+managed block per profile; rerun it if you move the checkout or install another
+PowerShell version. After `mise run install:windows` or `install.cmd`, open a new
+PowerShell session to use `dssh` and **Ctrl+Shift+F3**. Use `-ProfilePath PATH` to
+configure only a specific profile, including a different PowerShell host.
 
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.
@@ -806,7 +814,8 @@ mise run test:powershell
 mise run install:windows -- -PackageManager choco -VSCodePath 'C:\Tools\VS Code Portable'
 ```
 
-Setup updates the profile for the selected PowerShell host. The installers and
+The selected shell runs the installer; setup configures both installed PowerShell
+versions unless `-ProfilePath` selects a single profile. The installers and
 `bin/` launchers remain available for direct use. GitHub Actions uses these same tasks while
 selecting Python and PowerShell versions through its existing matrix.
 

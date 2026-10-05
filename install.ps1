@@ -16,7 +16,7 @@ param(
     [ValidateSet('auto', 'winget', 'choco')][string]$PackageManager = 'auto',
     [switch]$SkipFzf,
     [string]$VSCodePath,
-    [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost,
+    [string]$ProfilePath,
     [switch]$SkipTerminal,
     [string[]]$TerminalSettingsPath
 )

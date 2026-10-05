@@ -48,6 +48,8 @@ run_windows = 'python -m unittest discover -s tests -p "test_bridge*.py" -v'
 
 [tasks."test:powershell"]
 description = "Verify Windows setup and profile integration in PowerShell"
+# Rebuild module paths for the selected shell, including 5.1 launched from pwsh.
+env = { PSModulePath = "" }
 run = "{{ vars.powershell }} -NoProfile -File ./tests/test_windows_setup.ps1"
 
 [tasks."install:linux"]
@@ -56,8 +58,9 @@ raw_args = true
 run = "./install"
 
 [tasks."install:windows"]
-description = "Set up Windows PowerShell, fzf, and Terminal integration"
+description = "Set up installed PowerShell profiles, fzf, and Terminal integration"
 raw_args = true
+env = { PSModulePath = "" }
 run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./install.ps1"
 
 [tasks."reload:linux"]
