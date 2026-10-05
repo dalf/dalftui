@@ -38,12 +38,28 @@ class HostCacheTests(unittest.TestCase):
     def evaluate(self, command, **_kwargs):
         return subprocess.CompletedProcess(command, 0, 'tag ' + self.tags.get(command[-1], 'git') + '\n', '')
 
-    def test_unchanged_list_preserves_order_and_starts_no_ssh_processes(self):
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+    def test_unchanged_list_is_alphabetical_and_starts_no_ssh_processes(self):
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.assertEqual(self.run.call_count, 3)
         self.run.reset_mock()
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.run.assert_not_called()
+
+    def test_case_insensitive_sort_reuses_existing_cache_and_reaches_cli(self):
+        self.config.write_text('Host zeta Bravo alpha\n')
+        self.tags['Bravo'] = 'dalftui'
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'Bravo', 'zeta'])
+        original = self.cache.read_bytes()
+        # Keep the existing cache format/config order; sort only returned hosts.
+        self.assertEqual(json.loads(original)['hosts'], ['zeta', 'Bravo', 'alpha'])
+        self.run.reset_mock()
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'Bravo', 'zeta'])
+        output = io.StringIO()
+        with (patch.object(sys, 'argv', ['ssh_picker.py', '--list']), redirect_stdout(output)):
+            self.assertEqual(ssh.main(), 0)
+        self.assertEqual(output.getvalue(), 'alpha\nBravo\nzeta\n')
+        self.run.assert_not_called()
+        self.assertEqual(self.cache.read_bytes(), original)
 
     def test_successfully_empty_list_is_cached(self):
         self.tags.clear()
@@ -112,7 +128,7 @@ class HostCacheTests(unittest.TestCase):
         other.write_bytes(self.config.read_bytes())
         with patch.object(ssh, 'SSH_CONFIG', other):
             self.run.reset_mock()
-            self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+            self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
             self.assertEqual(self.run.call_count, 3)
         ssh.target_hosts()
         self.executable.write_bytes(b'updated OpenSSH installation')
@@ -152,9 +168,9 @@ class HostCacheTests(unittest.TestCase):
                                'Match final originalhost zeta\n Tag dalftui\n'
                                'Match host exec\n Tag git\n'
                                'Match !tagged git\n Tag dalftui\n')
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.run.reset_mock()
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.run.assert_not_called()
 
     def test_unreadable_dependencies_bypass_cache(self):
@@ -185,7 +201,7 @@ class HostCacheTests(unittest.TestCase):
             with self.subTest(content=content):
                 self.cache.write_bytes(content)
                 self.run.reset_mock()
-                self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+                self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
                 self.assertEqual(self.run.call_count, 3)
 
     def test_probe_failure_is_not_cached_and_preserves_previous_good_cache(self):
@@ -213,9 +229,9 @@ class HostCacheTests(unittest.TestCase):
 
     def test_unavailable_cache_directory_does_not_break_listing(self):
         self.cache.parent.write_text('a file blocks the cache directory')
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.run.reset_mock()
-        self.assertEqual(ssh.target_hosts(), ['zeta', 'alpha'])
+        self.assertEqual(ssh.target_hosts(), ['alpha', 'zeta'])
         self.assertEqual(self.run.call_count, 3)
 
     def test_edit_during_probing_is_not_published_as_a_valid_cache(self):
@@ -247,11 +263,11 @@ class HostCacheTests(unittest.TestCase):
             with self.subTest(platform=platform):
                 with (patch.object(sys, 'platform', platform),
                       patch.object(sys, 'argv', ['ssh_picker.py', '--refresh-hosts']),
-                      patch.object(ssh, 'pick_fzf', return_value=None) as fzf,
+                      patch.object(ssh, 'pick_host', return_value=None) as choose,
                       patch.object(ssh_picker, 'run_picker', return_value=0) as desktop):
                     self.assertEqual(ssh.main(), 0)
                     if platform == 'win32':
-                        fzf.assert_called_once_with(refresh=True)
+                        choose.assert_called_once_with(refresh=True)
                     else:
                         self.assertEqual(desktop.call_args.kwargs, {'refresh': True})
 
@@ -277,7 +293,7 @@ with patch.object(subprocess, 'run', side_effect=run):
                                       str(self.cache), str(self.executable), mode],
                                      cwd=ROOT, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout), ['zeta', 'alpha', 'git-service'])
+            self.assertEqual(json.loads(result.stdout), ['alpha', 'git-service', 'zeta'])
 
     native_run = staticmethod(subprocess.run)
 

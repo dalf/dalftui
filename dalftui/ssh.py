@@ -204,47 +204,81 @@ def target_hosts(*, refresh=False):
     if path is not None and not refresh:
         cached = read_host_cache(path, key, aliases)
         if cached is not None:
-            return cached
+            return sorted(cached, key=str.casefold)
     hosts = [host for host in aliases if configured_tag(host) == PICKER_TAG]
     if path is not None:
         # Do not publish a mixed result if files/client changed during probing.
         _, after = host_config_snapshot(SSH_CONFIG)
         if host_cache_key(after) == key:
             write_host_cache(path, key, hosts)
-    return hosts
+    return sorted(hosts, key=str.casefold)
 
 
 def pick_fzf(hosts=None, *, refresh=False):
-    """Use the native Windows fzf picker, also available with --pick on Linux."""
+    """Use the single-column fallback, also available explicitly with --fzf."""
     executable = shutil.which('fzf')
     if not executable:
         raise RuntimeError('fzf was not found. Run install.cmd, or install fzf '
                            'with winget or Chocolatey. Use --connect HOST to connect directly.')
     if hosts is None:
         hosts = target_hosts(refresh=True) if refresh else target_hosts()
-    if not hosts:
-        raise RuntimeError(f'No hosts enabled in {SSH_CONFIG}. Add Tag dalftui '
-                           'to the SSH Host entries you want in the picker.')
     env = dict(os.environ)
     # Personal multi-select/print-query settings would change the returned host.
     env.pop('FZF_DEFAULT_OPTS', None)
     env.pop('FZF_DEFAULT_OPTS_FILE', None)
     result = subprocess.run(
-        [executable, '--height=80%', '--layout=reverse', '--border=rounded',
-         '--no-multi', '--prompt=Host> ',
-         '--header=SSH hosts | Tag dalftui\nType to filter | Up/Down select | Enter connect | Esc cancel',
+        [executable, '--layout=reverse', '--border=rounded',
+         '--no-multi', '--no-sort', '--prompt=Host> ', '--print-query',
+         '--bind=ctrl-o:print-query',
+         '--header=SSH hosts | Tag dalftui\n'
+         'Type to filter | Up/Down select | Enter connect | Esc cancel\n'
+         'Ctrl+O connect typed hostname, IP or user@host',
          '--color=bg:-1,fg:#e5e7eb,bg+:#e5e7eb,fg+:#111827,hl:#89b4fa,hl+:#1565c0,'
          'header:#a6adc8,prompt:#89b4fa,pointer:#89b4fa,border:#585b70'],
-        input='\n'.join(hosts) + '\n', stdout=subprocess.PIPE,
+        input=''.join(host + '\n' for host in hosts), stdout=subprocess.PIPE,
         encoding='utf-8', env=env)
     if result.returncode in (1, 130):
         return None
     if result.returncode:
         raise RuntimeError(f'fzf exited with status {result.returncode}.')
-    selected = result.stdout.strip()
-    if selected not in hosts:
-        raise RuntimeError('fzf did not return a configured, tagged host.')
-    return selected
+    # Enter prints the query followed by the selection. The print-query action
+    # exits successfully with only the query, even when there are no matches.
+    lines = result.stdout.splitlines()
+    if len(lines) == 1:
+        if not valid_host(lines[0]):
+            raise RuntimeError('Enter a valid SSH hostname, IP address or user@host.')
+        return lines[0]
+    if len(lines) == 2 and lines[1] in hosts:
+        return lines[1]
+    raise RuntimeError('fzf did not return a configured, tagged host or a typed destination.')
+
+
+def validate_picker_host(host, *, require_tag=True):
+    if not valid_host(host):
+        return 'Enter a valid SSH hostname, IP address or user@host.'
+    if require_tag and configured_tag(host) != PICKER_TAG:
+        return f'{host} is not enabled: add Tag dalftui to its SSH configuration.'
+    return ''
+
+
+def pick_host(*, refresh=False):
+    """Use a full-screen grid when supported, otherwise fall back to fzf."""
+    options = {'refresh': True} if refresh else {}
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        return pick_fzf(**options)
+    hosts = target_hosts(**options)
+    if sys.platform == 'win32':
+        from . import host_picker
+        from .windows.host_picker import ConsoleScreen, ConsoleUnavailable
+        try:
+            with ConsoleScreen() as screen:
+                return host_picker.pick(screen, hosts, validate_picker_host)
+        except ConsoleUnavailable:
+            return pick_fzf(hosts)
+    from .linux import ssh_picker
+    if ssh_picker.curses is None:
+        return pick_fzf(hosts)
+    return ssh_picker.curses.wrapper(ssh_picker.pick, hosts, action='connect')
 
 
 def configured_login(host):
@@ -382,7 +416,8 @@ def main():
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--connect', metavar='HOST')
     action.add_argument('--pick', action='store_true',
-                        help='Use fzf to choose a host and connect in this terminal (Windows default)')
+                        help='Choose a host in a full-screen grid and connect here (Windows default)')
+    action.add_argument('--fzf', action='store_true', help='Use the single-column fzf picker instead')
     action.add_argument('--list', action='store_true', help='Print the host list without connecting')
     parser.add_argument('--refresh-hosts', action='store_true',
                         help='Recompute the picker host list instead of using its cache')
@@ -399,9 +434,9 @@ def main():
     if args.list:
         print('\n'.join(target_hosts(**refresh_options)))
         return 0
-    if sys.platform == 'win32' or args.pick:
+    if sys.platform == 'win32' or args.pick or args.fzf:
         try:
-            host = pick_fzf(**refresh_options)
+            host = (pick_fzf if args.fzf else pick_host)(**refresh_options)
             return connect(host, args.bridge) if host else 0
         except KeyboardInterrupt:
             return 130

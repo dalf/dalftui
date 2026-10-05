@@ -354,5 +354,5 @@ function Invoke-DalftuiWindowsSetup {
     Write-Host 'dssh HOST is ready.'
     Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'
     if ($pickerReady) { Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).' }
-    else { Write-Host 'Install fzf to enable the picker, or rerun setup without -SkipFzf.' }
+    else { Write-Host 'The grid picker is ready. Install fzf only for --fzf or the terminal fallback.' }
 }

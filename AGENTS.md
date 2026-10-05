@@ -132,7 +132,7 @@ mise run test:windows
 
 This runs `test_windows*.py` and `test_bridge*.py` discovery. Those patterns select
 `test_windows_launcher.py`, `test_windows_terminal.py`, `test_windows_ssh_cache.py`,
-and `test_windows_ssh_title.py`,
+`test_windows_ssh_title.py`, `test_windows_host_picker.py`, and `test_windows_fzf.py`,
 then `test_bridge_lifecycle.py` and `test_bridge_protocol.py`, respectively.
 Linux-targeted bootstrap/startup tests are in `tests/test_remote_bootstrap.py`.
 Run PowerShell setup/profile verification separately when the shell is available:

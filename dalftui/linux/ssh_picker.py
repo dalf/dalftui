@@ -32,81 +32,56 @@ def set_terminal_title(title):
         pass
 
 
-def pick(screen, hosts):
-    from .. import ssh
+class PickerScreen:
+    """Adapt curses to the shared grid without importing it on Windows."""
+    def __init__(self, screen):
+        self.screen = screen
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, 246 if curses.COLORS >= 256 else curses.COLOR_WHITE, -1)
+        curses.set_escdelay(25)
 
-    curses.use_default_colors()
-    curses.init_pair(1, curses.COLOR_CYAN, -1)
-    curses.init_pair(2, curses.COLOR_WHITE, -1)
-    curses.init_pair(3, 246 if curses.COLORS >= 256 else curses.COLOR_WHITE, -1)
-    curses.set_escdelay(25)
-    query, selected, message = '', 0, ''
+    def size(self):
+        height, width = self.screen.getmaxyx()
+        return width, height
 
-    def write(y, x, text, style=0):
-        height, width = screen.getmaxyx()
-        if 0 <= y < height and x < width - 1:
+    def draw(self, cells):
+        from ..host_picker import cell_width
+        self.screen.erase()
+        styles = {'normal': curses.color_pair(2),
+                  'heading': curses.color_pair(1) | curses.A_BOLD,
+                  'muted': curses.color_pair(3),
+                  'selected': curses.color_pair(2) | curses.A_REVERSE | curses.A_BOLD}
+        for y, x, text, style in cells:
             try:
-                screen.addnstr(y, x, text, width - x - 1, style)
+                self.screen.addnstr(y, x, text, len(text), styles[style])
             except curses.error:
-                pass
-
-    while True:
-        height, width = screen.getmaxyx()
-        screen.erase()
-        matches = [host for host in hosts if query.casefold() in host.casefold()]
-        selected = max(0, min(selected, len(matches) - 1))
-        capacity = max(1, height - 9)
-        start = max(0, selected - capacity + 1)
-        write(1, 2, 'SSH HOSTS · TAG DALFTUI', curses.color_pair(1) | curses.A_BOLD)
-        write(2, 2, 'Type to filter · ↑/↓ select · Enter opens a new window · Esc cancels', curses.color_pair(3))
-        write(4, 2, 'Filter: ', curses.color_pair(3))
-        write(4, 10, query, curses.color_pair(2))
-        if not matches:
-            hint = ('No matching tagged hosts. Enter checks the typed hostname.' if query
-                    else 'No hosts enabled. Add Tag dalftui to an SSH Host entry.')
-            write(6, 2, hint, curses.color_pair(3))
-        for index in range(start, min(len(matches), start + capacity)):
-            label = matches[index]
-            style = curses.color_pair(2)
-            if index == selected:
-                style |= curses.A_REVERSE | curses.A_BOLD
-            write(6 + index - start, 2, ('  ' + label).ljust(max(0, width - 5)), style)
-        write(height - 3, 2, message, curses.color_pair(1))
-        write(height - 2, 2, 'Remote tmux when installed · otherwise a login shell', curses.color_pair(3))
+                pass  # A resize may happen between layout and drawing.
         try:
-            screen.move(min(4, height - 1), min(10 + len(query), max(0, width - 2)))
+            query = next((text for y, _, text, _ in cells if y == 2), '')
+            self.screen.move(2, min(self.size()[0] - 2, 1 + cell_width(query)))
         except curses.error:
             pass
-        screen.refresh()
-        key = screen.get_wch()
-        if key in ('\x1b', '\x03'):
-            return None
-        if key in ('\n', '\r', curses.KEY_ENTER):
-            if matches:
-                return matches[selected]
-            if ssh.valid_host(query):
-                try:
-                    if ssh.configured_tag(query) == ssh.PICKER_TAG:
-                        return query
-                    message = f'{query} is not enabled: add Tag dalftui to its SSH configuration.'
-                except RuntimeError as error:
-                    message = str(error)
-            continue
-        if key == curses.KEY_UP:
-            selected = max(0, selected - 1)
-        elif key == curses.KEY_DOWN:
-            selected = min(len(matches) - 1, selected + 1)
-        elif key == curses.KEY_PPAGE:
-            selected = max(0, selected - capacity)
-        elif key == curses.KEY_NPAGE:
-            selected = min(len(matches) - 1, selected + capacity)
-        elif key in ('\x7f', '\b', curses.KEY_BACKSPACE):
-            query, selected, message = query[:-1], 0, ''
-        elif key == '\x15':
-            query, selected, message = '', 0, ''
-        elif isinstance(key, str) and key.isprintable() and not key.isspace():
-            query, selected, message = query + key, 0, ''
+        self.screen.refresh()
 
+    def read_key(self):
+        key = self.screen.get_wch()
+        keys = {curses.KEY_UP: 'up', curses.KEY_DOWN: 'down',
+                curses.KEY_LEFT: 'left', curses.KEY_RIGHT: 'right',
+                curses.KEY_HOME: 'home', curses.KEY_END: 'end',
+                curses.KEY_PPAGE: 'page_up', curses.KEY_NPAGE: 'page_down',
+                curses.KEY_BACKSPACE: 'backspace', curses.KEY_ENTER: 'enter',
+                curses.KEY_BTAB: 'back_tab', curses.KEY_RESIZE: None,
+                '\x1b': 'cancel', '\x03': 'cancel', '\x04': 'eof',
+                '\r': 'enter', '\n': 'enter', '\x7f': 'backspace', '\b': 'backspace',
+                '\x0f': 'connect_typed', '\x15': 'clear', '\t': 'tab'}
+        return keys.get(key, key if isinstance(key, str) else None)
+
+
+def pick(screen, hosts, *, action='opens a new window'):
+    from .. import host_picker, ssh
+    return host_picker.pick(PickerScreen(screen), hosts, ssh.validate_picker_host, action=action)
 
 def open_window(host):
     from .. import ssh

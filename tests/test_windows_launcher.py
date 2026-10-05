@@ -32,11 +32,11 @@ class SharedLauncherTests(unittest.TestCase):
         self.root = Path(directory.name).resolve()
         self.checkout = self.root / "checkout's $cash ; & é"
         for relative in ('bin/ssh_picker.py', 'bin/vscode.py', 'bridge_protocol.py', 'bin/tmux-start.sh',
-                         'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py',
+                         'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py', 'dalftui/host_picker.py',
                          'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
                          'dalftui/linux/remote_bootstrap.py', 'dalftui/linux/tmux-start.sh',
                          'dalftui/linux/tmux_editor.py', 'dalftui/windows/__init__.py',
-                         'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py'):
+                         'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py', 'dalftui/windows/host_picker.py'):
             destination = self.checkout / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, destination)
@@ -268,7 +268,7 @@ with patch.object(picker, 'connect', return_value=17) as connect, \
         sys.argv = ['bin/ssh_picker.py', *arguments]
         with patch.object(picker.sys, 'platform', 'win32' if case == 'windows' else 'linux'), \
              patch.object(picker.subprocess, 'run',
-                          return_value=subprocess.CompletedProcess([], 0, 'vm-alias\\n')) as run:
+                          return_value=subprocess.CompletedProcess([], 0, '\\nvm-alias\\n')) as run:
             status = picker.main()
         if case == 'list':
             connect.assert_not_called()
@@ -402,7 +402,7 @@ raise SystemExit(status)
 
     def test_windows_picker_connects_selected_host_without_curses_or_alacritty(self):
         with patch.object(picker.sys, 'platform', 'win32'):
-            with patch.object(picker, 'pick_fzf', return_value='vm-alias') as choose:
+            with patch.object(picker, 'pick_host', return_value='vm-alias') as choose:
                 with patch.object(picker, 'connect', return_value=17) as connect:
                     with patch.dict(sys.modules, {'dalftui.linux.ssh_picker': None}):
                         with patch.object(sys, 'argv', ['bin/ssh_picker.py']):
@@ -411,14 +411,14 @@ raise SystemExit(status)
         connect.assert_called_once_with('vm-alias', None)
 
     def test_cancelled_picker_does_not_open_ssh(self):
-        with patch.object(picker, 'pick_fzf', return_value=None):
+        with patch.object(picker, 'pick_host', return_value=None):
             with patch.object(picker, 'connect') as connect:
                 with patch.object(sys, 'argv', ['bin/ssh_picker.py', '--pick']):
                     self.assertEqual(picker.main(), 0)
         connect.assert_not_called()
 
     def test_fzf_receives_only_tagged_hosts_and_ignores_personal_output_settings(self):
-        result = subprocess.CompletedProcess(['fzf'], 0, 'server-two\r\n')
+        result = subprocess.CompletedProcess(['fzf'], 0, 'two\r\nserver-two\r\n')
         with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
             with patch.object(picker, 'target_hosts', return_value=['server-one', 'server-two']):
                 with patch.dict(os.environ, {'FZF_DEFAULT_OPTS': '--multi --print-query',
@@ -426,9 +426,11 @@ raise SystemExit(status)
                     with patch.object(picker.subprocess, 'run', return_value=result) as run:
                         self.assertEqual(picker.pick_fzf(), 'server-two')
         self.assertEqual(run.call_args.kwargs['input'], 'server-one\nserver-two\n')
+        self.assertIn('--no-sort', run.call_args.args[0])
         self.assertNotIn('FZF_DEFAULT_OPTS', run.call_args.kwargs['env'])
         self.assertNotIn('FZF_DEFAULT_OPTS_FILE', run.call_args.kwargs['env'])
         self.assertFalse(run.call_args.kwargs.get('shell', False))
+        self.assertFalse(any(arg.startswith('--height') for arg in run.call_args.args[0]))
 
     def test_fzf_cancel_no_match_and_unexpected_output(self):
         with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
@@ -437,20 +439,17 @@ raise SystemExit(status)
                     with patch.object(picker.subprocess, 'run',
                                       return_value=subprocess.CompletedProcess(['fzf'], code, '')):
                         self.assertIsNone(picker.pick_fzf(['server']))
-            for code, output in ((2, ''), (0, 'github.com\n'), (0, 'server\nother\n')):
+            for code, output in ((2, ''), (0, '\ngithub.com\n'), (0, 'server\nother\n')):
                 with self.subTest(code=code, output=output):
                     with patch.object(picker.subprocess, 'run',
                                       return_value=subprocess.CompletedProcess(['fzf'], code, output)):
                         with self.assertRaises(RuntimeError):
                             picker.pick_fzf(['server'])
 
-    def test_missing_fzf_or_empty_host_list_has_actionable_error(self):
+    def test_missing_fzf_has_actionable_error(self):
         with patch.object(picker.shutil, 'which', return_value=None):
             with self.assertRaisesRegex(RuntimeError, 'install.cmd'):
                 picker.pick_fzf(['server'])
-        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
-            with self.assertRaisesRegex(RuntimeError, 'Tag dalftui'):
-                picker.pick_fzf([])
 
     def test_picker_tag_evaluation_uses_real_windows_ssh_and_include_config(self):
         if not shutil.which(picker.ssh_executable()):
@@ -492,7 +491,7 @@ raise SystemExit(status)
                           'Host git-service\n Tag git\n'
                           'Match final originalhost final-alias\n Tag dalftui\n')
         with patch.object(picker, 'SSH_CONFIG', config):
-            self.assertEqual(picker.target_hosts(), ['vm-alias', 'final-alias'])
+            self.assertEqual(picker.target_hosts(), ['final-alias', 'vm-alias'])
         # Only listing disables canonicalization; connections retain the user's
         # SSH configuration so short aliases still work with private DNS.
         self.assertNotIn('CanonicalizeHostname=no', picker.ssh_command('vm-alias'))

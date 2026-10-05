@@ -73,7 +73,7 @@ class TagTests(TagConfig):
         include = self.root / 'hosts included.conf'
         include.write_text('Host server alias\n Tag dalftui\nHost service\n Tag git\n')
         self.config.write_text(f'Include "{include}"\n')
-        self.assertEqual(picker.target_hosts(), ['server', 'alias'])
+        self.assertEqual(picker.target_hosts(), ['alias', 'server'])
 
     def test_wildcard_tag_and_negated_host_pattern(self):
         self.config.write_text('Host server.lab excluded.lab github.com\n'
@@ -136,6 +136,20 @@ class DesktopPickerTests(unittest.TestCase):
             stack.enter_context(patch.object(ssh_picker.curses, 'COLORS', 256, create=True))
             selected = ssh_picker.pick(screen, hosts)
         return selected, screen.messages
+
+    def test_ctrl_o_connects_literal_input_and_is_visible_in_linux_picker(self):
+        for query, hosts in (('prod', ['sibils-prod-ai']), ('alice@new-server', [])):
+            with (self.subTest(query=query),
+                  patch.object(picker, 'configured_tag') as evaluate):
+                selected, messages = self.choose([*query, '\x0f'], hosts)
+                self.assertEqual(selected, query)
+                self.assertIn('Ctrl+O connect typed hostname, IP or user@host', messages)
+                evaluate.assert_not_called()
+
+    def test_empty_ctrl_o_input_shows_error_and_allows_correction(self):
+        selected, messages = self.choose(['\x0f', *'new-server', '\x0f'], [])
+        self.assertEqual(selected, 'new-server')
+        self.assertIn('Enter a valid SSH hostname, IP address or user@host.', messages)
 
     def test_filter_navigation_and_query_editing(self):
         keys = ssh_picker.curses

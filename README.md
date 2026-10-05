@@ -197,6 +197,23 @@ connect. **Esc** cancels. OpenSSH resolves tags, so wildcard, `Match`, and inclu
 settings apply. Wildcard rules are not individual hosts. You can type a full
 hostname covered by a tagged wildcard rule and press Enter to connect.
 
+To connect to a destination outside the list, type a hostname, IP address, or
+`user@host` and press **Ctrl+O**. This always uses exactly what you typed, even
+when another host matches the filter. The shortcut has its own help line in the
+picker and works with an empty list. No `Tag dalftui` or SSH config entry is
+required for this explicit action; normal SSH settings still apply. It does not
+add the destination to your config or cached host list.
+
+The picker fills the available terminal and adds columns when needed to fit the
+hosts. It recalculates the layout on resize and after filtering, keeping hostnames
+readable. Up/down move through hosts; left/right move between columns. If all
+hosts still cannot fit, use **Page Up/Page Down**; the footer shows the visible
+range. **Home/End** select the first/last host and **Ctrl+U** clears the filter.
+Filtering is case-insensitive and accepts abbreviated hostnames and multiple
+search terms while preserving alphabetical order (ignoring case). Hosts are sorted
+down each column, then continue in the next column. The Linux tmux popup uses
+the full client size; run `bin/reload` after updating to apply its new dimensions.
+
 Picker tag checks disable `CanonicalizeHostname` so building the list does not
 wait for DNS lookups, including when a VPN or private DNS is unavailable. Put
 `Tag dalftui` on the original alias or a matching rule; tags that require a
@@ -364,8 +381,9 @@ does not make an old root-layout or undeclared installation eligible for setup.
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python
 3.11+, Windows OpenSSH, and Windows VS Code with **Remote - SSH**. The `code`
 command should be on an absolute PATH entry during setup. The host picker also
-needs fzf and OpenSSH 9.4+ for `Tag dalftui`. No local tmux, Alacritty, or
-curses package is needed.
+needs OpenSSH 9.4+ for `Tag dalftui`. The full-screen grid uses Python's native
+Windows console support; no local tmux, Alacritty, or curses package is needed.
+fzf remains available as a single-column fallback for unsupported terminals.
 
 Clone the repository once on Windows, then install from PowerShell:
 
@@ -409,7 +427,7 @@ If that installation is moved or removed, folder opening fails without trying
 another executable and tells you to rerun setup. Use `-VSCodePath` again when
 moving a portable installation.
 
-Setup reuses fzf when it is already on PATH. Otherwise it installs fzf using
+Setup reuses fzf for the fallback when it is already on PATH. Otherwise it installs fzf using
 WinGet if available, or Chocolatey. You can choose a package manager explicitly:
 
 ```powershell
@@ -418,8 +436,8 @@ WinGet if available, or Chocolatey. You can choose a package manager explicitly:
 ```
 
 If neither package manager is available, setup prints the manual install
-commands and configures direct connections. Use `-SkipFzf` to configure `dssh`
-without installing fzf. The package commands are
+commands; the native grid and direct connections remain available. Use `-SkipFzf`
+to configure `dssh` without installing the fallback. The package commands are
 [documented by fzf](https://junegunn.github.io/fzf/installation/).
 Chocolatey installations may require an administrator PowerShell.
 
@@ -499,7 +517,9 @@ Host my-vm
 ```
 
 Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
-to cancel. Selection connects in the current terminal window. SSH uses the
+to cancel. **Ctrl+O** connects to exactly what you typed, including a destination
+outside the list. The grid uses the full tab and adds columns when space permits; resizing
+the tab immediately updates the layout. Selection connects in the current terminal window. SSH uses the
 configured username; if none is configured, the launcher asks for one. It
 creates or reattaches tmux using the usual session policy when tmux is installed,
 or silently opens a plain login shell otherwise. With a compatible remote
@@ -514,6 +534,10 @@ launcher directly:
 py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --pick
 py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --connect my-vm
 ```
+
+Use `--fzf` instead of `--pick` for fzf's single-column interface and its full
+search syntax. This fallback also uses the full terminal height and shows the
+same **Ctrl+O** shortcut for typed destinations on both Windows and Linux.
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
 
@@ -655,6 +679,7 @@ needed. Representative layout:
 .
 ├── dalftui/
 │   ├── ssh.py
+│   ├── host_picker.py
 │   ├── vscode.py
 │   ├── linux/
 │   │   ├── alacritty_config.py
@@ -666,6 +691,7 @@ needed. Representative layout:
 │   │   └── tmux-start.sh
 │   └── windows/
 │       ├── ssh.py
+│       ├── host_picker.py
 │       ├── vscode.py
 │       ├── terminal_settings.py
 │       ├── setup.ps1
@@ -702,7 +728,9 @@ needed. Representative layout:
 ```
 
 [dalftui/ssh.py](dalftui/ssh.py) owns shared host/tag/login evaluation, fzf,
-SSH arguments, and connection orchestration. [dalftui/vscode.py](dalftui/vscode.py)
+SSH arguments, and connection orchestration. [dalftui/host_picker.py](dalftui/host_picker.py)
+owns the responsive grid, filtering, and navigation; platform adapters handle console I/O.
+[dalftui/vscode.py](dalftui/vscode.py)
 owns URI construction, editor launching, both Unix and TCP bridge transports,
 authentication, and lifecycle handling. Platform modules own local operating-system
 integration. Directory placement describes the environment targeted by code;
