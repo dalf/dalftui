@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Pick an SSH host, using remote tmux and a VS Code bridge when installed."""
 import argparse
+from dataclasses import dataclass
+import fnmatch
 import glob
 import hashlib
 import json
@@ -16,11 +18,14 @@ import tempfile
 sys.dont_write_bytecode = True
 from bridge_protocol import SOCKET_ENV, TOKEN_ENV
 from .linux import remote_bootstrap
+from .linux import ops
+from .host_picker import HostAction
 from .vscode import EditorBridge
 
 SSH_CONFIG = Path.home() / '.ssh/config'
 PICKER_TAG = 'dalftui'
 HOST_CACHE_VERSION = 1
+CHECKS_CONFIG = Path.home() / '.ssh/dalftui-checks.json'
 
 CHECKOUT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -214,45 +219,6 @@ def target_hosts(*, refresh=False):
     return sorted(hosts, key=str.casefold)
 
 
-def pick_fzf(hosts=None, *, refresh=False):
-    """Use the single-column fallback, also available explicitly with --fzf."""
-    executable = shutil.which('fzf')
-    if not executable:
-        raise RuntimeError('fzf was not found. Run install.cmd, or install fzf '
-                           'with winget or Chocolatey. Use --connect HOST to connect directly.')
-    if hosts is None:
-        hosts = target_hosts(refresh=True) if refresh else target_hosts()
-    env = dict(os.environ)
-    # Personal multi-select/print-query settings would change the returned host.
-    env.pop('FZF_DEFAULT_OPTS', None)
-    env.pop('FZF_DEFAULT_OPTS_FILE', None)
-    result = subprocess.run(
-        [executable, '--layout=reverse', '--border=rounded',
-         '--no-multi', '--no-sort', '--prompt=Host> ', '--print-query',
-         '--bind=ctrl-o:print-query',
-         '--header=SSH hosts | Tag dalftui\n'
-         'Type to filter | Up/Down select | Enter connect | Esc cancel\n'
-         'Ctrl+O connect typed hostname, IP or user@host',
-         '--color=bg:-1,fg:#e5e7eb,bg+:#e5e7eb,fg+:#111827,hl:#89b4fa,hl+:#1565c0,'
-         'header:#a6adc8,prompt:#89b4fa,pointer:#89b4fa,border:#585b70'],
-        input=''.join(host + '\n' for host in hosts), stdout=subprocess.PIPE,
-        encoding='utf-8', env=env)
-    if result.returncode in (1, 130):
-        return None
-    if result.returncode:
-        raise RuntimeError(f'fzf exited with status {result.returncode}.')
-    # Enter prints the query followed by the selection. The print-query action
-    # exits successfully with only the query, even when there are no matches.
-    lines = result.stdout.splitlines()
-    if len(lines) == 1:
-        if not valid_host(lines[0]):
-            raise RuntimeError('Enter a valid SSH hostname, IP address or user@host.')
-        return lines[0]
-    if len(lines) == 2 and lines[1] in hosts:
-        return lines[1]
-    raise RuntimeError('fzf did not return a configured, tagged host or a typed destination.')
-
-
 def validate_picker_host(host, *, require_tag=True):
     if not valid_host(host):
         return 'Enter a valid SSH hostname, IP address or user@host.'
@@ -262,23 +228,102 @@ def validate_picker_host(host, *, require_tag=True):
 
 
 def pick_host(*, refresh=False):
-    """Use a full-screen grid when supported, otherwise fall back to fzf."""
+    """Choose a host in the native full-screen grid."""
     options = {'refresh': True} if refresh else {}
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        return pick_fzf(**options)
+        raise RuntimeError('The SSH picker requires an interactive terminal. '
+                           'Open it in a terminal, or use --connect HOST to connect directly.')
     hosts = target_hosts(**options)
     if sys.platform == 'win32':
         from . import host_picker
         from .windows.host_picker import ConsoleScreen, ConsoleUnavailable
         try:
             with ConsoleScreen() as screen:
-                return host_picker.pick(screen, hosts, validate_picker_host)
-        except ConsoleUnavailable:
-            return pick_fzf(hosts)
+                return host_picker.pick(screen, hosts, validate_picker_host,
+                                        details=connection_details, checks=saved_checks)
+        except ConsoleUnavailable as error:
+            raise RuntimeError(f'{error} Use --connect HOST to connect directly.') from error
     from .linux import ssh_picker
     if ssh_picker.curses is None:
-        return pick_fzf(hosts)
+        raise RuntimeError('The SSH picker requires Python curses support. '
+                           'Use --connect HOST to connect directly.')
     return ssh_picker.curses.wrapper(ssh_picker.pick, hosts, action='connect')
+
+
+def connection_details(host):
+    """Evaluate only the selected destination, using the connection's SSH options."""
+    try:
+        result = subprocess.run([*ssh_base(host), '-G', '--', host], capture_output=True,
+                                text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f'Could not read SSH details for {host}: {error}') from error
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or 'Could not read SSH configuration')
+    labels = {'hostname': 'Hostname', 'user': 'User', 'port': 'Port',
+              'proxyjump': 'Jump host', 'proxycommand': 'Proxy command',
+              'identityfile': 'Identity file', 'identitiesonly': 'Identities only',
+              'forwardagent': 'Agent forwarding'}
+    lines = [f'SSH destination: {host}']
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(' ')
+        if key in labels:
+            lines.append(f'{labels[key]}: {value}')
+    return lines + ['', 'Values are evaluated by OpenSSH; no connection is opened.',
+                    'If User is unset in your configuration, dalftui asks for a login.',
+                    'Identity files are paths only; key contents are never read.']
+
+
+@dataclass(frozen=True)
+class SavedCheck:
+    name: str
+    command: str
+    timeout: int = 30
+
+
+def saved_checks(host):
+    """Load local, trusted shell commands only when the checks action is opened."""
+    checks = [SavedCheck('packages', ops.package_status_script()),
+              SavedCheck('system', 'uptime; df -h /; systemctl --failed --no-pager')]
+    try:
+        data = json.loads(CHECKS_CONFIG.read_text(encoding='utf-8-sig'))
+    except FileNotFoundError:
+        return checks
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f'Could not read {CHECKS_CONFIG}: {error}') from error
+    if not isinstance(data, dict) or set(data) != {'checks'} or not isinstance(data['checks'], list):
+        raise ValueError(f'{CHECKS_CONFIG}: expected an object with a checks array')
+    names = {check.name for check in checks}
+    for item in data['checks']:
+        if not isinstance(item, dict) or set(item) - {'name', 'command', 'hosts', 'timeout'}:
+            raise ValueError(f'{CHECKS_CONFIG}: invalid check fields')
+        name, command = item.get('name'), item.get('command')
+        timeout, hosts = item.get('timeout', 30), item.get('hosts', ['*'])
+        if (not isinstance(name, str) or not name.strip() or not name.isprintable()
+                or name in names or not isinstance(command, str) or not command.strip()
+                or '\0' in command or len(command) > 16000
+                or type(timeout) is not int or not 1 <= timeout <= 3600
+                or not isinstance(hosts, list) or not hosts
+                or any(not isinstance(pattern, str) or not pattern for pattern in hosts)):
+            raise ValueError(f'{CHECKS_CONFIG}: invalid or duplicate check {name!r}; '
+                             'provide name, command, hosts, and a timeout from 1 to 3600 seconds')
+        names.add(name)
+        if any(fnmatch.fnmatchcase(host, pattern) for pattern in hosts):
+            checks.append(SavedCheck(name, command, timeout))
+    return checks
+
+
+def action_arguments(selection):
+    if not isinstance(selection, HostAction):
+        return []
+    if selection.mode == 'check':
+        return ['--check', selection.check]
+    return ['--' + selection.mode]
+
+
+def connect_selection(selection, transport=None):
+    if isinstance(selection, HostAction):
+        return connect(selection.host, transport, mode=selection.mode, check=selection.check)
+    return connect(selection, transport)
 
 
 def configured_login(host):
@@ -348,7 +393,7 @@ def cleanup_editor_bridge(host, login, bridge, env):
         pass
 
 
-def ssh_command(host, login=None, bridge=None):
+def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None):
     args = [*ssh_base(host, login), '-t']
     if bridge:
         # Keep the forwarding and its local bridge owned by this SSH window.
@@ -357,16 +402,24 @@ def ssh_command(host, login=None, bridge=None):
         # Both transports must refuse an occupied or disallowed forward.
         args += ['-R', bridge.forward_spec, '-o', 'ExitOnForwardFailure=yes']
     return [*args, '--', host,
-            'sh -c ' + shlex.quote(remote_bootstrap.session_script(bridge))]
+            'sh -c ' + shlex.quote(remote_bootstrap.session_script(bridge, mode=mode, check=check))]
 
 
-def connect(host, transport=None):
+def connect(host, transport=None, *, mode='normal', check=None):
     env = dict(os.environ, TERM='xterm-256color')
     env.pop('TMUX', None)
     env.pop('TMUX_PANE', None)
     env.pop(SOCKET_ENV, None)
     env.pop(TOKEN_ENV, None)
     try:
+        options = {}
+        if mode != 'normal':
+            options['mode'] = mode
+        if mode == 'check':
+            selected = next((item for item in saved_checks(host) if item.name == check), None)
+            if selected is None:
+                raise ValueError(f'No saved check {check!r} is configured for {host}')
+            options['check'] = selected
         login = None
         user = configured_login(host)
         if user is None:
@@ -390,9 +443,9 @@ def connect(host, transport=None):
             prepared = prepare_editor_credentials(host, login, bridge, env, check_installation=True)
             if prepared:
                 with bridge:
-                    status = subprocess.run(ssh_command(host, login, bridge), env=env).returncode
+                    status = subprocess.run(ssh_command(host, login, bridge, **options), env=env).returncode
             else:
-                status = subprocess.run(ssh_command(host, login), env=env).returncode
+                status = subprocess.run(ssh_command(host, login, **options), env=env).returncode
         finally:
             # Stop accepting/launching before any potentially slow cleanup SSH.
             if prepared is not False:
@@ -417,8 +470,11 @@ def main():
     action.add_argument('--connect', metavar='HOST')
     action.add_argument('--pick', action='store_true',
                         help='Choose a host in a full-screen grid and connect here (Windows default)')
-    action.add_argument('--fzf', action='store_true', help='Use the single-column fzf picker instead')
     action.add_argument('--list', action='store_true', help='Print the host list without connecting')
+    session = parser.add_mutually_exclusive_group()
+    session.add_argument('--plain', action='store_true', help='With --connect: bypass tmux')
+    session.add_argument('--ops', action='store_true', help='With --connect: open three ops panes')
+    session.add_argument('--check', metavar='NAME', help='With --connect: run a saved check, then a shell')
     parser.add_argument('--refresh-hosts', action='store_true',
                         help='Recompute the picker host list instead of using its cache')
     parser.add_argument('--bridge', choices=('unix', 'tcp'),
@@ -428,16 +484,22 @@ def main():
         parser.error('Python 3.11 or newer is required.')
     if args.connect and args.refresh_hosts:
         parser.error('--refresh-hosts cannot be used with --connect')
+    if (args.plain or args.ops or args.check is not None) and not args.connect:
+        parser.error('--plain, --ops and --check require --connect HOST')
     refresh_options = {'refresh': True} if args.refresh_hosts else {}
     if args.connect:
-        return connect(args.connect, args.bridge)
+        selection = args.connect
+        if args.plain or args.ops or args.check is not None:
+            mode = 'plain' if args.plain else 'ops' if args.ops else 'check'
+            selection = HostAction(args.connect, mode, args.check)
+        return connect_selection(selection, args.bridge)
     if args.list:
         print('\n'.join(target_hosts(**refresh_options)))
         return 0
-    if sys.platform == 'win32' or args.pick or args.fzf:
+    if sys.platform == 'win32' or args.pick:
         try:
-            host = (pick_fzf if args.fzf else pick_host)(**refresh_options)
-            return connect(host, args.bridge) if host else 0
+            host = pick_host(**refresh_options)
+            return connect_selection(host, args.bridge) if host else 0
         except KeyboardInterrupt:
             return 130
         except (OSError, RuntimeError, UnicodeError) as error:

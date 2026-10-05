@@ -72,7 +72,7 @@ class PickerScreen:
                 curses.KEY_HOME: 'home', curses.KEY_END: 'end',
                 curses.KEY_PPAGE: 'page_up', curses.KEY_NPAGE: 'page_down',
                 curses.KEY_BACKSPACE: 'backspace', curses.KEY_ENTER: 'enter',
-                curses.KEY_BTAB: 'back_tab', curses.KEY_RESIZE: None,
+                curses.KEY_BTAB: 'back_tab', curses.KEY_RESIZE: None, curses.KEY_F0 + 4: 'actions',
                 '\x1b': 'cancel', '\x03': 'cancel', '\x04': 'eof',
                 '\r': 'enter', '\n': 'enter', '\x7f': 'backspace', '\b': 'backspace',
                 '\x0f': 'connect_typed', '\x15': 'clear', '\t': 'tab'}
@@ -81,10 +81,16 @@ class PickerScreen:
 
 def pick(screen, hosts, *, action='opens a new window'):
     from .. import host_picker, ssh
-    return host_picker.pick(PickerScreen(screen), hosts, ssh.validate_picker_host, action=action)
+    return host_picker.pick(PickerScreen(screen), hosts, ssh.validate_picker_host, action=action,
+                            details=ssh.connection_details, checks=ssh.saved_checks)
 
 def open_window(host):
     from .. import ssh
+    from ..host_picker import HostAction
+
+    selection = host
+    if isinstance(selection, HostAction):
+        host = selection.host
 
     alacritty = shutil.which('alacritty')
     if not alacritty:
@@ -98,7 +104,8 @@ def open_window(host):
     title = json.dumps(f'SSH · {host}', ensure_ascii=False)
     args = [alacritty, '--option', f'window.title={title}', 'window.dynamic_title=true',
             '-e', sys.executable,
-            str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host]
+            str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host,
+            *ssh.action_arguments(selection)]
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(args, env=env, start_new_session=True,
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)
@@ -115,7 +122,7 @@ def run_picker(parser, *, refresh=False):
     from .. import ssh
 
     if curses is None:
-        parser.error('Use --connect HOST on Windows; the interactive host picker requires curses.')
+        parser.error('The SSH picker requires Python curses support. Use --connect HOST to connect directly.')
     try:
         hosts = ssh.target_hosts(refresh=True) if refresh else ssh.target_hosts()
         host = curses.wrapper(pick, hosts)

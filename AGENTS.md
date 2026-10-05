@@ -43,7 +43,7 @@ not establish compatibility when their meaning or bootstrap behavior changes.
 ## Implementation layout
 
 - Shared SSH behavior belongs in [dalftui/ssh.py](dalftui/ssh.py): host/tag/login
-  evaluation, fzf, SSH arguments, and connection orchestration. Shared editor
+  evaluation, picker dispatch, SSH arguments, and connection orchestration. Shared editor
   behavior belongs in [dalftui/vscode.py](dalftui/vscode.py): URIs, launching,
   both bridge transports, authentication, and lifecycle handling.
 - Local operating-system integration belongs in `dalftui/linux/` or
@@ -132,9 +132,10 @@ mise run test:windows
 
 This runs `test_windows*.py` and `test_bridge*.py` discovery. Those patterns select
 `test_windows_launcher.py`, `test_windows_terminal.py`, `test_windows_ssh_cache.py`,
-`test_windows_ssh_title.py`, `test_windows_host_picker.py`, and `test_windows_fzf.py`,
+`test_windows_ssh_title.py`, `test_windows_host_picker.py`, and `test_windows_ssh_actions.py`,
 then `test_bridge_lifecycle.py` and `test_bridge_protocol.py`, respectively.
-Linux-targeted bootstrap/startup tests are in `tests/test_remote_bootstrap.py`.
+Linux-targeted bootstrap/startup tests are in `tests/test_remote_bootstrap.py`
+and `tests/test_ops_mode.py`.
 Run PowerShell setup/profile verification separately when the shell is available:
 
 ```powershell

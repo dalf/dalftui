@@ -36,7 +36,7 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes fzf git less openssh-client tmux
+          sudo apt-get install --yes git less openssh-client tmux
       - name: Check spelling
         run: mise run spellcheck
       - name: Check Python with Pylint

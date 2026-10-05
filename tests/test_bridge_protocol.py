@@ -139,6 +139,45 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout + result.stderr, '')
 
+    def test_new_session_modes_deliver_credentials_to_a_historical_remote_client(self):
+        self.install_historical(version=2)
+        (self.bin / 'timeout').symlink_to(shutil.which('timeout'))
+        client = self.directory / 'historical-client.py'
+        fixture = Path(__file__).parent / 'fixtures/bridge_protocol_v1.py'
+        client.write_text('import importlib.util, os\n'
+                          f'spec = importlib.util.spec_from_file_location("old_peer", {str(fixture)!r})\n'
+                          'peer = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(peer)\n'
+                          'peer.request(os.environ["DALFTUI_EDITOR_SOCKET"], peer.FOLDER, '
+                          'os.environ["DALFTUI_EDITOR_TOKEN"])\n', encoding='utf-8')
+        shell = self.bin / 'login-shell'
+        shell.write_text('#!/bin/sh\nexec python3 "$TEST_HISTORICAL_CLIENT"\n')
+        shell.chmod(0o755)
+        tmux = self.bin / 'tmux'
+        tmux.write_text('#!/bin/sh\ncase "$1" in\n'
+                        "new-session) printf '$42 %%70\\n' ;;\n"
+                        "split-window) printf '%%71\\n' ;;\n"
+                        'attach-session) exec python3 "$TEST_HISTORICAL_CLIENT" ;;\nesac\n')
+        self.env.update(SHELL=str(shell), TEST_HISTORICAL_CLIENT=str(client))
+        for mode in ('plain', 'check', 'ops'):
+            with (self.subTest(mode=mode), patch.object(vscode, 'launch') as launch,
+                  vscode.EditorBridge('alice@historical-host', transport='tcp') as bridge):
+                bridge.remote_directory = str(self.directory / (mode + '-credentials'))
+                bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
+                bridge.remote_token_file = bridge.remote_directory + '/token'
+                # Substitute the SSH forward with this disposable listener.
+                bridge.remote_socket = f'tcp:127.0.0.1:{bridge.local_port}'
+                prepared = self.run_script(remote_bootstrap.prepare_credentials_script(
+                    bridge, check_installation=True), token=bridge.token + '\n')
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                check = SimpleNamespace(name='health', command='true', timeout=2)
+                script = remote_bootstrap.session_script(bridge, mode=mode, check=check)
+                self.assertNotIn(bridge.token, script)
+                result = self.run_script(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                launch.assert_called_once()
+                self.assertEqual(launch.call_args.args[:2], (legacy.FOLDER, 'alice@historical-host'))
+                self.assertFalse(Path(bridge.remote_directory).exists())
+
     def test_current_desktop_refuses_credentials_without_a_supported_readable_declaration(self):
         checkout = self.install_historical(version=2)
         declaration = checkout / 'bridge_protocol.py'

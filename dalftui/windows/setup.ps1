@@ -169,53 +169,6 @@ function Update-DalftuiProcessPath {
     $env:PATH = ($entries | Where-Object { $_ }) -join [IO.Path]::PathSeparator
 }
 
-function Select-DalftuiPackageManager([string]$Preference = 'auto') {
-    if ($Preference -ne 'auto') {
-        $command = Find-DalftuiApplication $Preference
-        if (-not $command) {
-            throw "$Preference was not found. Install fzf manually or choose an available package manager."
-        }
-        return $command
-    }
-    foreach ($name in @('winget', 'choco')) {
-        $command = Find-DalftuiApplication $name
-        if ($command) { return $command }
-    }
-    return $null
-}
-
-function Invoke-DalftuiPackageInstall($Manager) {
-    if ([IO.Path]::GetFileNameWithoutExtension($Manager.Name) -eq 'winget') {
-        & $Manager.Source install --id junegunn.fzf --exact --source winget `
-            --accept-package-agreements --accept-source-agreements | Out-Host
-    } else {
-        & $Manager.Source install fzf --yes --no-progress | Out-Host
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "fzf installation failed (exit $LASTEXITCODE). For Chocolatey, use an administrator PowerShell if required, then rerun setup."
-    }
-}
-
-function Install-DalftuiFzf([string]$Preference = 'auto', [switch]$Skip) {
-    if (Find-DalftuiApplication 'fzf') {
-        Write-Host 'fzf is already available; keeping the installed version.'
-        return $true
-    }
-    if ($Skip) { return $false }
-    $manager = Select-DalftuiPackageManager $Preference
-    if (-not $manager) {
-        Write-Warning 'Install fzf with: winget install --id junegunn.fzf --exact OR choco install fzf. Then open a new terminal. Direct connections with dssh HOST are available meanwhile.'
-        return $false
-    }
-    Write-Host "Installing fzf using $($manager.Name) ..."
-    Invoke-DalftuiPackageInstall $manager
-    Update-DalftuiProcessPath
-    if (-not (Find-DalftuiApplication 'fzf')) {
-        throw 'The package manager finished, but fzf is not on PATH. Open a new terminal and rerun setup.'
-    }
-    return $true
-}
-
 function Get-DalftuiProfilePaths([string]$TargetProfile) {
     if (-not [string]::IsNullOrWhiteSpace($TargetProfile)) {
         return $TargetProfile
@@ -318,7 +271,7 @@ function Test-DalftuiWindowsPlatform {
 
 function Invoke-DalftuiWindowsSetup {
     [CmdletBinding()]
-    param([string]$Preference = 'auto', [switch]$Skip, [string]$TargetProfile,
+    param([string]$TargetProfile,
           [string]$Checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')),
           [switch]$NoTerminal,
           [string[]]$SettingsPaths, [string]$SelectedVSCodePath)
@@ -342,7 +295,6 @@ function Invoke-DalftuiWindowsSetup {
     }
     Update-DalftuiProcessPath
     $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
-    $pickerReady = Install-DalftuiFzf -Preference $Preference -Skip:$Skip
     foreach ($profilePath in $profilePaths) {
         Write-DalftuiProfile -Path $profilePath -Checkout $Checkout
     }
@@ -353,6 +305,6 @@ function Invoke-DalftuiWindowsSetup {
     }
     Write-Host 'dssh HOST is ready.'
     Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'
-    if ($pickerReady) { Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).' }
-    else { Write-Host 'The grid picker is ready. Install fzf only for --fzf or the terminal fallback.' }
+    Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).'
+    Write-Host 'In the picker, Ctrl+O connects to a typed hostname, IP address or user@host.'
 }

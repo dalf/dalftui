@@ -3,6 +3,13 @@ from dataclasses import dataclass
 import unicodedata
 
 
+@dataclass(frozen=True)
+class HostAction:
+    host: str
+    mode: str
+    check: str | None = None
+
+
 def cell_width(text):
     return sum(0 if unicodedata.combining(char) else
                2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
@@ -103,7 +110,7 @@ class Picker:
             write(0, 0, 'Enlarge terminal | Esc cancels')
             return grid, cells
         write(0, 1, f'SSH HOSTS  {len(self.matches)}/{len(self.hosts)}', 'heading')
-        write(1, 1, f'Type to filter | Arrows select | Enter {action} | Esc cancel', 'muted')
+        write(1, 1, f'F4 actions | Enter {action} | Arrows select | Esc cancel', 'muted')
         # Show the end of a long query without moving the grid outside the screen.
         query = self.query
         while query and cell_width(query) > max(1, width - 11):
@@ -130,7 +137,80 @@ class Picker:
         return grid, cells
 
 
-def pick(screen, hosts, validate, *, action='connect'):
+def dialog(screen, title, lines, *, choose=False):
+    """Scrollable text or single-column menu; Esc always returns to its caller."""
+    selected = 0
+    previous = None
+    while True:
+        width, height = screen.size()
+        visible_lines = list(lines)
+        if not choose:
+            visible_lines = []
+            for line in lines:
+                line = ''.join(char for char in line if char.isprintable())
+                while cell_width(line) > max(2, width - 4):
+                    part = clip(line, max(2, width - 4))
+                    visible_lines.append(part)
+                    line = line[len(part):]
+                visible_lines.append(line)
+        rows = max(1, height - 4)
+        selected = max(0, min(selected, len(visible_lines) - 1))
+        start = selected // rows * rows
+        help_text = ('Enter select | ' if choose else 'Enter back | ') + 'Esc back | Arrows / PgUp / PgDn'
+        cells = [(0, 1, title, 'heading'), (1, 1, help_text, 'muted')]
+        for index, line in enumerate(visible_lines[start:start + rows], start):
+            active = choose and index == selected
+            cells.append((2 + index - start, 1, ('> ' if active else '  ') + line,
+                          'selected' if active else 'normal'))
+        cells.append((height - 1, 1, f'{start + 1 if visible_lines else 0}-{min(start + rows, len(visible_lines))} / {len(visible_lines)}', 'muted'))
+        frame = [(y, x, clip(text, width - x - 1), style)
+                 for y, x, text, style in cells if 0 <= y < height and x < width - 1]
+        if (width, height, frame) != previous:
+            screen.draw(frame)
+            previous = (width, height, frame)
+        key = screen.read_key()
+        if key in ('cancel', 'eof') or (key == 'enter' and not choose):
+            return None
+        if key == 'enter' and lines:
+            return selected
+        steps = {'up': -1, 'down': 1, 'tab': 1, 'back_tab': -1,
+                 'page_up': -rows, 'page_down': rows}
+        if key in steps:
+            selected += steps[key]
+        elif key == 'home':
+            selected = 0
+        elif key == 'end':
+            selected = len(visible_lines) - 1
+
+
+def host_actions(screen, host, details, checks):
+    labels = ['Connect normally', 'Show connection details', 'Connect without tmux',
+              'Run a saved check', 'Open ops mode']
+    while True:
+        choice = dialog(screen, f'HOST ACTIONS: {host}', labels, choose=True)
+        if choice is None:
+            return None
+        if choice == 0:
+            return host
+        if choice in (2, 4):
+            return HostAction(host, 'plain' if choice == 2 else 'ops')
+        try:
+            if choice == 1:
+                width, _ = screen.size()
+                screen.draw([(0, 0, clip('Reading SSH connection details...', max(0, width - 1)), 'heading')])
+                dialog(screen, f'CONNECTION DETAILS: {host}', details(host))
+            else:
+                available = checks(host)
+                choice = dialog(screen, f'SAVED CHECKS: {host}',
+                                [f'{check.name} ({check.timeout}s)' for check in available], choose=True)
+                if choice is not None:
+                    check = available[choice]
+                    return HostAction(host, 'check', check.name)
+        except (OSError, RuntimeError, ValueError) as error:
+            dialog(screen, 'Could not load host action', str(error).splitlines())
+
+
+def pick(screen, hosts, validate, *, action='connect', details=None, checks=None):
     """Use normalized screen keys; validate with require_tag=False for Ctrl+O."""
     picker = Picker(hosts)
     previous = None
@@ -144,6 +224,15 @@ def pick(screen, hosts, validate, *, action='connect'):
         key = screen.read_key()
         if key in ('cancel', 'eof'):
             return None
+        if key == 'actions' and details is not None and checks is not None:
+            host = picker.matches[picker.selected] if picker.matches else picker.query
+            picker.message = validate(host, require_tag=False)
+            if not picker.message:
+                selected = host_actions(screen, host, details, checks)
+                if selected:
+                    return selected
+                previous = None
+            continue
         if key in ('enter', 'connect_typed'):
             if key == 'enter' and picker.matches:
                 return picker.matches[picker.selected]

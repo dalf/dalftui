@@ -146,6 +146,13 @@ class DesktopPickerTests(unittest.TestCase):
                 self.assertIn('Ctrl+O connect typed hostname, IP or user@host', messages)
                 evaluate.assert_not_called()
 
+    def test_f4_opens_actions_and_dispatches_plain_connection(self):
+        from dalftui.host_picker import HostAction
+        keys = ssh_picker.curses
+        selected, messages = self.choose([keys.KEY_F0 + 4, keys.KEY_DOWN, keys.KEY_DOWN, '\n'], ['prod'])
+        self.assertEqual(selected, HostAction('prod', 'plain'))
+        self.assertTrue(any('F4 actions' in message for message in messages))
+
     def test_empty_ctrl_o_input_shows_error_and_allows_correction(self):
         selected, messages = self.choose(['\x0f', *'new-server', '\x0f'], [])
         self.assertEqual(selected, 'new-server')
@@ -230,7 +237,7 @@ class DesktopWindowTests(unittest.TestCase):
                 picker.main()
         self.assertEqual(failure.exception.code, 2)
         hosts.assert_not_called()
-        self.assertIn('Use --connect HOST on Windows; the interactive host picker requires curses.',
+        self.assertIn('The SSH picker requires Python curses support. Use --connect HOST to connect directly.',
                       output.getvalue())
 
     def test_missing_alacritty_and_startup_failures(self):

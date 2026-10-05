@@ -53,13 +53,11 @@ try {
     $probeImplementation = @'
 function Invoke-DalftuiWindowsSetup {
     [CmdletBinding()]
-    param([string]$Preference = 'auto', [switch]$Skip, [string]$TargetProfile,
+    param([string]$TargetProfile,
           [string]$Checkout, [switch]$NoTerminal, [string[]]$SettingsPaths,
           [string]$SelectedVSCodePath)
     if ($env:DALFTUI_SETUP_PROBE_FAIL) { throw 'probe failure' }
     $result = [ordered]@{
-        Preference = $Preference
-        Skip = [bool]$Skip
         TargetProfile = $TargetProfile
         Checkout = $Checkout
         NoTerminal = [bool]$NoTerminal
@@ -89,7 +87,7 @@ function Invoke-DalftuiWindowsSetup {
         '$ErrorActionPreference = ''Stop''',
         ('Push-Location -LiteralPath ' + (ConvertTo-DalftuiSingleQuotedLiteral $unrelated)),
         'try {',
-        ('    & ' + $wrapperLiteral + ' -PackageManager choco -SkipFzf' +
+        ('    & ' + $wrapperLiteral +
             ' -VSCodePath ' + (ConvertTo-DalftuiSingleQuotedLiteral $selectedCode) +
             ' -ProfilePath ' + (ConvertTo-DalftuiSingleQuotedLiteral $targetProfile) +
             ' -SkipTerminal -TerminalSettingsPath @(' +
@@ -107,8 +105,7 @@ function Invoke-DalftuiWindowsSetup {
     $null = & $probeShell -NoLogo -NoProfile -File $runner
     Assert-True ($LASTEXITCODE -eq 0) 'The public setup wrapper must forward non-default arguments successfully'
     $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
-    Assert-True ($forwarded.Preference -eq 'choco' -and $forwarded.Skip -and
-                 $forwarded.TargetProfile -eq $targetProfile -and $forwarded.NoTerminal -and
+    Assert-True ($forwarded.TargetProfile -eq $targetProfile -and $forwarded.NoTerminal -and
                  $forwarded.SelectedVSCodePath -eq $selectedCode) `
         'The public setup wrapper must preserve non-default scalar and switch arguments'
     Assert-True ($forwarded.Checkout -eq $forwardingCheckout) `
@@ -123,8 +120,7 @@ function Invoke-DalftuiWindowsSetup {
     $null = & $probeShell -NoLogo -NoProfile -File $runner
     Assert-True ($LASTEXITCODE -eq 0) 'The public setup wrapper must forward defaults successfully'
     $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
-    Assert-True ($forwarded.Preference -eq 'auto' -and -not $forwarded.Skip -and
-                 -not $forwarded.NoTerminal -and -not $forwarded.TargetProfile -and
+    Assert-True (-not $forwarded.NoTerminal -and -not $forwarded.TargetProfile -and
                  $forwarded.Checkout -eq $forwardingCheckout) `
         'The public setup wrapper must leave profile discovery to the installer by default'
     $env:DALFTUI_SETUP_PROBE_FAIL = '1'
@@ -149,13 +145,12 @@ function Invoke-DalftuiWindowsSetup {
         $modulePathBefore = $env:PSModulePath
         Push-Location -LiteralPath $unrelated
         try {
-            $null = & $cmdInstaller -PackageManager choco -SkipFzf `
+            $null = & $cmdInstaller `
                 -VSCodePath $selectedCode -ProfilePath $targetProfile -SkipTerminal `
                 -TerminalSettingsPath $settingsOne
             Assert-True ($LASTEXITCODE -eq 0) 'install.cmd must preserve successful setup status'
             $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
             Assert-True ($forwarded.Checkout -eq $forwardingCheckout -and
-                         $forwarded.Preference -eq 'choco' -and $forwarded.Skip -and
                          $forwarded.TargetProfile -eq $targetProfile -and $forwarded.NoTerminal -and
                          $forwarded.SelectedVSCodePath -eq $selectedCode -and
                          $forwarded.SettingsPaths[0] -eq $settingsOne) `
@@ -311,70 +306,6 @@ function Invoke-DalftuiWindowsSetup {
         '"%~dp0..\Code.exe" "%~dp0..\..\resources\app\out\cli.js" %*')
     Assert-Throws { Resolve-DalftuiVSCode $versionedApp } 'The launcher must not select CLI paths outside the installation'
 
-    $originalFind = (Get-Item Function:\Find-DalftuiApplication).ScriptBlock
-    $originalInstall = (Get-Item Function:\Invoke-DalftuiPackageInstall).ScriptBlock
-    $originalPath = (Get-Item Function:\Update-DalftuiProcessPath).ScriptBlock
-    $script:apps = @{}
-    function Find-DalftuiApplication([string]$Name) { $script:apps[$Name] }
-    $winget = [pscustomobject]@{ Name = 'winget.exe'; Source = 'winget.exe' }
-    $choco = [pscustomobject]@{ Name = 'choco.exe'; Source = 'choco.exe' }
-    $script:apps = @{winget = $winget; choco = $choco}
-    Assert-True ((Select-DalftuiPackageManager).Name -eq 'winget.exe') 'Auto must prefer WinGet'
-    Assert-True ((Select-DalftuiPackageManager choco).Name -eq 'choco.exe') 'Explicit Chocolatey must be respected'
-    $script:apps.Remove('winget')
-    Assert-True ((Select-DalftuiPackageManager).Name -eq 'choco.exe') 'Auto must use Chocolatey without WinGet'
-    $script:apps = @{}
-    Assert-True ($null -eq (Select-DalftuiPackageManager)) 'No package manager must return no selection'
-    Assert-Throws { Select-DalftuiPackageManager winget } 'An unavailable explicit manager must fail'
-
-    $script:installs = 0
-    $script:pathUpdates = 0
-    function Invoke-DalftuiPackageInstall($Manager) {
-        $script:installs++
-        $script:apps.fzf = [pscustomobject]@{Name = 'fzf.exe'; Source = 'fzf.exe'}
-    }
-    function Update-DalftuiProcessPath { $script:pathUpdates++ }
-    $script:apps = @{fzf = [pscustomobject]@{Name = 'fzf.exe'; Source = 'fzf.exe'}}
-    Assert-True (Install-DalftuiFzf -Preference choco) 'Existing fzf must be reused even without its installer'
-    Assert-True ($script:installs -eq 0) 'Existing fzf must never be reinstalled'
-    $script:apps = @{}
-    Assert-True (-not (Install-DalftuiFzf -Skip)) 'SkipFzf must avoid installation'
-    Assert-True (-not (Install-DalftuiFzf -WarningAction SilentlyContinue)) 'No package manager must allow direct-connection setup'
-    Assert-True ($script:installs -eq 0) 'Missing/skipped managers must never run an installer'
-    $script:apps = @{winget = $winget}
-    Assert-True (Install-DalftuiFzf) 'A successful install must enable the picker'
-    Assert-True ($script:installs -eq 1 -and $script:pathUpdates -eq 1) 'Install must refresh PATH once'
-    function Invoke-DalftuiPackageInstall($Manager) { throw 'test installer failure' }
-    $script:apps = @{winget = $winget; choco = $choco}
-    Assert-Throws { Install-DalftuiFzf } 'Installation failure must propagate instead of switching package managers'
-    Set-Item Function:\Invoke-DalftuiPackageInstall $originalInstall
-
-    # Capture the exact manager arguments without running either package manager.
-    $capture = Join-Path $root 'manager-arguments.txt'
-    $fakeManager = Join-Path $root 'fake-manager.ps1'
-    $escapedCapture = $capture.Replace("'", "''")
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        # PowerShell 5.1 parses script parameters differently from native argv.
-        $fakeManager = Join-Path $root 'fake-manager.cmd'
-        [IO.File]::WriteAllText($fakeManager, "@echo off`r`necho %* > `"$capture`"`r`nexit /b 0`r`n")
-    } else {
-        [IO.File]::WriteAllText($fakeManager, "(`$args -join ' ') | Set-Content -LiteralPath '$escapedCapture'; `$global:LASTEXITCODE = 0")
-    }
-    Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'winget.exe'; Source = $fakeManager})
-    $arguments = [IO.File]::ReadAllText($capture).Trim()
-    Assert-True ($arguments -eq 'install --id junegunn.fzf --exact --source winget --accept-package-agreements --accept-source-agreements') "WinGet arguments must install the exact fzf package: $arguments"
-    Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'choco.exe'; Source = $fakeManager})
-    $arguments = [IO.File]::ReadAllText($capture).Trim()
-    Assert-True ($arguments -eq 'install fzf --yes --no-progress') "Chocolatey arguments must install only fzf: $arguments"
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        [IO.File]::WriteAllText($fakeManager, "@echo off`r`nexit /b 17`r`n")
-    } else {
-        [IO.File]::WriteAllText($fakeManager, '$global:LASTEXITCODE = 17')
-    }
-    Assert-Throws { Invoke-DalftuiPackageInstall ([pscustomobject]@{Name = 'winget.exe'; Source = $fakeManager}) } 'A nonzero manager status must fail setup'
-    Set-Item Function:\Find-DalftuiApplication $originalFind
-    Set-Item Function:\Update-DalftuiProcessPath $originalPath
-
     # Profile discovery is read-only, even when both real shells are installed.
     $nativeProfiles = @(Get-DalftuiProfilePaths)
     Assert-True ($nativeProfiles -contains $PROFILE.CurrentUserCurrentHost) `
@@ -436,6 +367,8 @@ function Invoke-DalftuiWindowsSetup {
         & {
             function Test-DalftuiWindowsPlatform { return $true }
             function Find-DalftuiApplication([string]$Name) {
+                Assert-True ($Name -notin @('fzf', 'winget', 'choco')) `
+                    'Setup must not look for an external picker or package manager'
                 if ($Name -eq $pythonCommandName) { return $pythonCommand }
                 if ($Name -eq 'ssh') {
                     return [pscustomobject]@{Name = 'ssh'; Source = 'ssh'}
@@ -446,11 +379,10 @@ function Invoke-DalftuiWindowsSetup {
             function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigPath) {
                 return $null
             }
-            function Install-DalftuiFzf([string]$Preference, [switch]$Skip) { return $false }
             function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
                 $script:directSetupCheckout = $Checkout
             }
-            Invoke-DalftuiWindowsSetup -Skip -TargetProfile (Join-Path $root 'direct profile.ps1') `
+            Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
 
             # Run default installation twice against disposable profiles. Keep
@@ -462,8 +394,8 @@ function Invoke-DalftuiWindowsSetup {
                 Assert-True (-not $TargetProfile) 'Default setup must not restrict discovery to its own profile'
                 return @($defaultWindowsProfile, $defaultPwshProfile)
             }
-            Invoke-DalftuiWindowsSetup -Skip -NoTerminal -WarningAction SilentlyContinue
-            Invoke-DalftuiWindowsSetup -Skip -NoTerminal -WarningAction SilentlyContinue
+            Invoke-DalftuiWindowsSetup -NoTerminal -WarningAction SilentlyContinue
+            Invoke-DalftuiWindowsSetup -NoTerminal -WarningAction SilentlyContinue
             foreach ($installedProfile in @($defaultWindowsProfile, $defaultPwshProfile)) {
                 $installedText = [IO.File]::ReadAllText($installedProfile)
                 Assert-True ([regex]::Matches($installedText, '(?m)^# >>> dalftui >>>').Count -eq 1) `

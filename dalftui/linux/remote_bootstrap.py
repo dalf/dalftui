@@ -8,6 +8,7 @@ from pathlib import Path
 import shlex
 
 from bridge_protocol import SOCKET_ENV, SUPPORTED_PROTOCOL_VERSIONS, TOKEN_BYTES, TOKEN_ENV
+from . import ops
 
 # The installer links the checkout here in both desktop and tmux-only modes.
 # Status 3 means there is no remote editor integration to prepare.
@@ -82,12 +83,16 @@ def cleanup_script(bridge):
     return _editor_resources(bridge) + '\ncleanup_editor_resources\n'
 
 
-def session_script(bridge=None):
+def session_script(bridge=None, *, mode='normal', check=None):
     """Consume credentials and run the embedded policy in the same shell.
 
     Keep its exit/signal traps active through the policy and silent login-shell
     fallback. A remote host with tmux does not need a dalftui checkout.
     """
+    if mode not in ('normal', 'plain', 'check', 'ops'):
+        raise ValueError(f'Unknown SSH session mode: {mode}')
+    if mode == 'check' and check is None:
+        raise ValueError('A saved check is required')
     editor_setup = ''
     if bridge:
         editor_setup = _editor_resources(bridge) + """
@@ -109,11 +114,17 @@ editor_file_valid "$editor_token" || editor_credentials_error
                          f'export {SOCKET_ENV} {TOKEN_ENV}\n')
     # Resolve our actual module location, even through an installed checkout
     # symlink. Copied desktop checkouts must embed their own canonical policy.
-    policy = Path(__file__).resolve().with_name('tmux-start.sh').read_text(encoding='utf-8')
-    return (f'unset TMUX TMUX_PANE {SOCKET_ENV} {TOKEN_ENV}\n'
-            + editor_setup + """
-if ! command -v tmux >/dev/null 2>&1; then
+    prefix = f'unset TMUX TMUX_PANE {SOCKET_ENV} {TOKEN_ENV}\n' + editor_setup
+    if mode == 'plain':
+        return prefix + ops.LOGIN_SHELL
+    if mode == 'check':
+        return prefix + ops.check_script(check.name, check.command, check.timeout)
+    policy = (ops.session_script() if mode == 'ops' else
+              Path(__file__).resolve().with_name('tmux-start.sh').read_text(encoding='utf-8'))
+    fallback_notice = ("    printf '%s\\n' 'tmux is unavailable; opening a shell.'\n"
+                       if mode == 'ops' else '')
+    return prefix + 'if ! command -v tmux >/dev/null 2>&1; then\n' + fallback_notice + """
     "${SHELL:-/bin/sh}" -l
     exit $?
 fi
-""" + policy)
+""" + policy

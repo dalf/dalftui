@@ -204,6 +204,112 @@ picker and works with an empty list. No `Tag dalftui` or SSH config entry is
 required for this explicit action; normal SSH settings still apply. It does not
 add the destination to your config or cached host list.
 
+Press **F4** for actions on the highlighted host. **Esc** returns to the previous
+menu and keeps the host filter and selection. The same menu works on Windows
+and Linux:
+
+| Action | Behavior |
+| --- | --- |
+| Connect normally | Existing SSH/tmux startup policy |
+| Show connection details | Effective OpenSSH hostname, user, port, jump/proxy configuration, and identity-file paths |
+| Connect without tmux | Login shell without dalftui's tmux startup |
+| Run a saved check | A bounded diagnostic command, followed by an interactive login shell |
+| Open ops mode | A new remote tmux session with process, journal, and shell panes |
+
+Connection details run `ssh -G` only for the selected destination, with a
+five-second timeout. They never read private-key contents. OpenSSH may evaluate
+your configured `Match exec` commands or DNS rules. A configured username is
+used when connecting; if `User` is unset, dalftui still asks for a login rather
+than accepting OpenSSH's local-user default shown in the details. Details and
+saved checks are loaded on demand, keeping host-list caching unchanged.
+
+#### Saved checks
+
+Two read-only checks are built in: **packages** (Debian/Ubuntu APT status) and
+**system** (uptime, root-filesystem usage, and failed systemd units).
+Add your own checks to `~/.ssh/dalftui-checks.json` on either client platform
+(`$HOME\.ssh\dalftui-checks.json` in PowerShell):
+
+```json
+{
+  "checks": [
+    {
+      "name": "web-service",
+      "hosts": ["sibils-api", "web-*"],
+      "command": "systemctl is-active nginx; systemctl --failed --no-pager",
+      "timeout": 15
+    },
+    {
+      "name": "disk-space",
+      "command": "df -h; df -i",
+      "timeout": 10
+    }
+  ]
+}
+```
+
+Names must be unique, including the built-in names. `hosts` defaults to `["*"]`
+and matches the SSH destination as entered, using case-sensitive glob patterns
+(`*`, `?`, and character classes). `timeout` defaults to 30 seconds and accepts
+integers from 1 to 3600. Configuration errors appear in the menu.
+
+Commands are trusted local configuration, executed literally by the remote
+`sh`; there is no host-variable substitution. They run as your SSH user, with
+stdin closed, and should be noninteractive diagnostics. If a check requires
+privileges, configure `sudo -n` explicitly. GNU `timeout` terminates the command's
+process group at the deadline, with a five-second kill grace period; if it is
+missing, the command is skipped. Output remains visible, the exit status or
+timeout is reported, and you receive a shell even after failure. No checks run
+while browsing or filtering hosts.
+
+#### Ops mode
+
+Ops mode supports Debian and Ubuntu servers from Windows and Linux clients.
+It creates a separate `dalftui-ops-PID` tmux session with this layout and focuses
+the bottom pane:
+
+```text
++------------------------+------------------------+
+| htop (or top)           | Live journal           |
+|                        | Current boot, follow   |
++------------------------+------------------------+
+| Cached package status, then interactive shell    |
++-------------------------------------------------+
+```
+
+The journal starts with the last 50 entries and follows new messages using your
+existing permissions; it never invokes sudo automatically. Stop following with
+Ctrl+C. Missing monitoring tools or journal errors leave a shell in that pane.
+Missing tmux, a terminal smaller than 40 columns by 12 rows, or failed pane
+creation falls back to a shell. Other sessions and their panes are unchanged.
+Detaching leaves the new ops session running; a later normal connection can
+select it through the existing tmux session picker. Standard tmux pane navigation
+works even without dalftui installed on the server (`Ctrl+B`, then an arrow).
+
+The package check runs `apt-get --simulate upgrade` against cached lists, with
+a 30-second limit. It reports APT's last recorded successful refresh when a
+success stamp exists, otherwise **unknown**. It always labels the result as
+cached: zero available upgrades does not establish that the host is up to date.
+It also reports a reboot request when `/var/run/reboot-required` exists.
+Nothing refreshes package lists or installs upgrades automatically. To check
+online, explicitly run `sudo apt-get update` in the shell and rerun the
+package check. APT configuration and repository failures can still affect that
+refresh; inspect its result.
+
+The same actions are available directly:
+
+```sh
+python bin/ssh_picker.py --connect sibils-api --plain
+python bin/ssh_picker.py --connect sibils-api --check packages
+python bin/ssh_picker.py --connect sibils-api --ops
+```
+
+Use `python3` on Linux if `python` is unavailable. On Linux the desktop picker
+opens the selected connection action in a new Alacritty window; `--pick` and
+Windows use the current terminal. Plain mode skips dalftui's tmux policy; your
+own shell startup files still run. Editor integration follows the same installed
+remote compatibility checks as a normal connection.
+
 The picker fills the available terminal and adds columns when needed to fit the
 hosts. It recalculates the layout on resize and after filtering, keeping hostnames
 readable. Up/down move through hosts; left/right move between columns. If all
@@ -383,7 +489,8 @@ The Windows launcher runs in PowerShell or Command Prompt. It needs Python
 command should be on an absolute PATH entry during setup. The host picker also
 needs OpenSSH 9.4+ for `Tag dalftui`. The full-screen grid uses Python's native
 Windows console support; no local tmux, Alacritty, or curses package is needed.
-fzf remains available as a single-column fallback for unsupported terminals.
+The picker requires an interactive terminal. Direct connections with `dssh HOST`
+remain available when the console cannot run the picker.
 
 Clone the repository once on Windows, then install from PowerShell:
 
@@ -427,19 +534,8 @@ If that installation is moved or removed, folder opening fails without trying
 another executable and tells you to rerun setup. Use `-VSCodePath` again when
 moving a portable installation.
 
-Setup reuses fzf for the fallback when it is already on PATH. Otherwise it installs fzf using
-WinGet if available, or Chocolatey. You can choose a package manager explicitly:
-
-```powershell
-.\install.cmd -PackageManager winget
-.\install.cmd -PackageManager choco
-```
-
-If neither package manager is available, setup prints the manual install
-commands; the native grid and direct connections remain available. Use `-SkipFzf`
-to configure `dssh` without installing the fallback. The package commands are
-[documented by fzf](https://junegunn.github.io/fzf/installation/).
-Chocolatey installations may require an administrator PowerShell.
+Setup configures the native SSH picker and shell integration without installing
+packages or requiring a package manager.
 
 Setup adds a managed block to the current user's console profiles for Windows
 PowerShell 5.1 and PowerShell 7 when installed, regardless of which version runs
@@ -487,7 +583,7 @@ portable installation, pass its settings path explicitly:
 .\install.cmd -TerminalSettingsPath 'C:\Tools\Terminal\settings\settings.json'
 ```
 
-Use `-SkipTerminal` to configure only PowerShell and fzf. The tab launcher reads
+Use `-SkipTerminal` to configure only PowerShell integration. The tab launcher reads
 this checkout each time, so later Git updates apply to new tabs. Rerun setup
 after moving the checkout or replacing the PowerShell installation used by setup.
 
@@ -534,10 +630,6 @@ launcher directly:
 py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --pick
 py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --connect my-vm
 ```
-
-Use `--fzf` instead of `--pick` for fzf's single-column interface and its full
-search syntax. This fallback also uses the full terminal height and shows the
-same **Ctrl+O** shortcut for typed destinations on both Windows and Linux.
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.
 
@@ -688,6 +780,8 @@ needed. Representative layout:
 │   │   ├── ssh_picker.py
 │   │   ├── tmux_editor.py
 │   │   ├── remote_bootstrap.py
+│   │   ├── ops.py
+│   │   ├── package-status.sh
 │   │   └── tmux-start.sh
 │   └── windows/
 │       ├── ssh.py
@@ -727,7 +821,7 @@ needed. Representative layout:
     └── catppuccin/
 ```
 
-[dalftui/ssh.py](dalftui/ssh.py) owns shared host/tag/login evaluation, fzf,
+[dalftui/ssh.py](dalftui/ssh.py) owns shared host/tag/login evaluation, picker dispatch,
 SSH arguments, and connection orchestration. [dalftui/host_picker.py](dalftui/host_picker.py)
 owns the responsive grid, filtering, and navigation; platform adapters handle console I/O.
 [dalftui/vscode.py](dalftui/vscode.py)
@@ -737,7 +831,10 @@ integration. Directory placement describes the environment targeted by code;
 portable helpers can be imported on other operating systems.
 In particular, [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py)
 generates Linux-server shell programs from portable Python and is also used by
-Windows desktops. [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) is
+Windows desktops. [dalftui/linux/ops.py](dalftui/linux/ops.py) generates the
+optional ops layout and bounded saved-check runner, embedding the read-only
+Debian/Ubuntu check from `dalftui/linux/package-status.sh`.
+[dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) is
 the canonical startup policy: `bin/tmux-start.sh` forwards local startup, while
 remote execution embeds the canonical policy directly.
 
@@ -822,6 +919,15 @@ v2 probe in [tests/fixtures/ssh_bootstrap_v2.py](tests/fixtures/ssh_bootstrap_v2
 checks the new installed layout. Current bootstrap tests refuse credentials for
 old root-only installations and exercise the frozen v2 layout.
 
+The optional plain, saved-check, and ops startup modes keep protocol version 2.
+A new desktop embeds the selected startup program, so a supported older remote
+does not need new action code. Credentials still travel on SSH stdin into private
+files, are consumed before startup, and remain available in the connection's
+environment until cleanup. Historical-peer tests exercise these new modes with
+the frozen remote client. An older desktop retains its normal startup behavior
+against a new remote: installed paths, declarations, wire messages, and credential
+semantics are unchanged. Existing historical-peer tests cover that direction too.
+
 ## Repository tasks
 
 [mise](https://mise.jdx.dev/getting-started.html) 2026.7.5+ runs the commands
@@ -864,7 +970,7 @@ PowerShell 7 instead, set `DALFTUI_POWERSHELL` to `pwsh`:
 ```powershell
 $env:DALFTUI_POWERSHELL = 'pwsh'
 mise run test:powershell
-mise run install:windows -- -PackageManager choco -VSCodePath 'C:\Tools\VS Code Portable'
+mise run install:windows -- -VSCodePath 'C:\Tools\VS Code Portable'
 ```
 
 The selected shell runs the installer; setup configures both installed PowerShell
@@ -966,12 +1072,12 @@ mise run test:powershell
 ```
 
 GitHub Actions runs the full Linux suite on Ubuntu with Python 3.11 and 3.14,
-installing tmux, OpenSSH, fzf, Git, and less for the integration tests.
+installing tmux, OpenSSH, Git, and less for the integration tests.
 Both Linux and Windows CI run the same pinned spelling and Pylint checks before
 the Python test suites. CI also runs native Windows tests with Python 3.11 and 3.14, in
-PowerShell 5.1 and 7. They cover package manager selection and failures,
+PowerShell 5.1 and 7. They cover installation without package managers,
 profile backups and repeated setup, safe VS Code discovery and portable-path
-configuration, the `dssh` command, real fzf filtering, SSH tag and login
+configuration, the `dssh` command, native picker rendering and navigation, SSH tag and login
 resolution, TCP authentication, and connection token handling. Isolated bridge
 tests also cover slow input deadlines, concurrent requests, capacity rejection
 and recovery, shutdown races, and interruption of readers and editor CLI waits.

@@ -1,5 +1,5 @@
 """Shared grid and Windows console regressions, runnable on either platform."""
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import subprocess
 from pathlib import Path
@@ -193,7 +193,7 @@ class WindowsConsoleTests(unittest.TestCase):
                 self.assertEqual(console.SetConsoleMode.call_args_list[-2].args, (-11, 0x247))
                 self.assertEqual(console.SetConsoleMode.call_args_list[-1].args, (-10, 0x247))
 
-    def test_partial_setup_failure_restores_input_mode_before_fallback(self):
+    def test_partial_setup_failure_restores_input_mode(self):
         console = self.console()
         console.SetConsoleMode.side_effect = [True, False, True, True]
         output = io.StringIO()
@@ -233,54 +233,98 @@ class PickerDispatchTests(unittest.TestCase):
                   patch.object(sys.stdin, 'isatty', return_value=True),
                   patch.object(sys.stdout, 'isatty', return_value=True),
                   patch.object(ssh, 'target_hosts', return_value=hosts),
-                  patch.object(ssh, 'pick_fzf') as fallback,
+                  patch.object(ssh.subprocess, 'run') as external,
                   patch.object(ssh, 'configured_tag') as tag,
                   patch.object(ssh, 'connect', return_value=17) as connect,
                   patch.object(windows_picker, 'ConsoleScreen') as console):
                 console.return_value.__enter__.return_value = screen
                 self.assertEqual(ssh.main(), 17)
                 connect.assert_called_once_with(query, None)
-                fallback.assert_not_called()
+                external.assert_not_called()
                 tag.assert_not_called()
                 self.assertIn('Ctrl+O connect typed hostname, IP or user@host',
                               [text for _, _, text, _ in screen.frames[0]])
 
-    def test_interactive_windows_uses_grid_without_fzf_or_linux_imports(self):
+    def test_interactive_windows_uses_grid_without_external_picker_or_linux_imports(self):
         screen = Screen(['right', 'enter'], (60, 12))
         hosts = [f'host-{index:02}' for index in range(12)]
         with (patch.object(sys, 'platform', 'win32'),
               patch.object(sys.stdin, 'isatty', return_value=True),
               patch.object(sys.stdout, 'isatty', return_value=True),
               patch.object(ssh, 'target_hosts', return_value=hosts) as listing,
-              patch.object(ssh, 'pick_fzf') as fallback,
+              patch.object(ssh.subprocess, 'run') as external,
               patch.object(windows_picker, 'ConsoleScreen') as console,
               patch.dict(sys.modules, {'dalftui.linux.ssh_picker': None})):
             console.return_value.__enter__.return_value = screen
             self.assertEqual(ssh.pick_host(refresh=True), 'host-06')
         listing.assert_called_once_with(refresh=True)
-        fallback.assert_not_called()
+        external.assert_not_called()
         console.return_value.__exit__.assert_called_once()
 
-    def test_unavailable_console_falls_back_with_the_same_hosts(self):
+    def test_unavailable_console_reports_direct_connection_option_without_launching(self):
         with (patch.object(sys, 'platform', 'win32'),
               patch.object(sys.stdin, 'isatty', return_value=True),
               patch.object(sys.stdout, 'isatty', return_value=True),
               patch.object(ssh, 'target_hosts', return_value=['server']),
-              patch.object(ssh, 'pick_fzf', return_value='server') as fallback,
+              patch.object(ssh.subprocess, 'run') as external,
               patch.object(windows_picker, 'ConsoleScreen') as console):
             console.return_value.__enter__.side_effect = windows_picker.ConsoleUnavailable('No console')
-            self.assertEqual(ssh.pick_host(), 'server')
-        fallback.assert_called_once_with(['server'])
+            with self.assertRaisesRegex(RuntimeError, 'No console.*--connect HOST'):
+                ssh.pick_host()
+        external.assert_not_called()
 
-    def test_explicit_fzf_keeps_refresh_and_connection_dispatch(self):
-        with (patch.object(sys, 'argv', ['ssh_picker.py', '--fzf', '--refresh-hosts']),
-              patch.object(ssh, 'pick_fzf', return_value='server') as choose,
-              patch.object(ssh, 'pick_host') as grid,
+    def test_explicit_picker_keeps_refresh_and_connection_dispatch(self):
+        with (patch.object(sys, 'argv', ['ssh_picker.py', '--pick', '--refresh-hosts']),
+              patch.object(ssh, 'pick_host', return_value='server') as choose,
               patch.object(ssh, 'connect', return_value=17) as connect):
             self.assertEqual(ssh.main(), 17)
         choose.assert_called_once_with(refresh=True)
-        grid.assert_not_called()
         connect.assert_called_once_with('server', None)
+
+    def test_noninteractive_picker_reports_error_without_loading_hosts_or_connecting(self):
+        for platform in ('win32', 'linux'):
+            for input_tty, output_tty in ((False, True), (True, False), (False, False)):
+                error = io.StringIO()
+                with (self.subTest(platform=platform, input_tty=input_tty, output_tty=output_tty),
+                      patch.object(sys, 'platform', platform),
+                      patch.object(sys, 'argv', ['ssh_picker.py', '--pick']),
+                      patch.object(sys.stdin, 'isatty', return_value=input_tty),
+                      patch.object(sys.stdout, 'isatty', return_value=output_tty),
+                      patch.object(ssh, 'target_hosts') as listing,
+                      patch.object(ssh, 'connect') as connect,
+                      patch.object(ssh.subprocess, 'run') as external,
+                      redirect_stderr(error)):
+                    self.assertEqual(ssh.main(), 1)
+                    self.assertIn('requires an interactive terminal', error.getvalue())
+                    self.assertIn('--connect HOST', error.getvalue())
+                    listing.assert_not_called()
+                    connect.assert_not_called()
+                    external.assert_not_called()
+
+    def test_missing_curses_reports_direct_connection_option_without_launching(self):
+        from dalftui.linux import ssh_picker
+        with (patch.object(sys, 'platform', 'linux'),
+              patch.object(sys.stdin, 'isatty', return_value=True),
+              patch.object(sys.stdout, 'isatty', return_value=True),
+              patch.object(ssh, 'target_hosts', return_value=[]),
+              patch.object(ssh_picker, 'curses', None),
+              patch.object(ssh.subprocess, 'run') as external):
+            with self.assertRaisesRegex(RuntimeError, 'requires Python curses support.*--connect HOST'):
+                ssh.pick_host()
+        external.assert_not_called()
+
+    def test_direct_connection_does_not_require_an_interactive_picker(self):
+        for platform in ('win32', 'linux'):
+            with (self.subTest(platform=platform),
+                  patch.object(sys, 'platform', platform),
+                  patch.object(sys, 'argv', ['ssh_picker.py', '--connect', 'alice@server']),
+                  patch.object(sys.stdin, 'isatty', return_value=False),
+                  patch.object(sys.stdout, 'isatty', return_value=False),
+                  patch.object(ssh, 'pick_host') as choose,
+                  patch.object(ssh, 'connect', return_value=17) as connect):
+                self.assertEqual(ssh.main(), 17)
+                choose.assert_not_called()
+                connect.assert_called_once_with('alice@server', None)
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'Requires the native Windows console')

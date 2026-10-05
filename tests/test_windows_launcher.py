@@ -35,6 +35,7 @@ class SharedLauncherTests(unittest.TestCase):
                          'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py', 'dalftui/host_picker.py',
                          'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
                          'dalftui/linux/remote_bootstrap.py', 'dalftui/linux/tmux-start.sh',
+                         'dalftui/linux/ops.py', 'dalftui/linux/package-status.sh',
                          'dalftui/linux/tmux_editor.py', 'dalftui/windows/__init__.py',
                          'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py', 'dalftui/windows/host_picker.py'):
             destination = self.checkout / relative
@@ -62,6 +63,7 @@ class SharedLauncherTests(unittest.TestCase):
                 self.assertIn(description, result.stdout)
                 self.assertEqual(result.stderr, '')
         cases = (
+            ('bin/ssh_picker.py', ('--fzf',), 'unrecognized arguments: --fzf'),
             ('bin/ssh_picker.py', ('--pick', '--list'), 'not allowed with argument'),
             ('bin/ssh_picker.py', ('--connect', 'host', '--list'), 'not allowed with argument'),
             ('bin/ssh_picker.py', ('--connect', 'host', '--refresh-hosts'),
@@ -186,6 +188,12 @@ with patch.object(sys, 'platform', 'win32'), \
         command = ssh.ssh_command('vm-alias', 'alice', bridge)
         assert shlex.split(command[-1]) == ['sh', '-c', remote_bootstrap.session_script(bridge)]
         assert '-S' not in command
+        check = SimpleNamespace(name='health', command='printf healthy', timeout=30)
+        for mode in ('plain', 'check', 'ops'):
+            command = ssh.ssh_command('vm-alias', 'alice', bridge, mode=mode, check=check)
+            assert shlex.split(command[-1]) == ['sh', '-c', remote_bootstrap.session_script(bridge, mode=mode, check=check)]
+            assert '-S' not in command
+            assert len(subprocess.list2cmdline(command).encode('utf-16-le')) // 2 < 32767
     assert remote_bootstrap.session_script()
 assert not blocked.intersection(sys.modules)
 '''
@@ -248,6 +256,7 @@ from dalftui import ssh as picker
 from dalftui import vscode
 case, folder, application, cli = sys.argv[2:]
 with patch.object(picker, 'connect', return_value=17) as connect, \
+     patch.object(picker, 'pick_host', return_value='vm-alias') as choose, \
      patch.object(picker, 'target_hosts', return_value=['vm-alias']), \
      patch.object(picker.shutil, 'which', return_value='harmless-probe'):
     if case in ('folder', 'windows-folder'):
@@ -268,15 +277,17 @@ with patch.object(picker, 'connect', return_value=17) as connect, \
         sys.argv = ['bin/ssh_picker.py', *arguments]
         with patch.object(picker.sys, 'platform', 'win32' if case == 'windows' else 'linux'), \
              patch.object(picker.subprocess, 'run',
-                          return_value=subprocess.CompletedProcess([], 0, '\\nvm-alias\\n')) as run:
+                          return_value=subprocess.CompletedProcess([], 0)) as run:
             status = picker.main()
         if case == 'list':
             connect.assert_not_called()
         else:
             connect.assert_called_once_with('vm-alias', None)
         if case in ('pick', 'windows'):
-            assert run.call_args.args[0][0] == 'harmless-probe'
-            assert run.call_args.kwargs['input'] == 'vm-alias\\n'
+            choose.assert_called_once_with()
+            run.assert_not_called()
+        else:
+            choose.assert_not_called()
 assert not blocked.intersection(sys.modules)
 raise SystemExit(status)
 '''
@@ -417,40 +428,6 @@ raise SystemExit(status)
                     self.assertEqual(picker.main(), 0)
         connect.assert_not_called()
 
-    def test_fzf_receives_only_tagged_hosts_and_ignores_personal_output_settings(self):
-        result = subprocess.CompletedProcess(['fzf'], 0, 'two\r\nserver-two\r\n')
-        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
-            with patch.object(picker, 'target_hosts', return_value=['server-one', 'server-two']):
-                with patch.dict(os.environ, {'FZF_DEFAULT_OPTS': '--multi --print-query',
-                                              'FZF_DEFAULT_OPTS_FILE': 'personal-options'}):
-                    with patch.object(picker.subprocess, 'run', return_value=result) as run:
-                        self.assertEqual(picker.pick_fzf(), 'server-two')
-        self.assertEqual(run.call_args.kwargs['input'], 'server-one\nserver-two\n')
-        self.assertIn('--no-sort', run.call_args.args[0])
-        self.assertNotIn('FZF_DEFAULT_OPTS', run.call_args.kwargs['env'])
-        self.assertNotIn('FZF_DEFAULT_OPTS_FILE', run.call_args.kwargs['env'])
-        self.assertFalse(run.call_args.kwargs.get('shell', False))
-        self.assertFalse(any(arg.startswith('--height') for arg in run.call_args.args[0]))
-
-    def test_fzf_cancel_no_match_and_unexpected_output(self):
-        with patch.object(picker.shutil, 'which', return_value='fzf.exe'):
-            for code in (1, 130):
-                with self.subTest(code=code):
-                    with patch.object(picker.subprocess, 'run',
-                                      return_value=subprocess.CompletedProcess(['fzf'], code, '')):
-                        self.assertIsNone(picker.pick_fzf(['server']))
-            for code, output in ((2, ''), (0, '\ngithub.com\n'), (0, 'server\nother\n')):
-                with self.subTest(code=code, output=output):
-                    with patch.object(picker.subprocess, 'run',
-                                      return_value=subprocess.CompletedProcess(['fzf'], code, output)):
-                        with self.assertRaises(RuntimeError):
-                            picker.pick_fzf(['server'])
-
-    def test_missing_fzf_has_actionable_error(self):
-        with patch.object(picker.shutil, 'which', return_value=None):
-            with self.assertRaisesRegex(RuntimeError, 'install.cmd'):
-                picker.pick_fzf(['server'])
-
     def test_picker_tag_evaluation_uses_real_windows_ssh_and_include_config(self):
         if not shutil.which(picker.ssh_executable()):
             self.skipTest('OpenSSH is not installed')
@@ -495,17 +472,6 @@ raise SystemExit(status)
         # Only listing disables canonicalization; connections retain the user's
         # SSH configuration so short aliases still work with private DNS.
         self.assertNotIn('CanonicalizeHostname=no', picker.ssh_command('vm-alias'))
-
-    def test_native_fzf_filters_unicode_hosts_using_picker_options(self):
-        if not shutil.which('fzf'):
-            self.skipTest('fzf is not installed')
-        real_run = subprocess.run
-
-        def noninteractive(command, **kwargs):
-            return real_run([*command, '--filter=prod'], **kwargs)
-
-        with patch.object(picker.subprocess, 'run', side_effect=noninteractive):
-            self.assertEqual(picker.pick_fzf(['dev-vm', 'prod-é']), 'prod-é')
 
     def test_windows_defaults_to_authenticated_tcp(self):
         with patch.object(vscode, 'WINDOWS', True):

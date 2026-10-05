@@ -58,7 +58,7 @@ raw_args = true
 run = "./install"
 
 [tasks."install:windows"]
-description = "Set up installed PowerShell profiles, fzf, and Terminal integration"
+description = "Set up PowerShell profiles, the native SSH picker, and Terminal integration"
 raw_args = true
 env = { PSModulePath = "" }
 run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./install.ps1"
