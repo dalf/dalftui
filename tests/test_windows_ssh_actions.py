@@ -17,7 +17,7 @@ from dalftui.linux import ssh_picker
 from dalftui.windows.host_picker import ConsoleScreen
 
 
-class ActionsMenuTests(unittest.TestCase):
+class ActionShortcutTests(unittest.TestCase):
     def choose(self, keys, *, details=None, checks=None, size=(100, 24)):
         screen = Screen(keys, size)
         result = host_picker.pick(screen, ['dev', 'prod'], ssh.validate_picker_host,
@@ -26,35 +26,64 @@ class ActionsMenuTests(unittest.TestCase):
         return result, screen
 
     def test_actions_help_stays_visible_beside_typed_connection_help(self):
-        _, screen = self.choose(['cancel'], size=(32, 12))
-        text = '\n'.join(cell[2] for cell in screen.frames[0])
-        self.assertIn('F4 actions', text)
-        self.assertIn('Ctrl+O connect typed', text)
+        for width in (24, 32, 80, 150):
+            with self.subTest(width=width):
+                _, screen = self.choose(['cancel'], size=(width, 12))
+                frame = screen.frames[0]
+                text = '\n'.join(cell[2] for cell in frame)
+                for label in ('F4 Details', 'F5 No tmux', 'F6 Ops', 'F7 Checks', 'Ctrl+O connect typed'):
+                    self.assertIn(label, text)
+                help_rows = {y for y, _, line, _ in frame if line.startswith(('F4', 'F5', 'F6', 'F7'))}
+                host_rows = {y for y, _, line, _ in frame if line.startswith(('> ', '  '))}
+                self.assertFalse(help_rows & host_rows)
+                self.assertEqual(len(help_rows), 1 if width >= 80 else 2 if width == 32 else 3)
+                for _, x, line, _ in frame:
+                    self.assertLess(x + host_picker.cell_width(line), width)
 
     def test_details_and_back_preserve_the_filtered_host(self):
         details = Mock(return_value=['Hostname: prod.example.org'])
-        result, screen = self.choose([*'prod', 'actions', 'down', 'enter', 'enter', 'cancel', 'enter'],
+        result, screen = self.choose([*'pr', 'details', 'cancel', 'enter'],
                                      details=details)
         self.assertEqual(result, 'prod')
         details.assert_called_once_with('prod')
         self.assertTrue(any('Hostname: prod.example.org' in text
                             for frame in screen.frames for _, _, text, _ in frame))
+        self.assertIn('Filter: pr', [cell[2] for cell in screen.frames[-1]])
+        self.assertIn('Target: prod', [cell[2] for cell in screen.frames[-1]])
+        self.assertFalse(any('HOST ACTIONS' in cell[2] for frame in screen.frames for cell in frame))
 
     def test_plain_and_ops_actions_use_the_selected_host(self):
-        for steps, mode in ((2, 'plain'), (4, 'ops')):
+        for mode in ('plain', 'ops'):
             with self.subTest(mode=mode):
-                result, _ = self.choose(['down', 'actions', *(['down'] * steps), 'enter'])
+                result, screen = self.choose([*'pr', mode])
                 self.assertEqual(result, host_picker.HostAction('prod', mode))
+                self.assertIn('Target: prod', [cell[2] for cell in screen.frames[-1]])
+                self.assertFalse(any('HOST ACTIONS' in cell[2] for frame in screen.frames for cell in frame))
 
     def test_saved_checks_are_loaded_on_demand_and_selection_does_not_execute(self):
         details, checks = Mock(), Mock(return_value=[ssh.SavedCheck('health', 'exit 0', 12)])
         with patch.object(ssh.subprocess, 'run') as run:
-            result, _ = self.choose(['actions', 'down', 'down', 'down', 'enter', 'enter'],
+            result, _ = self.choose(['checks', 'enter'],
                                     details=details, checks=checks)
         self.assertEqual(result, host_picker.HostAction('dev', 'check', 'health'))
         checks.assert_called_once_with('dev')
         details.assert_not_called()
         run.assert_not_called()
+
+    def test_cancelled_check_chooser_keeps_host_selection_and_filter(self):
+        checks = Mock(return_value=[ssh.SavedCheck('health', 'true'), ssh.SavedCheck('disk', 'df -h')])
+        result, screen = self.choose([*'d', 'down', 'checks', 'down', 'cancel', 'enter'], checks=checks)
+        self.assertEqual(result, 'prod')
+        checks.assert_called_once_with('prod')
+        self.assertIn('Filter: d', [cell[2] for cell in screen.frames[-1]])
+        self.assertIn('Target: prod', [cell[2] for cell in screen.frames[-1]])
+
+    def test_check_configuration_error_returns_to_the_same_host(self):
+        result, screen = self.choose(['down', 'checks', 'cancel', 'enter'],
+                                     checks=Mock(side_effect=ValueError('Invalid checks configuration')))
+        self.assertEqual(result, 'prod')
+        self.assertTrue(any('Invalid checks configuration' in cell[2]
+                            for frame in screen.frames for cell in frame))
 
     def test_normal_selection_never_loads_actions(self):
         details, checks = Mock(), Mock()
@@ -63,7 +92,7 @@ class ActionsMenuTests(unittest.TestCase):
         checks.assert_not_called()
 
     def test_action_errors_are_readable_and_return_to_host_grid(self):
-        result, screen = self.choose(['actions', 'down', 'enter', 'enter', 'cancel', 'enter'],
+        result, screen = self.choose(['details', 'enter', 'enter'],
                                      details=Mock(side_effect=RuntimeError('SSH details timed out')))
         self.assertEqual(result, 'dev')
         self.assertTrue(any('SSH details timed out' in cell[2]
@@ -71,9 +100,21 @@ class ActionsMenuTests(unittest.TestCase):
 
     def test_actions_accept_a_valid_typed_destination_without_tag_lookup(self):
         with patch.object(ssh, 'configured_tag') as tag:
-            result, _ = self.choose([*'alice@new', 'actions', 'down', 'down', 'enter'])
+            result, screen = self.choose([*'alice@new', 'plain'])
         self.assertEqual(result, host_picker.HostAction('alice@new', 'plain'))
+        self.assertIn('Target (typed): alice@new', [cell[2] for cell in screen.frames[-1]])
         tag.assert_not_called()
+
+    def test_invalid_typed_destinations_cannot_run_any_action(self):
+        for key in ('details', 'plain', 'ops', 'checks'):
+            for destination in ('-option', 'two hosts'):
+                with self.subTest(key=key, destination=destination):
+                    details, checks = Mock(), Mock()
+                    result, screen = self.choose([*destination, key, 'cancel'], details=details, checks=checks)
+                    self.assertIsNone(result)
+                    details.assert_not_called()
+                    checks.assert_not_called()
+                    self.assertTrue(any('Enter a valid SSH hostname' in cell[2] for cell in screen.frames[-1]))
 
     def test_text_dialog_wraps_long_paths_and_can_scroll_and_resize(self):
         screen = Screen(['page_down', (30, 12), 'end', 'enter'], (20, 7))
@@ -83,11 +124,14 @@ class ActionsMenuTests(unittest.TestCase):
             for _, x, text, _ in frame:
                 self.assertLess(x + host_picker.cell_width(text), width)
 
-    def test_windows_f4_is_decoded(self):
-        keyboard = Mock()
-        keyboard.getwch.side_effect = ['\0', '>']
-        with patch.dict(sys.modules, {'msvcrt': keyboard}):
-            self.assertEqual(ConsoleScreen.read_key(), 'actions')
+    def test_windows_f4_through_f7_are_decoded_without_consuming_typed_characters(self):
+        for code, action in (('>', 'details'), ('?', 'plain'), ('@', 'ops'), ('A', 'checks')):
+            with self.subTest(code=code):
+                keyboard = Mock()
+                keyboard.getwch.side_effect = ['\0', code, code]
+                with patch.dict(sys.modules, {'msvcrt': keyboard}):
+                    self.assertEqual(ConsoleScreen.read_key(), action)
+                    self.assertEqual(ConsoleScreen.read_key(), code)
 
 
 class SavedCheckTests(unittest.TestCase):
@@ -104,6 +148,9 @@ class SavedCheckTests(unittest.TestCase):
         self.assertEqual([item.name for item in checks], ['packages', 'system'])
         self.assertIn('apt-get --simulate', checks[0].command)
         self.assertIn('Cached metadata only', checks[0].command)
+        self.assertIn('status_view=detailed', checks[1].command)
+        self.assertIn('System overview', checks[1].command)
+        self.assertEqual(checks[1].timeout, 20)
 
     def test_host_patterns_defaults_and_literal_shell_commands(self):
         command = 'printf "%s\\n" "a quoted $value"; systemctl is-active nginx'

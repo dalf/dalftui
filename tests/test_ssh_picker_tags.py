@@ -146,12 +146,24 @@ class DesktopPickerTests(unittest.TestCase):
                 self.assertIn('Ctrl+O connect typed hostname, IP or user@host', messages)
                 evaluate.assert_not_called()
 
-    def test_f4_opens_actions_and_dispatches_plain_connection(self):
+    def test_function_keys_dispatch_directly_and_return_from_details_and_checks(self):
         from dalftui.host_picker import HostAction
         keys = ssh_picker.curses
-        selected, messages = self.choose([keys.KEY_F0 + 4, keys.KEY_DOWN, keys.KEY_DOWN, '\n'], ['prod'])
-        self.assertEqual(selected, HostAction('prod', 'plain'))
-        self.assertTrue(any('F4 actions' in message for message in messages))
+        for number, mode in ((5, 'plain'), (6, 'ops')):
+            with self.subTest(key=number):
+                selected, messages = self.choose([keys.KEY_F0 + number], ['prod'])
+                self.assertEqual(selected, HostAction('prod', mode))
+                self.assertTrue(any('F4 Details' in message and 'F7 Checks' in message for message in messages))
+        with patch.object(picker, 'connection_details', return_value=['Hostname: prod.example.org']) as details:
+            selected, messages = self.choose([keys.KEY_F0 + 4, '\x1b', '\n'], ['prod'])
+            self.assertEqual(selected, 'prod')
+            details.assert_called_once_with('prod')
+            self.assertTrue(any('Hostname: prod.example.org' in message for message in messages))
+        with patch.object(picker, 'saved_checks', return_value=[picker.SavedCheck('health', 'true')]):
+            selected, _ = self.choose([keys.KEY_F0 + 7, '\n'], ['prod'])
+            self.assertEqual(selected, HostAction('prod', 'check', 'health'))
+            selected, _ = self.choose([keys.KEY_F0 + 7, '\x1b', '\n'], ['prod'])
+            self.assertEqual(selected, 'prod')
 
     def test_empty_ctrl_o_input_shows_error_and_allows_correction(self):
         selected, messages = self.choose(['\x0f', *'new-server', '\x0f'], [])

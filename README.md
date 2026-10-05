@@ -204,17 +204,26 @@ picker and works with an empty list. No `Tag dalftui` or SSH config entry is
 required for this explicit action; normal SSH settings still apply. It does not
 add the destination to your config or cached host list.
 
-Press **F4** for actions on the highlighted host. **Esc** returns to the previous
-menu and keeps the host filter and selection. The same menu works on Windows
+Use **F4–F7** directly on the highlighted host; there is no intermediate actions
+menu. The shortcut labels stay visible and wrap onto extra lines on narrow
+terminals, with the host grid resizing to fit. The same shortcuts work on Windows
 and Linux:
 
-| Action | Behavior |
+| Key | Action |
 | --- | --- |
-| Connect normally | Existing SSH/tmux startup policy |
-| Show connection details | Effective OpenSSH hostname, user, port, jump/proxy configuration, and identity-file paths |
-| Connect without tmux | Login shell without dalftui's tmux startup |
-| Run a saved check | A bounded diagnostic command, followed by an interactive login shell |
-| Open ops mode | A new remote tmux session with process, journal, and shell panes |
+| Enter | Connect using the existing SSH/tmux startup policy |
+| F4 | Show effective OpenSSH hostname, user, port, jump/proxy configuration, and identity-file paths |
+| F5 | Open a login shell without dalftui's tmux startup |
+| F6 | Open ops mode in a new remote tmux session with process, journal, and shell panes |
+| F7 | Choose a saved check to run, followed by an interactive login shell |
+
+The footer explicitly shows the action's **Target**. When filtering leaves a
+highlighted host, F4–F7 act on that host. With no matches, it shows
+**Target (typed)** and the shortcuts use the exact typed destination after
+validation. Ctrl+O always connects to exactly what you typed, even if a listed
+host is highlighted. **Esc** from connection details or the saved-check chooser
+returns to the same host selection and filter; opening the chooser runs nothing
+until you select a check and press Enter.
 
 Connection details run `ssh -G` only for the selected destination, with a
 five-second timeout. They never read private-key contents. OpenSSH may evaluate
@@ -226,7 +235,7 @@ saved checks are loaded on demand, keeping host-list caching unchanged.
 #### Saved checks
 
 Two read-only checks are built in: **packages** (Debian/Ubuntu APT status) and
-**system** (uptime, root-filesystem usage, and failed systemd units).
+**system** (the detailed server overview described below).
 Add your own checks to `~/.ssh/dalftui-checks.json` on either client platform
 (`$HOME\.ssh\dalftui-checks.json` in PowerShell):
 
@@ -273,7 +282,7 @@ the bottom pane:
 | htop (or top)           | Live journal           |
 |                        | Current boot, follow   |
 +------------------------+------------------------+
-| Cached package status, then interactive shell    |
+| System overview, then interactive shell          |
 +-------------------------------------------------+
 ```
 
@@ -286,7 +295,42 @@ Detaching leaves the new ops session running; a later normal connection can
 select it through the existing tmux session picker. Standard tmux pane navigation
 works even without dalftui installed on the server (`Ctrl+B`, then an arrow).
 
-The package check runs `apt-get --simulate upgrade` against cached lists, with
+The shell pane starts with a compact, read-only snapshot: host and timestamp,
+uptime, systemd state and failed units, available memory and swap,
+disk space and inode usage, a recorded reboot request, NTP synchronization, and
+Linux software RAID status only when arrays or RAID activity are present. CPU
+count is left to the process monitor above. Every failed unit is listed on its
+own line without truncation, indented beneath the count without repeating `WARN`.
+Disk and inode usage at 80% or higher is highlighted.
+The root filesystem is included even on an overlay mount. Other mounted data
+filesystems, including network mounts, are checked; most pseudo filesystems are
+omitted. The compact view limits filesystem warning rows and counts additional
+warnings. Status rows reserve a four-character label plus a space: normal rows
+leave it blank, warnings show a yellow `WARN`, and unavailable checks show a red
+`ERR`. Color applies to the whole label; redirected output and dumb
+terminals retain plain text with the same alignment.
+
+**F7 → system** runs the same checks with CPU count, full filesystem tables, memory details,
+failed-unit details, a kernel-version comparison, and recent error/OOM excerpts.
+Journal queries cover this boot and the last hour, returning at most 15 error
+entries and 5 kernel OOM entries. Visibility follows your existing permissions;
+access warnings are retained. A different kernel version under `/boot` is a hint,
+not proof that a reboot is required or that this kernel will be selected at boot.
+No reboot marker means only that no reboot request was recorded.
+
+Each external query has a two-second limit (with a one-second kill grace period).
+The whole compact report has a ten-second limit; the detailed report has twenty
+seconds. The outer runner allows up to five seconds for forced termination.
+Missing tools, failed queries, and timeouts produce **unknown** results, never
+an empty healthy result. The report exits nonzero when collection is incomplete;
+successful collection does not imply that the server or its applications are
+healthy. F6 omits the numeric exit-status footer on success and reports incomplete
+or interrupted collection in plain language. Saved checks retain their numeric
+exit status. Either way, the runner leaves an interactive shell. This is a snapshot,
+not a continuously updated dashboard; application checks remain host-specific
+saved checks.
+
+**F7 → packages** runs `apt-get --simulate upgrade` against cached lists, with
 a 30-second limit. It reports APT's last recorded successful refresh when a
 success stamp exists, otherwise **unknown**. It always labels the result as
 cached: zero available upgrades does not establish that the host is up to date.
@@ -782,6 +826,7 @@ needed. Representative layout:
 │   │   ├── remote_bootstrap.py
 │   │   ├── ops.py
 │   │   ├── package-status.sh
+│   │   ├── system-status.sh
 │   │   └── tmux-start.sh
 │   └── windows/
 │       ├── ssh.py
@@ -833,7 +878,7 @@ In particular, [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstra
 generates Linux-server shell programs from portable Python and is also used by
 Windows desktops. [dalftui/linux/ops.py](dalftui/linux/ops.py) generates the
 optional ops layout and bounded saved-check runner, embedding the read-only
-Debian/Ubuntu check from `dalftui/linux/package-status.sh`.
+checks from `dalftui/linux/package-status.sh` and `dalftui/linux/system-status.sh`.
 [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) is
 the canonical startup policy: `bin/tmux-start.sh` forwards local startup, while
 remote execution embeds the canonical policy directly.
@@ -927,6 +972,10 @@ environment until cleanup. Historical-peer tests exercise these new modes with
 the frozen remote client. An older desktop retains its normal startup behavior
 against a new remote: installed paths, declarations, wire messages, and credential
 semantics are unchanged. Existing historical-peer tests cover that direction too.
+The system overview uses the same embedded startup and credential lifecycle;
+it requires no protocol bump or remote update. Compatibility tests run both the
+ops overview and detailed system check before opening an editor through a frozen
+historical remote client.
 
 ## Repository tasks
 
@@ -1029,6 +1078,9 @@ tmux without dalftui, installation detection with custom configuration paths,
 and connections that never start or forward a bridge. Real tmux tests route
 separate clients' endpoints and tokens even with deliberately stale server
 environment values.
+System overview tests use fake tools and local files to cover unavailable tools,
+permission failures, timeouts, empty journal matches, overlay roots, disk/inode
+warnings, and degraded software RAID without contacting an SSH server.
 Bridge protocol tests exercise frozen v1 messages and historical peers in both
 directions, reject unsupported versions without editor launches, and check the
 remote declaration before credential setup.

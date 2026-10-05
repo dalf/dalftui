@@ -59,11 +59,11 @@ class GridTests(unittest.TestCase):
 
     def test_navigation_reaches_columns_pages_and_last_partial_column(self):
         cases = (
-            (['right', 'enter'], (100, 24), 'host-18'),
+            (['right', 'enter'], (100, 24), 'host-17'),
             (['right', 'down', 'left', 'enter'], (100, 24), 'host-01'),
             (['end', 'left', 'right', 'enter'], (100, 24), 'host-44'),
-            (['page_down', 'enter'], (24, 12), 'host-12'),
-            (['end', 'page_up', 'enter'], (24, 12), 'host-32'),
+            (['page_down', 'enter'], (24, 12), 'host-06'),
+            (['end', 'page_up', 'enter'], (24, 12), 'host-38'),
             (['end', 'home', 'tab', 'back_tab', 'enter'], (100, 24), 'host-00'),
         )
         for keys, size, expected in cases:
@@ -88,7 +88,7 @@ class GridTests(unittest.TestCase):
 
     def test_filter_keeps_alphabetical_order_across_columns(self):
         hosts = ['alpha', 'Bravo', 'charlie', 'delta', 'Echo', 'zeta']
-        _, frames = self.choose([*'a', 'cancel'], hosts, (50, 8))
+        _, frames = self.choose([*'a', 'cancel'], hosts, (50, 9))
         labels = [text[2:] for _, _, text, _ in frames[-1] if text[2:] in hosts]
         self.assertEqual(labels, ['alpha', 'Bravo', 'charlie', 'delta', 'zeta'])
 
@@ -256,7 +256,7 @@ class PickerDispatchTests(unittest.TestCase):
               patch.object(windows_picker, 'ConsoleScreen') as console,
               patch.dict(sys.modules, {'dalftui.linux.ssh_picker': None})):
             console.return_value.__enter__.return_value = screen
-            self.assertEqual(ssh.pick_host(refresh=True), 'host-06')
+            self.assertEqual(ssh.pick_host(refresh=True), 'host-05')
         listing.assert_called_once_with(refresh=True)
         external.assert_not_called()
         console.return_value.__exit__.assert_called_once()
@@ -365,6 +365,8 @@ with open('CONIN$', 'r') as input_stream, open('CONOUT$', 'w') as output_stream:
             for host in hosts:
                 assert host in buffer.value, (host, buffer.value)
             assert 'Ctrl+O connect typed hostname, IP or user@host' in buffer.value, buffer.value
+            for label in ('F4 Details', 'F5 No tmux', 'F6 Ops', 'F7 Checks'):
+                assert label in buffer.value, buffer.value
             return 'cancel'
         with patch.object(screen, 'read_key', side_effect=read_key):
             assert host_picker.pick(screen, hosts, lambda _host: '') is None

@@ -72,7 +72,9 @@ class PickerScreen:
                 curses.KEY_HOME: 'home', curses.KEY_END: 'end',
                 curses.KEY_PPAGE: 'page_up', curses.KEY_NPAGE: 'page_down',
                 curses.KEY_BACKSPACE: 'backspace', curses.KEY_ENTER: 'enter',
-                curses.KEY_BTAB: 'back_tab', curses.KEY_RESIZE: None, curses.KEY_F0 + 4: 'actions',
+                curses.KEY_BTAB: 'back_tab', curses.KEY_RESIZE: None,
+                curses.KEY_F0 + 4: 'details', curses.KEY_F0 + 5: 'plain',
+                curses.KEY_F0 + 6: 'ops', curses.KEY_F0 + 7: 'checks',
                 '\x1b': 'cancel', '\x03': 'cancel', '\x04': 'eof',
                 '\r': 'enter', '\n': 'enter', '\x7f': 'backspace', '\b': 'backspace',
                 '\x0f': 'connect_typed', '\x15': 'clear', '\t': 'tab'}

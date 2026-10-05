@@ -35,7 +35,7 @@ class SharedLauncherTests(unittest.TestCase):
                          'dalftui/__init__.py', 'dalftui/ssh.py', 'dalftui/vscode.py', 'dalftui/host_picker.py',
                          'dalftui/linux/__init__.py', 'dalftui/linux/ssh_picker.py',
                          'dalftui/linux/remote_bootstrap.py', 'dalftui/linux/tmux-start.sh',
-                         'dalftui/linux/ops.py', 'dalftui/linux/package-status.sh',
+                         'dalftui/linux/ops.py', 'dalftui/linux/package-status.sh', 'dalftui/linux/system-status.sh',
                          'dalftui/linux/tmux_editor.py', 'dalftui/windows/__init__.py',
                          'dalftui/windows/ssh.py', 'dalftui/windows/vscode.py', 'dalftui/windows/host_picker.py'):
             destination = self.checkout / relative
@@ -173,7 +173,7 @@ sys.meta_path.insert(0, BlockPlatformImports())
 with patch.object(sys, 'platform', 'win32'), \
      patch.object(subprocess, 'Popen', side_effect=AssertionError('Local program execution')), \
      patch.object(socket, 'socket', side_effect=AssertionError('Local socket creation')):
-    from dalftui.linux import remote_bootstrap
+    from dalftui.linux import ops, remote_bootstrap
     from dalftui import ssh
     for transport in ('unix', 'tcp'):
         bridge = SimpleNamespace(transport=transport,
@@ -188,7 +188,7 @@ with patch.object(sys, 'platform', 'win32'), \
         command = ssh.ssh_command('vm-alias', 'alice', bridge)
         assert shlex.split(command[-1]) == ['sh', '-c', remote_bootstrap.session_script(bridge)]
         assert '-S' not in command
-        check = SimpleNamespace(name='health', command='printf healthy', timeout=30)
+        check = SimpleNamespace(name='system', command=ops.system_status_script(), timeout=20)
         for mode in ('plain', 'check', 'ops'):
             command = ssh.ssh_command('vm-alias', 'alice', bridge, mode=mode, check=check)
             assert shlex.split(command[-1]) == ['sh', '-c', remote_bootstrap.session_script(bridge, mode=mode, check=check)]

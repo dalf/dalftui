@@ -10,18 +10,43 @@ def package_status_script():
     return Path(__file__).resolve().with_name('package-status.sh').read_text(encoding='utf-8')
 
 
-def check_script(name, command, timeout):
+def system_status_script(*, compact=False):
+    view = 'compact' if compact else 'detailed'
+    return (f'status_view={view}\n'
+            + Path(__file__).resolve().with_name('system-status.sh').read_text(encoding='utf-8'))
+
+
+def check_script(name, command, timeout, *, overview=False):
     """Bound the command and its process group, then leave a usable login shell."""
-    return (f'printf "%s\\n" {shlex.quote(f"Check: {name} (limit {timeout}s)")}\n'
+    if overview:
+        heading = '''overview_error() {
+    if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
+        printf '\\033[31mERR\\033[39m  %s\\n' "$1"
+    else
+        printf 'ERR  %s\\n' "$1"
+    fi
+}
+'''
+        result = '''        0) : ;;
+        124|137) overview_error 'System overview timed out; some sections may be missing.' ;;
+        1) overview_error 'Some status information is unavailable.' ;;
+        *) overview_error "System overview could not finish (exit $check_status)." ;;
+'''
+        missing = "overview_error 'System overview unavailable: timeout is missing.'\n"
+    else:
+        heading = f'printf "%s\\n" {shlex.quote(f"Check: {name} (limit {timeout}s)")}\n'
+        result = ('        124|137) printf "%s\\n" "Check timed out." ;;\n'
+                  '        *) printf "Check exit status: %s\\n" "$check_status" ;;\n')
+        missing = 'printf "%s\\n" "timeout is unavailable; check was not run."\n'
+    return (heading +
             'if command -v timeout >/dev/null 2>&1; then\n'
             f'    timeout --kill-after=5s {timeout}s sh -c {shlex.quote(command)} </dev/null\n'
             '    check_status=$?\n'
             '    case $check_status in\n'
-            '        124|137) printf "%s\\n" "Check timed out." ;;\n'
-            '        *) printf "Check exit status: %s\\n" "$check_status" ;;\n'
+            + result +
             '    esac\n'
             'else\n'
-            '    printf "%s\\n" "timeout is unavailable; check was not run."\n'
+            + missing +
             'fi\n' + LOGIN_SHELL)
 
 
@@ -45,7 +70,7 @@ else
     printf '%s\n' 'journalctl is unavailable.'
 fi
 """ + LOGIN_SHELL
-    shell = check_script('packages', package_status_script(), 30)
+    shell = check_script('system overview', system_status_script(compact=True), 10, overview=True)
     commands = ''.join(f'{name}={shlex.quote(script)}\n'
                        for name, script in (('ops_monitor_command', monitor),
                                             ('ops_journal_command', journal),
@@ -85,7 +110,7 @@ tmux set-option -w -t "$ops_monitor" pane-border-status top
 tmux set-option -w -t "$ops_monitor" pane-border-format '#{pane_title}'
 tmux select-pane -t "$ops_monitor" -T Processes
 tmux select-pane -t "$ops_journal" -T Journal
-tmux select-pane -t "$ops_shell" -T 'Shell / packages'
+tmux select-pane -t "$ops_shell" -T 'Shell / system'
 tmux select-pane -t "$ops_shell"
 tmux attach-session -t "$ops_session"
 exit $?

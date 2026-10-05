@@ -97,6 +97,20 @@ elif sys.argv[1] == 'split-window':
         self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
         self.assertTrue(self.shell_log.exists())
 
+    def test_overview_hides_success_status_but_reports_failures_before_opening_shell(self):
+        for command, expected in (('true', ''), ('exit 1', 'Some status information is unavailable.'),
+                                  ('exit 23', 'System overview could not finish (exit 23).'),
+                                  ('sleep 30 & wait', 'System overview timed out; some sections may be missing.')):
+            with self.subTest(command=command):
+                self.shell_log.unlink(missing_ok=True)
+                result = self.run_script(ops.check_script('system overview', command, 1, overview=True))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, 'ERR  ' + expected + '\n' if expected else '')
+                self.assertTrue(self.shell_log.exists())
+        (self.bin / 'timeout').unlink()
+        result = self.run_script(ops.check_script('system overview', 'echo SHOULD_NOT_RUN', 1, overview=True))
+        self.assertEqual(result.stdout, 'ERR  System overview unavailable: timeout is missing.\n')
+
     def test_package_status_only_simulates_and_labels_cached_metadata(self):
         result = self.run_script(ops.package_status_script())
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -136,7 +150,9 @@ elif sys.argv[1] == 'split-window':
         self.assertIn('Journal ended with status 1', journal.stdout)
         shell_command = next(command[-1] for command in commands if command[0] == 'split-window' and '-v' in command)
         shell = self.run_script(shell_command)
-        self.assertIn('Cached metadata only', shell.stdout)
+        self.assertIn('System overview', shell.stdout)
+        self.assertNotIn('Cached metadata only', shell.stdout)
+        self.assertFalse(Path(self.env['APT_LOG']).exists())
         self.assertEqual(len(self.shell_log.read_text().splitlines()), 3)
 
     def test_partial_setup_failure_cleans_up_only_the_new_session(self):

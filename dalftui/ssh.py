@@ -283,7 +283,7 @@ class SavedCheck:
 def saved_checks(host):
     """Load local, trusted shell commands only when the checks action is opened."""
     checks = [SavedCheck('packages', ops.package_status_script()),
-              SavedCheck('system', 'uptime; df -h /; systemctl --failed --no-pager')]
+              SavedCheck('system', ops.system_status_script(), 20)]
     try:
         data = json.loads(CHECKS_CONFIG.read_text(encoding='utf-8-sig'))
     except FileNotFoundError:

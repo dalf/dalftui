@@ -82,7 +82,8 @@ class ConsoleScreen:
         if key in ('\0', '\xe0'):
             return {'H': 'up', 'P': 'down', 'K': 'left', 'M': 'right',
                     'G': 'home', 'O': 'end', 'I': 'page_up', 'Q': 'page_down',
-                    '\x0f': 'back_tab', '>': 'actions'}.get(msvcrt.getwch())
+                    '\x0f': 'back_tab', '>': 'details', '?': 'plain',
+                    '@': 'ops', 'A': 'checks'}.get(msvcrt.getwch())
         if '\ud800' <= key <= '\udbff':
             following = msvcrt.getwch()
             if '\udc00' <= following <= '\udfff':

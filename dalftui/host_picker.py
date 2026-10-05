@@ -56,12 +56,23 @@ class Layout:
         return self.rows * self.columns
 
 
-def layout(hosts, width, height):
-    rows = max(1, height - 6)
+def layout(hosts, width, height, *, header_rows=4):
+    rows = max(1, height - header_rows - 2)
     usable = max(1, width - 2)
     desired = max((cell_width(host) + 4 for host in hosts), default=18)
     columns = min(max(1, usable // desired), max(1, (len(hosts) + rows - 1) // rows))
     return Layout(rows, columns, usable // columns)
+
+
+def action_help(width):
+    """Keep every action label visible, using extra rows on narrow terminals."""
+    lines = []
+    for label in ('F4 Details', 'F5 No tmux', 'F6 Ops', 'F7 Checks'):
+        if lines and cell_width(lines[-1] + ' | ' + label) <= width:
+            lines[-1] += ' | ' + label
+        else:
+            lines.append(label)
+    return lines
 
 
 class Picker:
@@ -97,7 +108,9 @@ class Picker:
         self.selected = max(0, min(self.selected, len(self.matches) - 1))
 
     def frame(self, width, height, action):
-        grid = layout(self.matches, width, height)
+        help_lines = action_help(width - 2)
+        first_row = 4 + len(help_lines)
+        grid = layout(self.matches, width, height, header_rows=first_row)
         cells = []
 
         def write(y, x, text, style='normal', limit=None):
@@ -106,34 +119,37 @@ class Picker:
                 budget = width - 1 - x
                 cells.append((y, x, clip(text, min(budget, limit) if limit is not None else budget), style))
 
-        if height < 7 or width < 12:
+        if height < first_row + 3 or width < 12:
             write(0, 0, 'Enlarge terminal | Esc cancels')
             return grid, cells
         write(0, 1, f'SSH HOSTS  {len(self.matches)}/{len(self.hosts)}', 'heading')
-        write(1, 1, f'F4 actions | Enter {action} | Arrows select | Esc cancel', 'muted')
+        write(1, 1, f'Enter {action} | Esc cancel | Arrows select', 'muted')
         # Show the end of a long query without moving the grid outside the screen.
         query = self.query
         while query and cell_width(query) > max(1, width - 11):
             query = query[1:]
         write(2, 1, f'Filter: {query}', 'heading')
         write(3, 1, 'Ctrl+O connect typed hostname, IP or user@host', 'muted')
+        for row, line in enumerate(help_lines, 4):
+            write(row, 1, line, 'muted')
         start = self.selected // grid.capacity * grid.capacity
         stop = min(len(self.matches), start + grid.capacity)
         if not self.matches:
-            write(4, 1, 'No matches. Ctrl+O connects to the typed destination.', 'muted')
+            write(first_row, 1, 'No matches. Actions use the typed destination.', 'muted')
         for index in range(start, stop):
             offset = index - start
-            y, x = 4 + offset % grid.rows, 1 + offset // grid.rows * grid.width
+            y, x = first_row + offset % grid.rows, 1 + offset // grid.rows * grid.width
             selected = index == self.selected
             label = ('> ' if selected else '  ') + self.matches[index]
             write(y, x, label, 'selected' if selected else 'normal', grid.width - 1)
         pages = max(1, (len(self.matches) + grid.capacity - 1) // grid.capacity)
         write(height - 2, 1,
-              f'{grid.columns} column(s) | {start + 1 if self.matches else 0}-{stop}'
+              self.message or f'{grid.columns} column(s) | {start + 1 if self.matches else 0}-{stop}'
               f' of {len(self.matches)} | Page {start // grid.capacity + 1}/{pages}'
-              ' | PgUp/PgDn | Ctrl+U clear', 'muted')
-        detail = self.message or (self.matches[self.selected] if self.matches else 'Type a hostname, IP address or user@host.')
-        write(height - 1, 1, detail, 'heading')
+              ' | PgUp/PgDn | Ctrl+U clear', 'heading' if self.message else 'muted')
+        target = (f'Target: {self.matches[self.selected]}' if self.matches else
+                  f'Target (typed): {self.query}' if self.query else 'Target: none - type a destination')
+        write(height - 1, 1, target, 'heading')
         return grid, cells
 
 
@@ -183,31 +199,24 @@ def dialog(screen, title, lines, *, choose=False):
             selected = len(visible_lines) - 1
 
 
-def host_actions(screen, host, details, checks):
-    labels = ['Connect normally', 'Show connection details', 'Connect without tmux',
-              'Run a saved check', 'Open ops mode']
-    while True:
-        choice = dialog(screen, f'HOST ACTIONS: {host}', labels, choose=True)
-        if choice is None:
-            return None
-        if choice == 0:
-            return host
-        if choice in (2, 4):
-            return HostAction(host, 'plain' if choice == 2 else 'ops')
-        try:
-            if choice == 1:
-                width, _ = screen.size()
-                screen.draw([(0, 0, clip('Reading SSH connection details...', max(0, width - 1)), 'heading')])
-                dialog(screen, f'CONNECTION DETAILS: {host}', details(host))
-            else:
-                available = checks(host)
-                choice = dialog(screen, f'SAVED CHECKS: {host}',
-                                [f'{check.name} ({check.timeout}s)' for check in available], choose=True)
-                if choice is not None:
-                    check = available[choice]
-                    return HostAction(host, 'check', check.name)
-        except (OSError, RuntimeError, ValueError) as error:
-            dialog(screen, 'Could not load host action', str(error).splitlines())
+def host_action(screen, host, key, details, checks):
+    if key in ('plain', 'ops'):
+        return HostAction(host, key)
+    try:
+        if key == 'details':
+            width, _ = screen.size()
+            screen.draw([(0, 0, clip('Reading SSH connection details...', max(0, width - 1)), 'heading')])
+            dialog(screen, f'CONNECTION DETAILS: {host}', details(host))
+        else:
+            available = checks(host)
+            choice = dialog(screen, f'SAVED CHECKS: {host}',
+                            [f'{check.name} ({check.timeout}s)' for check in available], choose=True)
+            if choice is not None:
+                check = available[choice]
+                return HostAction(host, 'check', check.name)
+    except (OSError, RuntimeError, ValueError) as error:
+        dialog(screen, 'Could not load host action', str(error).splitlines())
+    return None
 
 
 def pick(screen, hosts, validate, *, action='connect', details=None, checks=None):
@@ -224,11 +233,11 @@ def pick(screen, hosts, validate, *, action='connect', details=None, checks=None
         key = screen.read_key()
         if key in ('cancel', 'eof'):
             return None
-        if key == 'actions' and details is not None and checks is not None:
+        if key in ('details', 'plain', 'ops', 'checks') and details is not None and checks is not None:
             host = picker.matches[picker.selected] if picker.matches else picker.query
             picker.message = validate(host, require_tag=False)
             if not picker.message:
-                selected = host_actions(screen, host, details, checks)
+                selected = host_action(screen, host, key, details, checks)
                 if selected:
                     return selected
                 previous = None

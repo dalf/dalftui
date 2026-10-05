@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 import bridge_protocol as protocol
 from dalftui import vscode
-from dalftui.linux import remote_bootstrap
+from dalftui.linux import ops, remote_bootstrap
 from dalftui.windows import vscode as windows_vscode
 
 spec = importlib.util.spec_from_file_location(
@@ -140,8 +140,17 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.stdout + result.stderr, '')
 
     def test_new_session_modes_deliver_credentials_to_a_historical_remote_client(self):
+        check = SimpleNamespace(name='health', command='true', timeout=2)
+        self.assert_session_credentials((mode, mode, check) for mode in ('plain', 'check', 'ops'))
+
+    def test_system_overviews_preserve_editor_access_for_a_historical_remote_client(self):
+        check = SimpleNamespace(name='system', command=ops.system_status_script(), timeout=20)
+        self.assert_session_credentials((('system-check', 'check', check), ('ops-system', 'ops', None)))
+
+    def assert_session_credentials(self, cases):
         self.install_historical(version=2)
         (self.bin / 'timeout').symlink_to(shutil.which('timeout'))
+        (self.bin / 'awk').symlink_to(shutil.which('awk'))
         client = self.directory / 'historical-client.py'
         fixture = Path(__file__).parent / 'fixtures/bridge_protocol_v1.py'
         client.write_text('import importlib.util, os\n'
@@ -155,13 +164,17 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         tmux = self.bin / 'tmux'
         tmux.write_text('#!/bin/sh\ncase "$1" in\n'
                         "new-session) printf '$42 %%70\\n' ;;\n"
-                        "split-window) printf '%%71\\n' ;;\n"
-                        'attach-session) exec python3 "$TEST_HISTORICAL_CLIENT" ;;\nesac\n')
+                        'split-window)\n'
+                        '  if [ "$2" = -v ]; then\n'
+                        '    for argument do :; done\n'
+                        '    sh -c "$argument" > "$TEST_SYSTEM_REPORT" || exit $?\n'
+                        '  fi\n'
+                        "  printf '%%71\\n' ;;\nesac\n")
         self.env.update(SHELL=str(shell), TEST_HISTORICAL_CLIENT=str(client))
-        for mode in ('plain', 'check', 'ops'):
-            with (self.subTest(mode=mode), patch.object(vscode, 'launch') as launch,
+        for name, mode, check in cases:
+            with (self.subTest(mode=name), patch.object(vscode, 'launch') as launch,
                   vscode.EditorBridge('alice@historical-host', transport='tcp') as bridge):
-                bridge.remote_directory = str(self.directory / (mode + '-credentials'))
+                bridge.remote_directory = str(self.directory / (name + '-credentials'))
                 bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
                 bridge.remote_token_file = bridge.remote_directory + '/token'
                 # Substitute the SSH forward with this disposable listener.
@@ -169,13 +182,21 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 prepared = self.run_script(remote_bootstrap.prepare_credentials_script(
                     bridge, check_installation=True), token=bridge.token + '\n')
                 self.assertEqual(prepared.returncode, 0, prepared.stderr)
-                check = SimpleNamespace(name='health', command='true', timeout=2)
+                report = self.directory / (name + '-report')
+                self.env['TEST_SYSTEM_REPORT'] = str(report)
                 script = remote_bootstrap.session_script(bridge, mode=mode, check=check)
                 self.assertNotIn(bridge.token, script)
                 result = self.run_script(script)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 launch.assert_called_once()
                 self.assertEqual(launch.call_args.args[:2], (legacy.FOLDER, 'alice@historical-host'))
+                if mode == 'ops' or name == 'system-check':
+                    output = report.read_text() if mode == 'ops' else result.stdout
+                    self.assertIn('System overview', output)
+                    self.assertIn('Failed units: unknown', output)
+                    if mode == 'ops':
+                        self.assertNotIn('Check exit status:', output)
+                        self.assertIn('ERR  Some status information is unavailable.', output)
                 self.assertFalse(Path(bridge.remote_directory).exists())
 
     def test_current_desktop_refuses_credentials_without_a_supported_readable_declaration(self):
