@@ -36,7 +36,8 @@ white = "#ffffff"
 program = "sh"
 args = ["-c", 'case ${XDG_CONFIG_HOME-} in /*) config_home=$XDG_CONFIG_HOME ;; *) config_home=$HOME/.config ;; esac; exec sh "$config_home/dalftui/bin/tmux-start.sh"']
 
-# Copy mouse and keyboard selections to the system clipboard automatically.
+# Shift+drag selects, Ctrl+Shift+C copies and Ctrl+Shift+V pastes, as in Windows Terminal.
+# Selections are also copied automatically; Ctrl+Shift+C still works.
 [selection]
 save_to_clipboard = true
 

@@ -62,7 +62,8 @@ guide link, and `~/.config/tmux/local.conf`. It preserves existing Alacritty fil
 
 The server uses the same rounded tabs, Claude status styling, pane bindings,
 and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys
-and reminders for shortcuts supplied by your local Alacritty. The guide reads
+and reminders for shortcuts supplied by your local Alacritty, plus the
+[selection rules](#selecting-and-copying) shared with Windows Terminal. The guide reads
 live tmux bindings and does not try to read Alacritty settings on the server.
 From dalftui Alacritty, **Ctrl+Shift+F1** also opens that guide.
 **Ctrl+B, then F2** is disabled in server mode because its picker launches a
@@ -174,6 +175,34 @@ Alacritty translates Ctrl+Shift+F1/F2/F3 to the existing tmux actions. The
 tmux prefix bindings remain available as fallbacks. Reload locally to use
 the new Alacritty shortcuts; existing remote tmux configurations already
 understand the translated keys.
+
+### Selecting and copying
+
+Selection works the same way in Alacritty and Windows Terminal, locally or over
+SSH, whether the pane runs a shell or a mouse-aware program:
+
+- **Shift+drag** selects text; **Ctrl+Shift+C** copies and **Ctrl+Shift+V** pastes.
+- **Split panes:** a terminal selection crosses pane borders. Press **Ctrl+B, then z**
+  to zoom the pane, select, then **Ctrl+B, then z** again to restore the layout.
+- **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in Alacritty,
+  or **Ctrl+B, then Page Up**, then Shift+drag.
+
+A plain drag in a shell only shows a reminder to hold Shift, and a plain double-
+or triple-click no longer selects a word or line; hold Shift for those too.
+Programs that use the mouse, such as htop or editors, still receive drags and clicks. In Windows
+Terminal, select before pressing Ctrl+Shift+C: without a selection the key may
+reach the pane as Ctrl+C.
+
+dalftui adds no terminal copy bindings and relies on Alacritty and Windows
+Terminal defaults. Alacritty also copies selections automatically; Windows
+Terminal's `copyOnSelect` setting is left unchanged. tmux sets `set-clipboard on`,
+so programs in panes, including on remote servers, may set the desktop
+clipboard with OSC 52. They cannot read the desktop clipboard, but an OSC 52
+query returns tmux's most recent paste buffer: text copied in tmux history or
+set by another pane. Override it in
+`~/.config/tmux/local.conf`, for example with `set -s set-clipboard off`.
+Reloading only re-sources the configuration: if a later version removes these
+root mouse bindings, restart the tmux server to drop them.
 
 ## SSH hosts and login
 
@@ -416,7 +445,9 @@ remote **Ctrl+Shift+F3** integration. SSH windows override Alacritty's local
 startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--tmux-only` on each server where you want the shared configuration.
-Without it, remote tmux uses the server's existing configuration and bindings.
+Without it, remote tmux uses the server's existing configuration and bindings. Shift+drag
+selection works either way; the plain-drag reminder and OSC 52 clipboard writes
+need the shared configuration.
 
 ## Open the current folder in VS Code
 
@@ -1064,8 +1095,9 @@ both platforms.
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions.
 They cover backups, rollback, repeated installation, updates through the link,
-personal overrides, both shortcut guides, tag filtering, mode switching, and
-reloads that preserve pane processes and Claude status. The CLI is also tested
+personal overrides, both shortcut guides, tag filtering, mode switching,
+reloads that preserve pane processes and Claude status, and the clipboard and
+mouse-selection bindings loaded into a real tmux server. The CLI is also tested
 with Alacritty and SSH absent from PATH. Desktop picker tests are skipped when
 OpenSSH's Tag directive is unavailable; it is not required by server mode.
 Unix authentication tests include a deliberately mode-0666 socket in a

@@ -68,10 +68,14 @@ def render(tmux_only=False):
             ("Ctrl+F, text, Enter", "Find literal text while in history"),
             ("Esc", "Leave history and return to the application"),
         ],
-        "Clipboard / terminal": [
-            ("Shift+drag", "Select in Alacritty and copy automatically"),
-            ("Ctrl+Shift+C", "Copy selection"),
-            ("Ctrl+Shift+V", "Paste clipboard"),
+        "Select / copy / paste": [
+            ("Shift+drag", "Select text in Alacritty or Windows Terminal, locally or over SSH"),
+            ("Ctrl+Shift+C / Ctrl+Shift+V", "Copy selection / paste; in Windows Terminal, select before copying"),
+            ("Split panes", "Ctrl+B → z to zoom, Shift+drag, then Ctrl+B → z to restore"),
+            ("Text in history", "Scroll with the wheel or Shift+Page Up, then Shift+drag"),
+            ("Plain drag / double-click", "Does not select in shells (drag shows a hint); mouse apps such as htop receive it"),
+        ],
+        "Alacritty terminal": [
             ("Shift+Insert / middle click", "Paste Linux primary selection"),
             ("Ctrl+= / Ctrl+- / Ctrl+0", "Larger font / smaller font / reset font size"),
             ("Ctrl+Shift+F / Ctrl+Shift+B", "Search Alacritty's own buffer forward / backward"),
@@ -108,7 +112,8 @@ def render(tmux_only=False):
             ("Ctrl+B → x", "Close pane (asks for confirmation)"),
         ]
         groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
-        del groups["Clipboard / terminal"]
+        groups["Select / copy / paste"][3] = ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then Shift+drag")
+        del groups["Alacritty terminal"]
         del groups["SSH / servers"]
         groups["Session / help"] = [
             ("Ctrl+B → F1", "Open this guide"),
@@ -124,7 +129,6 @@ def render(tmux_only=False):
             ("Ctrl+Shift+D / Ctrl+Shift+E", "Split side by side / top and bottom"),
             ("Ctrl+Alt+arrow", "Move to the pane in that direction"),
             ("Ctrl+Alt+Shift+arrow", "Resize the pane by five cells"),
-            ("Shift+drag / Ctrl+Shift+V", "Copy selection / paste using your local terminal"),
         ]
     for title, bindings in groups.items():
         heading(title)
