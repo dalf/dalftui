@@ -634,10 +634,9 @@ PowerShell session to use `dssh` and **Ctrl+Shift+F3**. Use `-ProfilePath PATH` 
 configure only a specific profile, including a different PowerShell host.
 
 The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
-Setup installs the icons-only Symbols Nerd Font for the current user when it is
-missing, and appends it to the font face in Windows Terminal's `profiles.defaults`
-(for example `Cascadia Mono, Symbols Nerd Font`; Terminal 1.21+ reads the list).
-A profile with its own font face keeps it.
+Setup installs Hack Nerd Font for the current user when it is missing, and sets
+it as the font face in Windows Terminal's `profiles.defaults`. A profile with its
+own font face keeps it.
 
 The profile enables bash-like Emacs line editing, with **Ctrl+Left/Right** moving
 by word and history suggestions where PSReadLine supports them. As in tmux,

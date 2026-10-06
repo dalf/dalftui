@@ -389,7 +389,7 @@ function Invoke-DalftuiWindowsSetup {
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
             Assert-True ($script:fontInstaller -eq 'fake-oh-my-posh') `
-                'Setup must install the Symbols Nerd Font with the discovered oh-my-posh'
+                'Setup must install the Hack Nerd Font with the discovered oh-my-posh'
             $script:missingOhMyPosh = $true
             $script:directSetupCheckout = $null
             $message = ''
@@ -446,11 +446,11 @@ function Invoke-DalftuiWindowsSetup {
         $global:dalftuiFontInstalled = $true
         function Test-DalftuiNerdFont { return $global:dalftuiFontInstalled }
         Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
-        Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed Symbols Nerd Font must not be reinstalled'
+        Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed Hack Nerd Font must not be reinstalled'
         $global:dalftuiFontInstalled = $false
         Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
-        Assert-True ([IO.File]::ReadAllText($fontLog) -eq 'font install NerdFontsSymbolsOnly') `
-            'A missing Symbols Nerd Font must be installed with oh-my-posh'
+        Assert-True ([IO.File]::ReadAllText($fontLog) -eq 'font install Hack') `
+            'A missing Hack Nerd Font must be installed with oh-my-posh'
         [IO.File]::WriteAllText($fakeOhMyPosh, '$global:LASTEXITCODE = 0')
         $global:dalftuiFontInstalled = $false
         Assert-Throws { Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh } `

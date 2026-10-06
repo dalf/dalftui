@@ -16,8 +16,7 @@ SHORTCUT = 'ctrl+shift+f2'
 EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 EDITOR_SHORTCUT = 'ctrl+shift+f3'
 EDITOR_INPUT = '\x02\x1bOR'
-ICON_FONT = 'Symbols Nerd Font'
-DEFAULT_FONT = 'Cascadia Mono'
+PROMPT_FONT = 'Hack Nerd Font'
 DECODER = json.JSONDecoder()
 JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
@@ -161,23 +160,20 @@ def updated_settings(text, commandline):
     return text
 
 
-def icon_font_face(settings):
-    """Return the default font face with the icon font appended, or None when present."""
+def prompt_font_face(settings):
+    """Return the prompt font for the default profile face, or None when already set."""
     defaults = settings.get('profiles', {})
     defaults = defaults.get('defaults', {}) if isinstance(defaults, dict) else None
     if not isinstance(defaults, dict):
-        return None  # The legacy profiles array has no defaults to extend.
+        return None  # The legacy profiles array has no defaults to change.
     font = defaults.get('font', {})
     face = font.get('face') if isinstance(font, dict) else None
-    face = face or defaults.get('fontFace') or DEFAULT_FONT
-    if not isinstance(face, str) or ICON_FONT in [part.strip() for part in face.split(',')]:
-        return None
-    return face + ', ' + ICON_FONT
+    return None if face == PROMPT_FONT else PROMPT_FONT
 
 
 def font_edit(text, clean, settings, root_items, newline, edits):
-    """Add the prompt's icon font after the default face; return a missing root property."""
-    face = icon_font_face(settings)
+    """Set the default face to the prompt font; return a missing root property."""
+    face = prompt_font_face(settings)
     items, end = root_items, None
     path = ('profiles', 'defaults', 'font', 'face')
     for depth, key in enumerate(path if face else ()):
@@ -230,7 +226,7 @@ def configure(path, commandline):
     print(f'Terminal backup: {backup}')
     print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
     print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
-    print(f'Prompt icons fall back to {ICON_FONT} in the default profile font.')
+    print(f'Default profile font: {PROMPT_FONT}')
 
 
 def settings_paths(local_app_data):

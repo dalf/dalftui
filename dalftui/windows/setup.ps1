@@ -270,22 +270,22 @@ function Test-DalftuiNerdFont {
     foreach ($hive in @('HKCU:', 'HKLM:')) {
         $fonts = Get-ItemProperty -LiteralPath ($hive + '\Software\Microsoft\Windows NT\CurrentVersion\Fonts') `
             -ErrorAction SilentlyContinue
-        if ($fonts -and @($fonts.PSObject.Properties.Name -like 'Symbols Nerd Font*').Count) { return $true }
+        if ($fonts -and @($fonts.PSObject.Properties.Name -like 'Hack Nerd Font*').Count) { return $true }
     }
     return $false
 }
 
 function Install-DalftuiNerdFont([string]$OhMyPosh) {
     if (Test-DalftuiNerdFont) {
-        Write-Host 'Symbols Nerd Font already installed.'
+        Write-Host 'Hack Nerd Font already installed.'
         return
     }
     # Installs for the current user; no administrator rights are needed.
-    & $OhMyPosh font install NerdFontsSymbolsOnly | Out-Host
+    & $OhMyPosh font install Hack | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-DalftuiNerdFont)) {
-        throw 'Symbols Nerd Font installation failed; see the message above.'
+        throw 'Hack Nerd Font installation failed; see the message above.'
     }
-    Write-Host 'Symbols Nerd Font installed.'
+    Write-Host 'Hack Nerd Font installed.'
 }
 
 function Test-DalftuiWindowsPlatform {
