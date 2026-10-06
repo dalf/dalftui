@@ -41,8 +41,10 @@ if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) {
     try { Set-PSReadLineOption -PredictionSource History -ErrorAction Stop } catch { }
 }
 
-# Draw the prompt with the Oh My Posh theme shared with Linux.
-if (Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue) {
+# Draw the prompt with the Oh My Posh theme shared with Linux. Its init needs
+# PSReadLine, which is missing when PSModulePath is empty.
+if ((Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue) -and
+    (Get-Command Get-PSReadLineOption -ErrorAction SilentlyContinue)) {
     oh-my-posh init pwsh --config (Join-Path $Checkout 'config/oh-my-posh.omp.json') | Invoke-Expression
 }
 
