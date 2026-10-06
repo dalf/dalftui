@@ -29,6 +29,175 @@ $dalftuiCommand = {
 }.GetNewClosure()
 Set-Item -Path Function:\global:dssh -Value $dalftuiCommand
 
+# Unix-like commands. clear, pwd and man are built in. An alias to a tool that
+# setup does not install exists only when the tool does. Windows PowerShell 5.1
+# makes ls and wget AllScope aliases, which Set-Alias replaces only with AllScope.
+foreach ($dalftuiAlias in @(@('ls', 'lsd'), @('wget', 'wget2'), @('htop', 'btop'), @('sudo', 'gsudo'))) {
+    if (Get-Command $dalftuiAlias[1] -CommandType Application -ErrorAction SilentlyContinue) {
+        Set-Alias -Name $dalftuiAlias[0] -Value $dalftuiAlias[1] -Option AllScope -Scope Global
+    }
+}
+if (Get-Command bat -CommandType Application -ErrorAction SilentlyContinue) {
+    Remove-Item Alias:cat -ErrorAction SilentlyContinue
+    function global:cat { $input | & bat --style=plain @args }
+}
+
+function global:touch {
+    foreach ($path in $args) {
+        if (Test-Path -LiteralPath $path) { (Get-Item -LiteralPath $path).LastWriteTime = Get-Date }
+        else { $null = New-Item -ItemType File -Path $path }
+    }
+}
+
+function global:du {
+    param (
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Paths = @(".")  # Default to current directory
+    )
+
+    # Unix flags such as -sh are not paths; du always summarizes.
+    $Paths = @($Paths | Where-Object { $_ -notmatch '^-' })
+    if (-not $Paths) { $Paths = @('.') }
+
+    # Expand wildcards; -Force also finds hidden items such as AppData
+    $resolvedPaths = @()
+    foreach ($p in $Paths) {
+        $expanded = Get-Item $p -Force -ErrorAction SilentlyContinue
+        if ($expanded) {
+            $resolvedPaths += $expanded
+        } else {
+            Write-Warning "'$p' not found or matched no items."
+        }
+    }
+
+    # Remove duplicates and calculate size
+    $seen = @{}
+    foreach ($entry in $resolvedPaths) {
+        if ($seen.ContainsKey($entry.FullName)) { continue }
+        $seen[$entry.FullName] = $true
+
+        $totalSize = (Get-ChildItem -Path $entry.FullName -Recurse -Force -File -ErrorAction SilentlyContinue |
+            Measure-Object -Property Length -Sum).Sum
+        $sizeMB = [math]::Round($totalSize / 1MB, 2)
+        "{0,10:N2} MB {1}" -f $sizeMB, $entry.FullName
+    }
+}
+
+function global:df {
+    function Format-Size($bytes) {
+        if ($bytes -ge 1GB) { return "{0:N2} GB" -f ($bytes / 1GB) }
+        elseif ($bytes -ge 1MB) { return "{0:N2} MB" -f ($bytes / 1MB) }
+        elseif ($bytes -ge 1KB) { return "{0:N2} KB" -f ($bytes / 1KB) }
+        else { return "$bytes B" }
+    }
+
+    # A drive that is not ready (empty card reader) has no Used value.
+    $drives = Get-PSDrive -PSProvider 'FileSystem' | Where-Object { $null -ne $_.Used } | ForEach-Object {
+        $total = $_.Used + $_.Free
+        $used = $_.Used
+        $free = $_.Free
+        $percentUsed = if ($total -ne 0) { [math]::Round(($used / $total) * 100, 0) } else { 0 }
+
+        [PSCustomObject]@{
+            Drive     = $_.Name
+            Used      = Format-Size $used
+            Free      = Format-Size $free
+            Total     = Format-Size $total
+            Percent   = "$percentUsed%"
+            Root      = $_.Root
+        }
+    }
+
+    $drives | Format-Table `
+        @{Label="Drive";     Expression={$_.Drive};     Alignment='Right'}, `
+        @{Label="    Total"; Expression={$_.Total};     Alignment='Right'}, `
+        @{Label="     Used"; Expression={$_.Used};      Alignment='Right'}, `
+        @{Label="     Free"; Expression={$_.Free};      Alignment='Right'}, `
+        @{Label="% Used";    Expression={$_.Percent};   Alignment='Right'}, `
+        @{Label="Root";    Expression={$_.Root};      Alignment='Left'}
+}
+
+function global:wc {
+    # A simple function: an advanced one binds -w to -WarningAction.
+    $lineCount = $false
+    $wordCount = $false
+    $byteCount = $false
+    $files = @()
+
+    foreach ($arg in $args) {
+        if ($arg -match '^-[lwc]+$') {
+            if ($arg -match 'l') { $lineCount = $true }
+            if ($arg -match 'w') { $wordCount = $true }
+            if ($arg -match 'c') { $byteCount = $true }
+        } else {
+            $found = Get-Item $arg -Force -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }
+            if ($found) { $files += $found } else { Write-Error "File not found: $arg" }
+        }
+    }
+
+    if (-not ($lineCount -or $wordCount -or $byteCount)) {
+        $lineCount = $wordCount = $byteCount = $true
+    }
+
+    $pipeline = @($input)
+    if ($files.Count -eq 0 -and $pipeline.Count -eq 0) {
+        Write-Error "Usage: wc [-l] [-w] [-c] file1 [file2 ...]"
+        return
+    }
+
+    $totalLines = 0
+    $totalWords = 0
+    $totalBytes = 0
+
+    if ($files.Count -eq 0) {
+        # Piped text has no file size; -c counts characters plus line ends.
+        $lines = $pipeline.Count
+        $words = ($pipeline -join "`n" -split '\s+').Where({ $_ -ne '' }).Count
+        $bytes = ($pipeline | Measure-Object -Character).Characters + $lines
+        $output = @()
+        if ($lineCount) { $output += $lines }
+        if ($wordCount) { $output += $words }
+        if ($byteCount) { $output += $bytes }
+        return $output -join "`t"
+    }
+
+    foreach ($file in $files) {
+        $content = Get-Content -LiteralPath $file.FullName
+        $lines = $content.Count
+        $words = ($content -join "`n" -split '\s+').Where({ $_ -ne '' }).Count
+        $bytes = $file.Length
+
+        $totalLines += $lines
+        $totalWords += $words
+        $totalBytes += $bytes
+
+        $output = @()
+        if ($lineCount) { $output += $lines }
+        if ($wordCount) { $output += $words }
+        if ($byteCount) { $output += $bytes }
+
+        $output += $file.Name
+        $output -join "`t"
+    }
+
+    # Show totals if more than one file
+    if ($files.Count -gt 1) {
+        $output = @()
+        if ($lineCount) { $output += $totalLines }
+        if ($wordCount) { $output += $totalWords }
+        if ($byteCount) { $output += $totalBytes }
+
+        $output += "total"
+        $output -join "`t"
+    }
+}
+# Keep a real du, df or wc, such as Git for Windows' usr\bin tools.
+foreach ($dalftuiName in @('du', 'df', 'wc')) {
+    if (Get-Command $dalftuiName -CommandType Application -ErrorAction SilentlyContinue) {
+        Remove-Item -Path "Function:\$dalftuiName"
+    }
+}
+
 # Bash-like line editing. Setting EditMode resets every key handler, so this
 # runs before Oh My Posh and the editor shortcut add theirs, and only when the
 # mode differs, which keeps bindings made after an earlier switch.

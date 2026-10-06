@@ -559,6 +559,71 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True (($arguments -join ' ') -eq '--pick') 'The Terminal launcher must forward --pick without a personal profile'
     Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
 
+    # Unix-like aliases need their tools. Load the profile at global scope in a
+    # fresh shell, first without the tools, then with fakes that echo arguments.
+    $fakeTools = Join-Path $root 'fake unix tools'
+    $noTools = Join-Path $root 'no unix tools'
+    [IO.Directory]::CreateDirectory($fakeTools) | Out-Null
+    [IO.Directory]::CreateDirectory($noTools) | Out-Null
+    foreach ($tool in @('lsd', 'wget2', 'btop', 'gsudo', 'bat', 'du')) {
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            [IO.File]::WriteAllText((Join-Path $fakeTools "$tool.cmd"), "@echo $tool %*")
+        } else {
+            [IO.File]::WriteAllText((Join-Path $fakeTools $tool), "#!/bin/sh`necho $tool `"`$@`"`n")
+            chmod +x (Join-Path $fakeTools $tool)
+        }
+    }
+    $unixScript = Join-Path $root 'unix-aliases.ps1'
+    [IO.File]::WriteAllLines($unixScript, @(
+        '$ErrorActionPreference = ''Stop''',
+        'if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {',
+        '    # Like Windows PowerShell 5.1, whose ls and cat are AllScope aliases.',
+        '    Set-Alias ls Get-ChildItem -Option AllScope -Scope Global',
+        '    Set-Alias cat Get-Content -Option AllScope -Scope Global',
+        '}',
+        'function Get-UnixNames {',
+        '    (@(''ls'', ''cat'', ''wget'', ''htop'', ''sudo'', ''du'') | ForEach-Object {',
+        '        $command = Get-Command $_ -ErrorAction SilentlyContinue | Select-Object -First 1',
+        '        "$_=$($command.CommandType):$(if ($command.CommandType -eq ''Alias'') { $command.Definition })"',
+        '    }) -join '' ''',
+        '}',
+        '$env:PATH = $env:DALFTUI_TEST_NO_TOOLS',
+        ('. ' + (ConvertTo-DalftuiSingleQuotedLiteral $connectionProfile)),
+        'Get-UnixNames',
+        '$env:PATH = $env:DALFTUI_TEST_FAKE_TOOLS',
+        ('. ' + (ConvertTo-DalftuiSingleQuotedLiteral $connectionProfile)),
+        'Get-UnixNames',
+        'cat ''some file.txt'''), [Text.UTF8Encoding]::new($true))
+    $env:DALFTUI_TEST_NO_TOOLS = $noTools
+    $env:DALFTUI_TEST_FAKE_TOOLS = $fakeTools
+    try {
+        $unixOutput = @(& $terminalShell -NoLogo -NoProfile -Command (
+            '. ' + (ConvertTo-DalftuiSingleQuotedLiteral $unixScript)))
+    } finally {
+        Remove-Item Env:DALFTUI_TEST_NO_TOOLS, Env:DALFTUI_TEST_FAKE_TOOLS
+    }
+    Assert-True ($LASTEXITCODE -eq 0 -and $unixOutput.Count -eq 3) "The profile must load with and without Unix tools: $unixOutput"
+    Assert-True ($unixOutput[0] -match '^ls=Alias:Get-ChildItem cat=Alias:Get-Content ' -and
+                 $unixOutput[0] -notmatch 'wget2|btop|gsudo' -and $unixOutput[0] -match ' du=Function:$') `
+        "Missing Unix tools must keep the built-in commands: $($unixOutput[0])"
+    Assert-True ($unixOutput[1] -eq 'ls=Alias:lsd cat=Function: wget=Alias:wget2 htop=Alias:btop sudo=Alias:gsudo du=Application:') `
+        "Installed Unix tools must replace the built-in commands: $($unixOutput[1])"
+    # A Windows .cmd fake echoes the quotes PowerShell adds around "some file.txt".
+    Assert-True (($unixOutput[2] -replace '"') -eq 'bat --style=plain some file.txt') "cat must run bat: $($unixOutput[2])"
+
+    Push-Location -LiteralPath $root
+    try {
+        touch 'touch a.txt' 'touch b.txt'
+        Assert-True ((Test-Path 'touch a.txt') -and (Test-Path 'touch b.txt')) 'touch must create every file'
+        (Get-Item 'touch a.txt').LastWriteTime = [datetime]'2020-01-01'
+        touch 'touch a.txt'
+        Assert-True ((Get-Item 'touch a.txt').LastWriteTime.Year -gt 2020) 'touch must update an existing file'
+        # A real wc on PATH (Linux, Git for Windows) replaces the profile's function.
+        if ((Get-Command wc | Select-Object -First 1).CommandType -eq 'Function') {
+            Assert-True ((@('one two', 'three') | wc -l -w) -eq "2`t3") 'wc -l -w must count piped text'
+        }
+    } finally { Pop-Location }
+
     $settingsPath = Join-Path $root 'terminal-settings.json'
     [IO.File]::WriteAllText($settingsPath, '{"actions":[],"keybindings":[]}')
     $python = Find-DalftuiApplication 'py'

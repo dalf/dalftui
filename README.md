@@ -644,6 +644,11 @@ by word and history suggestions where PSReadLine supports them. As in tmux,
 shortens long paths to their last two folders (`…\Local\Temp`) and starts with 🛡️
 in an administrator session.
 
+The profile adds a Unix-like `touch`, and `du`, `df` and `wc` unless such programs
+are on PATH. When installed,
+`lsd`, `wget2`, `btop`, `gsudo` and `bat` replace `ls`, `wget`, `htop`, `sudo` and
+`cat`; setup does not install them.
+
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.
 The shortcut works while the current tab is in SSH, tmux, or another program.
