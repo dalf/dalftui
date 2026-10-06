@@ -376,6 +376,7 @@ function Invoke-DalftuiWindowsSetup {
                 if ($Name -eq 'oh-my-posh' -and -not $script:missingOhMyPosh) {
                     return [pscustomobject]@{Name = 'oh-my-posh'; Source = 'fake-oh-my-posh'}
                 }
+                if ($Name -eq 'pwsh') { return [pscustomobject]@{Name = 'pwsh'; Source = 'fake-pwsh'} }
                 return $null
             }
             function Update-DalftuiProcessPath {}
@@ -403,6 +404,15 @@ function Invoke-DalftuiWindowsSetup {
             $script:missingOhMyPosh = $false
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
+            function Set-DalftuiTerminalShortcut([string]$Python, [string[]]$PythonArguments,
+                    [string]$Checkout, [string[]]$SettingsPaths, [string]$PowerShell7) {
+                $script:terminalPwsh = $PowerShell7
+            }
+            Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
+                -WarningAction SilentlyContinue
+            Assert-True ($script:terminalPwsh -eq 'fake-pwsh') `
+                'Setup must pass the discovered PowerShell 7 to the Terminal profiles'
+            Remove-Item Function:\Set-DalftuiTerminalShortcut
 
             # Run default installation twice against disposable profiles. Keep
             # real discovery separate so these tests never edit personal files.
@@ -652,6 +662,22 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True (@(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak').Count -eq
                  $terminalBackups.Count) `
         'An idempotent Terminal rerun must not create another backup'
+    Assert-True (-not $settings.profiles.PSObject.Properties['list']) `
+        'Without PowerShell 7, setup must not add Terminal profiles'
+    $fakePwsh = Join-Path $root 'Power Shell\pwsh.exe'
+    foreach ($run in 1, 2) {
+        Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+            -Checkout $checkout -SettingsPaths @($settingsPath) -PowerShell7 $fakePwsh
+        if ($run -eq 1) { $installedSettings = [IO.File]::ReadAllBytes($settingsPath) }
+    }
+    Assert-True ([Convert]::ToBase64String($installedSettings) -eq
+                 [Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath))) `
+        'A PowerShell 7 profile rerun must not rewrite Terminal settings'
+    $profiles = @((ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))).profiles.list)
+    Assert-True ($profiles.Count -eq 2 -and $profiles[0].source -eq 'Windows.Terminal.PowershellCore' -and
+                 $profiles[1].name -eq 'Windows PowerShell 7 (Admin)' -and $profiles[1].elevate -and
+                 $profiles[1].commandline -eq ('"' + $fakePwsh + '"')) `
+        "Setup must customize PowerShell 7 and add an elevated copy: $($profiles | ConvertTo-Json -Compress)"
     Write-Host "Passed $checks Windows setup assertions."
     # The exit-status test above deliberately ran a failing native command.
     $global:LASTEXITCODE = 0

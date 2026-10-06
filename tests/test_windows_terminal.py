@@ -140,6 +140,74 @@ class TerminalSetupTests(unittest.TestCase):
             terminal.configure(self.path, 'launcher')
         write.assert_not_called()
 
+    def pwsh_profiles(self, text):
+        return [entry for entry in self.settings(text)['profiles']['list']
+                if entry.get('guid') in (terminal.PWSH_GUID, terminal.ADMIN_GUID)]
+
+    def test_powershell_7_profiles_are_added_once_with_cleartype(self):
+        pwsh = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe"'
+        for personal in ('{}', '{"profiles":{"defaults":{}}}', '{"profiles":{"list":[]}}',
+                         '{"profiles":{"list":[ // only a comment\n]}}',
+                         '{"profiles":{"list":[{"guid":"{a}","name":"Mine"}, // keep\n],},}',
+                         '{\r\n  "profiles": {\r\n    "defaults": {}\r\n  }\r\n}\r\n'):
+            with self.subTest(personal=personal):
+                installed = terminal.updated_settings(personal, 'launcher', pwsh)
+                self.assertEqual(terminal.updated_settings(installed, 'launcher', pwsh), installed)
+                if '\r\n' in personal:
+                    self.assertNotIn('\n', installed.replace('\r\n', ''))
+                stub, admin = self.pwsh_profiles(installed)
+                self.assertEqual(stub, {'guid': terminal.PWSH_GUID, 'antialiasingMode': 'cleartype',
+                                        'source': 'Windows.Terminal.PowershellCore'})
+                self.assertEqual((admin['name'], admin['commandline'], admin['elevate'],
+                                  admin['startingDirectory'], admin['antialiasingMode']),
+                                 (terminal.ADMIN_NAME, pwsh, True, '%USERPROFILE%', 'cleartype'))
+        self.assertNotIn('list', self.settings(terminal.updated_settings('{}', 'launcher'))['profiles'])
+
+    def test_powershell_7_profiles_keep_user_edits_and_gist_profiles(self):
+        generated = {'guid': terminal.PWSH_GUID.upper(), 'name': 'PowerShell', 'hidden': False,
+                     'source': 'Windows.Terminal.PowershellCore'}
+        gist = {'guid': '{0e0b8d1a-0000-4000-8000-000000000000}', 'name': 'windows powershell 7 (admin)',
+                'commandline': 'pwsh.exe', 'elevate': True}
+        personal = json.dumps({'profiles': {'list': [generated, gist]}}, indent=4)
+        installed = terminal.updated_settings(personal, 'launcher', 'pwsh.exe')
+        entries = self.settings(installed)['profiles']['list']
+        self.assertEqual(entries, [dict(generated, antialiasingMode='cleartype'), gist])
+        self.assertEqual(terminal.updated_settings(installed, 'launcher', 'pwsh.exe'), installed)
+        edited = {'guid': terminal.PWSH_GUID, 'antialiasingMode': 'grayscale'}
+        mine = {'guid': terminal.ADMIN_GUID, 'name': 'Mine', 'commandline': 'old.exe'}
+        personal = terminal.updated_settings(json.dumps({'profiles': {'list': [edited, mine]}}), 'launcher')
+        self.assertEqual(terminal.updated_settings(personal, 'launcher', 'pwsh.exe'), personal)
+        personal = json.dumps({'profiles': {'defaults': {'antialiasingMode': 'aliased'},
+                                            'list': [{'name': ''}, generated]}})
+        entries = self.settings(terminal.updated_settings(personal, 'launcher', 'pwsh.exe'))['profiles']['list']
+        self.assertEqual(entries[:2], [{'name': ''}, generated])
+        self.assertEqual([entry.get('antialiasingMode') for entry in entries], [None, None, None])
+
+    def test_powershell_7_profiles_skip_legacy_and_reject_invalid_lists(self):
+        self.assertEqual(self.settings(terminal.updated_settings(
+            '{"profiles":[]}', 'launcher', 'pwsh.exe'))['profiles'], [])
+        personal = '{"profiles":{"list":{}}}'
+        self.path.write_text(personal, encoding='utf-8')
+        with self.assertRaises(ValueError):
+            terminal.configure(self.path, 'launcher', 'pwsh.exe')
+        self.assertEqual(self.path.read_text(encoding='utf-8'), personal)
+        self.assertFalse(list(self.root.glob('*.bak')))
+
+    def test_cli_adds_powershell_7_profiles_only_when_given(self):
+        pwsh = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+        for arguments, expected in (([], 0), (['--pwsh', pwsh], 2)):
+            with self.subTest(arguments=arguments):
+                self.path.write_text('{}', encoding='utf-8')
+                result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'),
+                                         '--shell', 'pwsh.exe', '--settings', str(self.path), *arguments],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                profiles = self.settings(self.path.read_text(encoding='utf-8'))['profiles']
+                self.assertEqual(len(profiles.get('list', [])), expected)
+                self.assertEqual('PowerShell 7 not found' in result.stdout, not expected)
+                if expected:
+                    self.assertEqual(profiles['list'][1]['commandline'], subprocess.list2cmdline([pwsh]))
+
     def test_discovers_all_standard_distributions_without_creating_settings(self):
         expected = [self.root / 'Packages' / f'Microsoft.WindowsTerminal{channel}_8wekyb3d8bbwe' /
                     'LocalState' / 'settings.json' for channel in ('', 'Preview', 'Canary')]

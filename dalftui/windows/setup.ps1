@@ -253,7 +253,7 @@ function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
 
 function Set-DalftuiTerminalShortcut {
     param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
-          [string[]]$SettingsPaths)
+          [string[]]$SettingsPaths, [string]$PowerShell7)
     # Use the same PowerShell version as setup, without loading personal profiles.
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
@@ -261,6 +261,7 @@ function Set-DalftuiTerminalShortcut {
     $shellPath = Join-Path $PSHOME $shellName
     $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'), '--shell', $shellPath)
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
+    if ($PowerShell7) { $arguments += @('--pwsh', $PowerShell7) }
     & $Python @arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal shortcut setup failed; see the message above. dssh is already configured in PowerShell.' }
 }
@@ -329,7 +330,8 @@ function Invoke-DalftuiWindowsSetup {
     . (Join-Path $Checkout 'bin/profile.ps1')
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
-            -Checkout $Checkout -SettingsPaths $SettingsPaths
+            -Checkout $Checkout -SettingsPaths $SettingsPaths `
+            -PowerShell7 (Find-DalftuiApplication 'pwsh').Source
     }
     Write-Host 'dssh HOST is ready.'
     Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'

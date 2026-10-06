@@ -17,6 +17,10 @@ EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 EDITOR_SHORTCUT = 'ctrl+shift+f3'
 EDITOR_INPUT = '\x02\x1bOR'
 PROMPT_FONT = 'Hack Nerd Font'
+# Windows Terminal's own PowerShell 7 profile, and a dalftui-owned elevated copy.
+PWSH_GUID = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+ADMIN_GUID = '{267e52e6-0ec9-495c-a8b0-e4437770bc55}'
+ADMIN_NAME = 'Windows PowerShell 7 (Admin)'
 DECODER = json.JSONDecoder()
 JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
@@ -79,7 +83,60 @@ def has_shortcut(entry, shortcut=SHORTCUT):
         for key in keys)
 
 
-def updated_settings(text, commandline):
+def updated_settings(text, commandline, pwsh=None):
+    text = shortcut_settings(text, commandline)
+    return profile_settings(text, pwsh) if pwsh else text
+
+
+def profile_settings(text, pwsh):
+    """Use ClearType in Terminal's PowerShell 7 profile and add an elevated copy."""
+    clean = clean_jsonc(text)
+    profiles = json.loads(clean, object_pairs_hook=unique_object).get('profiles')
+    if not isinstance(profiles, dict):
+        return text  # The legacy profiles array is left unchanged.
+    root_items, _ = members(clean, skip_space(clean, 0), object_mode=True)
+    begin = next(begin for name, _, begin, _ in root_items if name == 'profiles')
+    items, end = members(clean, begin, object_mode=True)
+    cleartype = '"antialiasingMode": "cleartype"'
+    stub = {'guid': PWSH_GUID, 'source': 'Windows.Terminal.PowershellCore'}
+    admin = {'guid': ADMIN_GUID, 'name': ADMIN_NAME, 'commandline': pwsh, 'elevate': True,
+             'startingDirectory': '%USERPROFILE%', 'icon': 'ms-appx:///ProfileIcons/pwsh.png'}
+    defaults = profiles.get('defaults')
+    keep_mode = isinstance(defaults, dict) and 'antialiasingMode' in defaults
+    if not keep_mode:  # A mode chosen in profiles.defaults applies to every profile.
+        stub['antialiasingMode'] = admin['antialiasingMode'] = 'cleartype'
+    newline = '\r\n' if '\r\n' in text else '\n'
+    edits = []
+    found = [item for item in items if item[0] == 'list']
+    if not found:
+        append_entry(text, items, end, '"list": ' + json.dumps([stub, admin], ensure_ascii=False), newline, edits)
+    else:
+        _, entries, begin, _ = found[0]
+        if not isinstance(entries, list):
+            raise ValueError('Terminal profiles.list must be an array.')
+        items, end = members(clean, begin)
+        additions = []
+        for profile in (stub, admin):
+            # Match by name too: profiles from the old setup gist have random GUIDs.
+            keys = {('guid', profile['guid'].lower())}
+            if 'name' in profile:
+                keys.add(('name', profile['name'].lower()))
+            owned = [item for item in items if isinstance(item[1], dict) and any(
+                (key, str(item[1].get(key)).lower()) in keys for key in ('guid', 'name'))]
+            if not owned:
+                additions.append(json.dumps(profile, ensure_ascii=False))
+            elif profile is stub and not keep_mode and 'antialiasingMode' not in owned[0][1]:
+                entry_items, entry_end = members(clean, owned[0][2], object_mode=True)
+                append_entry(text, entry_items, entry_end, cleartype, newline, edits)
+        if additions:
+            append_entry(text, items, end, (',' + newline + '    ').join(additions), newline, edits)
+    for begin, end, replacement in sorted(edits, reverse=True):
+        text = text[:begin] + replacement + text[end:]
+    json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    return text
+
+
+def shortcut_settings(text, commandline):
     clean = clean_jsonc(text)
     settings = json.loads(clean, object_pairs_hook=unique_object)
     if not isinstance(settings, dict):
@@ -209,10 +266,10 @@ def append_entry(text, items, end, encoded, newline, edits):
     edits.append((end, end, prefix + newline + '    ' + encoded + newline))
 
 
-def configure(path, commandline):
+def configure(path, commandline, pwsh=None):
     original = path.read_bytes()
     text = original.decode('utf-8-sig')
-    updated = updated_settings(text, commandline)
+    updated = updated_settings(text, commandline, pwsh)
     if updated == text:
         print(f'Terminal shortcut already configured: {path}')
         return
@@ -227,6 +284,8 @@ def configure(path, commandline):
     print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
     print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
     print(f'Default profile font: {PROMPT_FONT}')
+    if pwsh:
+        print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
 
 
 def settings_paths(local_app_data):
@@ -247,17 +306,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--shell', required=True)
     parser.add_argument('--settings', action='append', type=Path)
+    parser.add_argument('--pwsh', help='PowerShell 7 path for the Terminal profiles')
     args = parser.parse_args()
     launcher = CHECKOUT_ROOT / 'bin/ssh-tab.ps1'
     commandline = subprocess.list2cmdline([
         args.shell, '-NoLogo', '-NoProfile', '-File', str(launcher)])
+    pwsh = subprocess.list2cmdline([args.pwsh]) if args.pwsh else None
+    if not pwsh:
+        print('PowerShell 7 not found; Windows Terminal PowerShell 7 profiles were not added.')
     paths = args.settings or settings_paths(os.environ.get('LOCALAPPDATA', ''))
     if not paths:
         print('Windows Terminal settings not found. Open Terminal once, then rerun setup. For a portable installation use -TerminalSettingsPath PATH. dssh remains available in PowerShell.')
         return 0
     try:
         for path in dict.fromkeys(paths):
-            configure(path, commandline)
+            configure(path, commandline, pwsh)
     except (OSError, UnicodeError, ValueError) as error:
         print(f'Terminal shortcut setup failed: {error}', file=sys.stderr)
         return 1

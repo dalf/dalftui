@@ -677,6 +677,9 @@ Setup finds existing Stable, Preview, Canary, and unpackaged Terminal settings.
 It backs up each changed `settings.json`, preserves comments and other settings,
 and adds no duplicates on repeated runs. An existing Ctrl+Shift+F2 or F3 binding is
 preserved; setup reports the conflict so you can remove that binding and rerun.
+When PowerShell 7 is installed, setup turns on ClearType in Terminal's own PowerShell
+profile and adds **Windows PowerShell 7 (Admin)**, which opens it as administrator
+(Terminal 1.13+). Profiles you already have, or later edit, are kept.
 If no settings are found, open Windows Terminal once and rerun setup. For a
 portable installation, pass its settings path explicitly:
 
