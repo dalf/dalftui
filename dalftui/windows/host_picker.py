@@ -59,7 +59,10 @@ class ConsoleScreen:
 
     @staticmethod
     def size():
-        return os.get_terminal_size(sys.stdout.fileno())
+        try:
+            return os.get_terminal_size(sys.stdout.fileno())
+        except ValueError:  # Python 3.11 accepts only descriptors 0-2 on Windows.
+            return os.get_terminal_size()
 
     @staticmethod
     def draw(cells):
