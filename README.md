@@ -639,6 +639,11 @@ missing, and appends it to the font face in Windows Terminal's `profiles.default
 (for example `Cascadia Mono, Symbols Nerd Font`; Terminal 1.21+ reads the list).
 A profile with its own font face keeps it.
 
+The profile enables bash-like Emacs line editing, with **Ctrl+Left/Right** moving
+by word and history suggestions where PSReadLine supports them. The window title
+shortens long paths to their last two folders (`…\Local\Temp`) and starts with 🛡️
+in an administrator session.
+
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.
 The shortcut works while the current tab is in SSH, tmux, or another program.

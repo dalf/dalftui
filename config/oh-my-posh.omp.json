@@ -96,5 +96,5 @@
   ],
   "final_space": true,
   "version": 4,
-  "console_title_template": "{{ if .Segments.Session.SSHSession }}{{ splitList \".\" .HostName | first }}:{{ end }}{{ if .Segments.Contains \"Git\" }}{{ .Segments.Git.RepoName }}@{{ .Segments.Git.Ref }}{{ else }}{{ .PWD }}{{ end }}"
+  "console_title_template": "{{ if and .Root (eq .OS \"windows\") }}🛡️ {{ end }}{{ if .Segments.Session.SSHSession }}{{ splitList \".\" .HostName | first }}:{{ end }}{{ if .Segments.Contains \"Git\" }}{{ .Segments.Git.RepoName }}@{{ .Segments.Git.Ref }}{{ else if eq .OS \"windows\" }}{{ $p := regexSplit `[\\\\/]` .PWD -1 }}{{ if le (len $p) 3 }}{{ join `\\` $p }}{{ else }}…\\{{ join `\\` (slice $p (sub (len $p) 2)) }}{{ end }}{{ else }}{{ .PWD }}{{ end }}"
 }
