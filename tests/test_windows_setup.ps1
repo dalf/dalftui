@@ -539,10 +539,10 @@ function Invoke-DalftuiWindowsSetup {
     } finally { Pop-Location }
     # Windows PowerShell ships an older PSReadLine without the -Chord option on Get-PSReadLineKeyHandler.
     $handlers = @(Get-PSReadLineKeyHandler)
-    $handler = $handlers | Where-Object { $_.Key -eq 'F3' }
+    $handler = $handlers | Where-Object { $_.Key -eq 'Ctrl+b,F3' }
     Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
     Assert-True ((Get-PSReadLineOption).EditMode -eq 'Emacs') 'The profile must enable Emacs editing'
-    foreach ($binding in @(@('Ctrl+b', 'BackwardChar'), @('Ctrl+LeftArrow', 'BackwardWord'), @('Ctrl+RightArrow', 'ForwardWord'))) {
+    foreach ($binding in @(@('Ctrl+b,Ctrl+b', 'BackwardChar'), @('Ctrl+LeftArrow', 'BackwardWord'), @('Ctrl+RightArrow', 'ForwardWord'))) {
         $handler = $handlers | Where-Object { $_.Key -eq $binding[0] }
         Assert-True ($handler.Function -eq $binding[1]) "$($binding[0]) must run $($binding[1])"
     }

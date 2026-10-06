@@ -46,9 +46,8 @@ if (Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinu
     oh-my-posh init pwsh --config (Join-Path $Checkout 'config/oh-my-posh.omp.json') | Invoke-Expression
 }
 
-# Terminal sends the same Ctrl+B, F3 sequence used by remote tmux. Locally,
-# Ctrl+B keeps its Emacs meaning (back one character) and F3 opens the folder
-# without inserting or executing command-line text.
+# Terminal sends the same Ctrl+B, F3 sequence used by remote tmux. PSReadLine
+# handles it at a local prompt without inserting or executing command-line text.
 $dalftuiEditorPath = Join-Path $Checkout 'bin/vscode.py'
 $dalftuiOpenFolder = {
     $location = Get-Location
@@ -70,7 +69,9 @@ $dalftuiOpenFolder = {
 Set-Item -Path Function:\global:Open-DalftuiCurrentFolder -Value $dalftuiOpenFolder
 
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
-    Set-PSReadLineKeyHandler -Chord 'F3', 'Ctrl+Shift+F3' `
+    # Like tmux, Ctrl+B is a prefix; Ctrl+B Ctrl+B moves back one character.
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,Ctrl+b' -Function BackwardChar
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F3', 'Ctrl+Shift+F3' `
         -BriefDescription 'DalftuiOpenFolderInCode' `
         -Description 'Open the current directory in VS Code; keep the input line' `
         -ScriptBlock {

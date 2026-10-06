@@ -640,7 +640,8 @@ missing, and appends it to the font face in Windows Terminal's `profiles.default
 A profile with its own font face keeps it.
 
 The profile enables bash-like Emacs line editing, with **Ctrl+Left/Right** moving
-by word and history suggestions where PSReadLine supports them. The window title
+by word and history suggestions where PSReadLine supports them. As in tmux,
+**Ctrl+B** is a prefix: **Ctrl+B, then Ctrl+B** moves back one character. The window title
 shortens long paths to their last two folders (`…\Local\Temp`) and starts with 🛡️
 in an administrator session.
 
