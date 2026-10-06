@@ -45,6 +45,8 @@ jobs:
         run: mise run pylint
       - name: Verify setup and PowerShell profile integration
         run: mise run test:powershell
+      - name: Install Oh My Posh
+        run: choco install oh-my-posh --yes --no-progress
       - name: Verify installation in an isolated profile
         run: mise run install:windows -- -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal
       - name: Verify Windows launcher, Terminal settings, and shared bridge suites
