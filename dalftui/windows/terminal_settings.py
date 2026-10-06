@@ -16,6 +16,8 @@ SHORTCUT = 'ctrl+shift+f2'
 EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 EDITOR_SHORTCUT = 'ctrl+shift+f3'
 EDITOR_INPUT = '\x02\x1bOR'
+ICON_FONT = 'Symbols Nerd Font'
+DEFAULT_FONT = 'Cascadia Mono'
 DECODER = json.JSONDecoder()
 JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
@@ -147,6 +149,9 @@ def updated_settings(text, commandline):
                 additions.append(encoded)
         if additions:
             append_entry(text, items, end, (',' + newline + '    ').join(additions), newline, edits)
+    font = font_edit(text, clean, settings, root_items, newline, edits)
+    if font:
+        missing.append(font)
     if missing:
         append_entry(text, root_items, root_end, (',' + newline + '    ').join(missing), newline, edits)
     for begin, end, replacement in sorted(edits, reverse=True):
@@ -154,6 +159,45 @@ def updated_settings(text, commandline):
     # Validate the result before creating a backup or changing anything.
     json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
     return text
+
+
+def icon_font_face(settings):
+    """Return the default font face with the icon font appended, or None when present."""
+    defaults = settings.get('profiles', {})
+    defaults = defaults.get('defaults', {}) if isinstance(defaults, dict) else None
+    if not isinstance(defaults, dict):
+        return None  # The legacy profiles array has no defaults to extend.
+    font = defaults.get('font', {})
+    face = font.get('face') if isinstance(font, dict) else None
+    face = face or defaults.get('fontFace') or DEFAULT_FONT
+    if not isinstance(face, str) or ICON_FONT in [part.strip() for part in face.split(',')]:
+        return None
+    return face + ', ' + ICON_FONT
+
+
+def font_edit(text, clean, settings, root_items, newline, edits):
+    """Add the prompt's icon font after the default face; return a missing root property."""
+    face = icon_font_face(settings)
+    items, end = root_items, None
+    path = ('profiles', 'defaults', 'font', 'face')
+    for depth, key in enumerate(path if face else ()):
+        found = [item for item in items if item[0] == key]
+        if not found:
+            value = face
+            for name in reversed(path[depth + 1:]):
+                value = {name: value}
+            encoded = json.dumps(key) + ': ' + json.dumps(value, ensure_ascii=False)
+            if end is None:
+                return encoded
+            append_entry(text, items, end, encoded, newline, edits)
+            break
+        _, value, begin, finish = found[0]
+        if key == 'face':
+            edits.append((begin, finish, json.dumps(face, ensure_ascii=False)))
+        if key == 'face' or not isinstance(value, dict):
+            break
+        items, end = members(clean, begin, object_mode=True)
+    return None
 
 
 def append_entry(text, items, end, encoded, newline, edits):
@@ -186,6 +230,7 @@ def configure(path, commandline):
     print(f'Terminal backup: {backup}')
     print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
     print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
+    print(f'Prompt icons fall back to {ICON_FONT} in the default profile font.')
 
 
 def settings_paths(local_app_data):

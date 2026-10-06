@@ -29,6 +29,11 @@ $dalftuiCommand = {
 }.GetNewClosure()
 Set-Item -Path Function:\global:dssh -Value $dalftuiCommand
 
+# Draw the prompt with the Oh My Posh theme shared with Linux.
+if (Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue) {
+    oh-my-posh init pwsh --config (Join-Path $Checkout 'config/oh-my-posh.omp.json') | Invoke-Expression
+}
+
 # Terminal sends the same Ctrl+B, F3 sequence used by remote tmux. PSReadLine
 # handles it at a local prompt without inserting or executing command-line text.
 $dalftuiEditorPath = Join-Path $Checkout 'bin/vscode.py'

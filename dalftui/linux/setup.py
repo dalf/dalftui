@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -16,6 +17,8 @@ from .alacritty_config import config_directory, load
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
 PROFILES = ('desktop', 'tmux-only')
+PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
+SYMBOLS_FONT = 'Symbols Nerd Font'
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -42,6 +45,10 @@ class Paths:
     @property
     def tmux(self):
         return self.home_dir / '.tmux.conf'
+
+    @property
+    def bashrc(self):
+        return self.home_dir / '.bashrc'
 
 
 @dataclass(frozen=True)
@@ -127,7 +134,7 @@ def dependencies(profile='desktop'):
         raise RuntimeError('This installer currently targets Linux.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
-    programs = ('tmux', 'less', 'git')
+    programs = ('tmux', 'less', 'git', 'oh-my-posh')
     if profile == 'desktop':
         programs += ('alacritty', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
@@ -142,6 +149,29 @@ def dependencies(profile='desktop'):
         if result.returncode or not match or tuple(map(int, match.groups())) < minimum:
             detected = f' Detected {match.group(0)}.' if match else ''
             raise RuntimeError(f'{name} {minimum[0]}.{minimum[1]} or newer is required.{detected}')
+
+
+def bashrc_with_prompt(paths, previous):
+    """Append the managed prompt line once, keeping the rest of ~/.bashrc."""
+    content = previous.value if previous and previous.kind == 'file' else b''
+    if PROMPT_MARKER.encode() in content:
+        return content
+    if content and not content.endswith(b'\n'):
+        content += b'\n'
+    loader = shlex.quote(str(paths.root / 'config/prompt.bash'))
+    return content + f'{PROMPT_MARKER}\n[ -f {loader} ] && . {loader}\n'.encode()
+
+
+def install_font(dry_run):
+    """Install the icons-only Nerd Font used by the prompt unless it is present."""
+    if shutil.which('fc-list'):
+        result = subprocess.run(['fc-list', ':', 'family'], capture_output=True, text=True, timeout=30)
+        if any(SYMBOLS_FONT in line.split(',') for line in result.stdout.splitlines()):
+            return
+    if dry_run:
+        print(f'Install font: {SYMBOLS_FONT}')
+        return
+    subprocess.run(['oh-my-posh', 'font', 'install', 'NerdFontsSymbolsOnly'], check=True, timeout=300)
 
 
 def install(paths=None, repo=None, *, dry_run=False, profile=None):
@@ -166,6 +196,8 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
     ]
     if profile == 'desktop':
         desired.append((paths.alacritty, Snapshot('file', alacritty)))
+    # A symlinked ~/.bashrc is replaced like other managed paths, keeping its content.
+    desired.append((paths.bashrc, Snapshot('file', bashrc_with_prompt(paths, snapshot(paths.bashrc.resolve())))))
     local_alacritty = paths.config_dir / 'alacritty/local.toml'
     local_tmux = paths.config_dir / 'tmux/local.conf'
     local_files = [(local_tmux, '# Personal tmux settings. Loaded after the shared dalftui configuration.\n')]
@@ -194,6 +226,8 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             if path != paths.tmux or previous.value not in known_tmux:
                 raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
         changes.append((path, previous, wanted))
+    if profile == 'desktop':
+        install_font(dry_run)
     if not changes:
         print('Already installed; personal overrides preserved.')
         return None

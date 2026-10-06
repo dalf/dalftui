@@ -40,6 +40,15 @@ class DependencyTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, r'tmux 3\.2.*Detected 3\.1'):
                     setup.dependencies('tmux-only')
 
+    def test_both_profiles_require_oh_my_posh(self):
+        def which(name):
+            return None if name == 'oh-my-posh' else '/test/bin'
+        for profile in setup.PROFILES:
+            with self.subTest(profile=profile):
+                with patch.object(setup.shutil, 'which', side_effect=which):
+                    with self.assertRaisesRegex(RuntimeError, 'Install the missing dependencies first: oh-my-posh'):
+                        setup.dependencies(profile)
+
 
 class DisposableSetup(unittest.TestCase):
     def setUp(self):
@@ -52,6 +61,10 @@ class DisposableSetup(unittest.TestCase):
         self.paths = setup.Paths(self.directory / 'user', self.directory / "custom config 'quoted' $xdg",
                                  self.directory / 'state')
         self.paths.home_dir.mkdir()
+        # Never query or download real fonts; FontTests cover this step.
+        font = patch.object(setup, 'install_font')
+        self.install_font = font.start()
+        self.addCleanup(font.stop)
 
     def install(self, **kwargs):
         with redirect_stdout(io.StringIO()):
@@ -203,6 +216,110 @@ class InstallationTests(DisposableSetup):
         self.assertFalse(self.paths.root.exists())
 
 
+class PromptTests(DisposableSetup):
+    def test_block_is_appended_once_and_preserves_bashrc(self):
+        self.paths.bashrc.write_text('alias ll="ls -l"')
+        self.paths.bashrc.chmod(0o600)
+        backup = self.install()
+        content = self.paths.bashrc.read_text()
+        self.assertTrue(content.startswith('alias ll="ls -l"\n' + setup.PROMPT_MARKER + '\n'))
+        self.assertEqual(content.count(setup.PROMPT_MARKER), 1)
+        self.assertEqual(stat.S_IMODE(self.paths.bashrc.stat().st_mode), 0o600)
+        records = json.loads((backup / 'manifest.json').read_text())
+        item = next(item for item in records if item['original'] == str(self.paths.bashrc))
+        self.assertEqual((backup / item['backup']).read_text(), 'alias ll="ls -l"')
+        before = self.paths.bashrc.stat().st_mtime_ns
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertIsNone(setup.install(self.paths, self.repo))
+        self.assertIn('Already installed', output.getvalue())
+        self.assertEqual(self.paths.bashrc.stat().st_mtime_ns, before)
+
+    def test_missing_bashrc_is_created(self):
+        self.install(profile='tmux-only')
+        self.assertIn(setup.PROMPT_MARKER, self.paths.bashrc.read_text())
+
+    def test_symlinked_bashrc_is_replaced_and_its_target_left_alone(self):
+        store = self.directory / 'store'
+        store.mkdir()
+        (store / 'bashrc').write_text('alias ll="ls -l"\n')
+        store.chmod(0o555)
+        self.addCleanup(store.chmod, 0o755)
+        self.paths.bashrc.symlink_to(store / 'bashrc')
+        self.install(profile='tmux-only')
+        self.assertFalse(self.paths.bashrc.is_symlink())
+        self.assertTrue(self.paths.bashrc.read_text().startswith('alias ll="ls -l"\n' + setup.PROMPT_MARKER))
+        self.assertEqual((store / 'bashrc').read_text(), 'alias ll="ls -l"\n')
+
+    def test_dry_run_reports_without_changing_bashrc(self):
+        self.paths.bashrc.write_text('export EDITOR=vi\n')
+        output = io.StringIO()
+        with redirect_stdout(output):
+            setup.install(self.paths, self.repo, dry_run=True)
+        self.assertIn(f'Back up and replace: {self.paths.bashrc}', output.getvalue())
+        self.assertEqual(self.paths.bashrc.read_text(), 'export EDITOR=vi\n')
+        self.install_font.assert_called_once_with(True)
+
+    def test_tmux_only_gets_the_prompt_but_no_font(self):
+        self.install(profile='tmux-only')
+        self.assertIn(setup.PROMPT_MARKER, self.paths.bashrc.read_text())
+        self.install_font.assert_not_called()
+        self.install(profile='desktop')
+        self.install_font.assert_called_once_with(False)
+        self.assertEqual(self.paths.bashrc.read_text().count(setup.PROMPT_MARKER), 1)
+
+    def test_loader_runs_init_before_job_counts_in_interactive_shells(self):
+        self.install(profile='tmux-only')
+        command_dir = self.directory / 'commands'
+        command_dir.mkdir()
+        # The real init defines an empty set_poshcontext; the loader must replace it.
+        fake = command_dir / 'oh-my-posh'
+        fake.write_text('#!/bin/sh\n'
+                        'printf "%s\\n" "$@" > "$TEST_ARGUMENTS"\n'
+                        'echo "set_poshcontext() { :; }"\n')
+        fake.chmod(0o755)
+        arguments = self.directory / 'arguments'
+        env = dict(os.environ, HOME=str(self.paths.home_dir), TEST_ARGUMENTS=str(arguments),
+                   PATH=str(command_dir) + os.pathsep + os.environ['PATH'])
+        script = 'sleep 30 & set_poshcontext; kill %1; echo "$OMP_JOBS_RUNNING"'
+        result = subprocess.run(['bash', '--rcfile', str(self.paths.bashrc), '-i', '-c', script],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), '1')
+        init, shell, flag, theme = arguments.read_text().splitlines()
+        self.assertEqual([init, shell, flag], ['init', 'bash', '--config'])
+        self.assertEqual(Path(theme).resolve(), self.repo / 'config/oh-my-posh.omp.json')
+        arguments.unlink()
+        result = subprocess.run(['bash', '-c', f'. {shlex.quote(str(self.paths.bashrc))}'],
+                                env=env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(arguments.exists())
+
+
+class FontTests(unittest.TestCase):
+    def fonts(self, families):
+        return subprocess.CompletedProcess(['fc-list'], 0, families, '')
+
+    def test_font_is_skipped_when_present(self):
+        with patch.object(setup.shutil, 'which', return_value='/usr/bin/fc-list'):
+            with patch.object(setup.subprocess, 'run',
+                              return_value=self.fonts('DejaVu Sans\nSymbols Nerd Font,Symbols Nerd Font Mono\n')) as run:
+                setup.install_font(False)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0][0], 'fc-list')
+
+    def test_missing_font_is_installed_or_only_reported(self):
+        with patch.object(setup.shutil, 'which', return_value='/usr/bin/fc-list'):
+            with patch.object(setup.subprocess, 'run', return_value=self.fonts('Symbols Nerd Font Mono\n')) as run:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    setup.install_font(True)
+                self.assertIn('Install font: Symbols Nerd Font', output.getvalue())
+                self.assertEqual(run.call_count, 1)
+                setup.install_font(False)
+        self.assertEqual(run.call_args.args[0], ['oh-my-posh', 'font', 'install', 'NerdFontsSymbolsOnly'])
+
+
 class RelocationTests(DisposableSetup):
     def command_environment(self):
         command_dir = self.directory / "commands 'quoted' $bin"
@@ -214,7 +331,7 @@ class RelocationTests(DisposableSetup):
             '  "list-keys") echo "bind-key -T prefix F1 display-popup help" ;;\n'
             '  *"has-session"*) echo "no server running" >&2; exit 1 ;;\n'
             'esac\n')
-        for name in ('less', 'git'):
+        for name in ('less', 'git', 'oh-my-posh'):
             (command_dir / name).write_text('#!/bin/sh\nexit 0\n')
         (command_dir / 'python3').symlink_to(sys.executable)
         for command in command_dir.iterdir():
@@ -385,6 +502,8 @@ class ServerInstallationTests(DisposableSetup):
             if not executable:
                 self.skipTest(f'{command} is required for this CLI test')
             (server_bin / command).symlink_to(executable)
+        (server_bin / 'oh-my-posh').write_text('#!/bin/sh\n')
+        (server_bin / 'oh-my-posh').chmod(0o755)
         loader = SourceFileLoader('installer_entry', str(ROOT / 'install'))
         spec = importlib.util.spec_from_loader(loader.name, loader)
         installer = importlib.util.module_from_spec(spec)

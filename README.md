@@ -8,9 +8,12 @@ light pill uses dark status circles, and inactive dark pills use light circles.
 ## Install once
 
 Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
-and `less` for the desktop mode. The server mode below needs Python 3.11+,
-tmux 3.2+, Git, and `less`. The installer configures software that is already installed. It
-uses no package manager, downloads, root access, or Python packages.
+`less`, and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the
+desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
+and Oh My Posh. The installer configures software that is already installed. It
+uses no package manager, root access, or Python packages. The only download is
+the desktop mode's icon font: when `fc-list` does not show Symbols Nerd Font,
+the installer runs `oh-my-posh font install NerdFontsSymbolsOnly`.
 
 Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
 
@@ -35,6 +38,11 @@ The installer creates these connections:
 | `~/.config/alacritty/alacritty.toml` | Desktop mode: imports shared Alacritty settings, then personal overrides |
 | `~/.tmux.conf` | Sources shared tmux settings, then personal overrides |
 | `~/.config/tmux/shortcuts.py` | Link to `bin/shortcuts.py` |
+| `~/.bashrc` | Appended line sourcing `config/prompt.bash`, which starts Oh My Posh with `config/oh-my-posh.omp.json` |
+
+The `~/.bashrc` line is added once, after the existing content, and marked
+`# dalftui: Oh My Posh prompt`; the rest of the file is kept. Remove your own
+`oh-my-posh init` line to avoid initializing the prompt twice.
 
 `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when they contain absolute
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
@@ -55,10 +63,11 @@ cd ~/code/dalftui
 ./bin/reload
 ```
 
-Server requirements are **Python 3.11+, tmux 3.2+, Git, and `less`**. Alacritty
+Server requirements are **Python 3.11+, tmux 3.2+, Git, `less`, and Oh My Posh**. Alacritty
 and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
 server installer manages the shared configuration link, tmux loader, shortcut
-guide link, and `~/.config/tmux/local.conf`. It preserves existing Alacritty files.
+guide link, `~/.config/tmux/local.conf`, and the `~/.bashrc` prompt line. It
+preserves existing Alacritty files and installs no font: your local terminal draws the icons.
 
 The server uses the same rounded tabs, Claude status styling, pane bindings,
 and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys
@@ -560,7 +569,8 @@ does not make an old root-layout or undeclared installation eligible for setup.
 ### Connect from Windows
 
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python
-3.11+, Windows OpenSSH, and Windows VS Code with **Remote - SSH**. The `code`
+3.11+, Windows OpenSSH, [Oh My Posh](https://ohmyposh.dev/) (`winget install
+JanDeDobbeleer.OhMyPosh`), and Windows VS Code with **Remote - SSH**. The `code`
 command should be on an absolute PATH entry during setup. The host picker also
 needs OpenSSH 9.4+ for `Tag dalftui`. The full-screen grid uses Python's native
 Windows console support; no local tmux, Alacritty, or curses package is needed.
@@ -622,6 +632,12 @@ managed block per profile; rerun it if you move the checkout or install another
 PowerShell version. After `mise run install:windows` or `install.cmd`, open a new
 PowerShell session to use `dssh` and **Ctrl+Shift+F3**. Use `-ProfilePath PATH` to
 configure only a specific profile, including a different PowerShell host.
+
+The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
+Setup installs the icons-only Symbols Nerd Font for the current user when it is
+missing, and appends it to the font face in Windows Terminal's `profiles.defaults`
+(for example `Cascadia Mono, Symbols Nerd Font`; Terminal 1.21+ reads the list).
+A profile with its own font face keeps it.
 
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.

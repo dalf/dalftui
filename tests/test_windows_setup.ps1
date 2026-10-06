@@ -21,7 +21,7 @@ function Copy-DalftuiWindowsCheckout([string]$Source, [string]$Destination) {
                          'bin/terminal_settings.py', 'dalftui\__init__.py',
                          'dalftui\windows\__init__.py', 'dalftui\windows\setup.ps1',
                          'dalftui\windows\profile.ps1', 'dalftui\windows\ssh-tab.ps1',
-                         'dalftui\windows\terminal_settings.py')) {
+                         'dalftui\windows\terminal_settings.py', 'config\oh-my-posh.omp.json')) {
         $destinationPath = Join-Path $Destination $file
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destinationPath)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $Source $file) -Destination $destinationPath
@@ -373,15 +373,34 @@ function Invoke-DalftuiWindowsSetup {
                 if ($Name -eq 'ssh') {
                     return [pscustomobject]@{Name = 'ssh'; Source = 'ssh'}
                 }
+                if ($Name -eq 'oh-my-posh' -and -not $script:missingOhMyPosh) {
+                    return [pscustomobject]@{Name = 'oh-my-posh'; Source = 'fake-oh-my-posh'}
+                }
                 return $null
             }
             function Update-DalftuiProcessPath {}
+            function Install-DalftuiNerdFont([string]$OhMyPosh) { $script:fontInstaller = $OhMyPosh }
             function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigPath) {
                 return $null
             }
             function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
                 $script:directSetupCheckout = $Checkout
             }
+            Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
+                -NoTerminal -WarningAction SilentlyContinue
+            Assert-True ($script:fontInstaller -eq 'fake-oh-my-posh') `
+                'Setup must install the Symbols Nerd Font with the discovered oh-my-posh'
+            $script:missingOhMyPosh = $true
+            $script:directSetupCheckout = $null
+            $message = ''
+            try {
+                Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
+                    -NoTerminal -WarningAction SilentlyContinue
+            } catch { $message = $_.Exception.Message }
+            Assert-True ($message.Contains('winget install JanDeDobbeleer.OhMyPosh') -and
+                         $null -eq $script:directSetupCheckout) `
+                'Setup must require oh-my-posh before changing any profile'
+            $script:missingOhMyPosh = $false
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
 
@@ -416,6 +435,28 @@ function Invoke-DalftuiWindowsSetup {
 
     $checkout = Join-Path $root ("repo's unicode " + [char]0xe9)
     Copy-DalftuiWindowsCheckout -Source $repo -Destination $checkout
+    # Install the font only when it is absent, and check the result.
+    $fakeOhMyPosh = Join-Path $root 'fake-oh-my-posh.ps1'
+    $fontLog = Join-Path $root 'font-install.txt'
+    [IO.File]::WriteAllLines($fakeOhMyPosh, @(
+        ('[IO.File]::WriteAllText(' + (ConvertTo-DalftuiSingleQuotedLiteral $fontLog) + ', ($args -join '' ''))'),
+        '$global:dalftuiFontInstalled = $true',
+        '$global:LASTEXITCODE = 0'), [Text.UTF8Encoding]::new($true))
+    & {
+        $global:dalftuiFontInstalled = $true
+        function Test-DalftuiNerdFont { return $global:dalftuiFontInstalled }
+        Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
+        Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed Symbols Nerd Font must not be reinstalled'
+        $global:dalftuiFontInstalled = $false
+        Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
+        Assert-True ([IO.File]::ReadAllText($fontLog) -eq 'font install NerdFontsSymbolsOnly') `
+            'A missing Symbols Nerd Font must be installed with oh-my-posh'
+        [IO.File]::WriteAllText($fakeOhMyPosh, '$global:LASTEXITCODE = 0')
+        $global:dalftuiFontInstalled = $false
+        Assert-Throws { Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh } `
+            'A font installation that leaves the font missing must fail setup'
+    }
+
     $profile = Join-Path (Join-Path $root 'profile directory') 'profile.ps1'
     Write-DalftuiProfile -Path $profile -Checkout $checkout
     Assert-True (Test-Path -LiteralPath $profile) 'A missing profile and parent directory must be created'
@@ -455,6 +496,22 @@ function Invoke-DalftuiWindowsSetup {
     $existingLoader = ". '" + (Join-Path $checkout 'bin/profile.ps1').Replace("'", "''") + "'"
     [IO.File]::WriteAllText($connectionProfile, $existingLoader + [Environment]::NewLine,
         [Text.UTF8Encoding]::new($true))
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        # A fake oh-my-posh must receive the checkout theme; its output is evaluated.
+        $poshBin = Join-Path $root 'fake posh bin'
+        [IO.Directory]::CreateDirectory($poshBin) | Out-Null
+        $poshLog = Join-Path $root 'posh-init.txt'
+        [IO.File]::WriteAllLines((Join-Path $poshBin 'oh-my-posh.cmd'), @(
+            '@echo off', ('echo %*> "' + $poshLog + '"'),
+            'echo $global:dalftuiPoshLoaded = $true'))
+        $previousPath = $env:PATH
+        $env:PATH = $poshBin + [IO.Path]::PathSeparator + $env:PATH
+        try { . $connectionProfile } finally { $env:PATH = $previousPath }
+        $poshArguments = [IO.File]::ReadAllText($poshLog)
+        Assert-True ($global:dalftuiPoshLoaded -and $poshArguments.StartsWith('init pwsh --config ') -and
+                     $poshArguments.Contains('oh-my-posh.omp.json')) `
+            "The profile must initialise oh-my-posh with the checkout theme: $poshArguments"
+    }
     . $connectionProfile
     $argumentJson = dssh 'alice@vm-alias'
     $arguments = ConvertFrom-Json -InputObject $argumentJson

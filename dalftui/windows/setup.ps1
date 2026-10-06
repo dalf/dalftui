@@ -265,6 +265,29 @@ function Set-DalftuiTerminalShortcut {
     if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal shortcut setup failed; see the message above. dssh is already configured in PowerShell.' }
 }
 
+function Test-DalftuiNerdFont {
+    # oh-my-posh and Windows register fonts by name under these keys.
+    foreach ($hive in @('HKCU:', 'HKLM:')) {
+        $fonts = Get-ItemProperty -LiteralPath ($hive + '\Software\Microsoft\Windows NT\CurrentVersion\Fonts') `
+            -ErrorAction SilentlyContinue
+        if ($fonts -and @($fonts.PSObject.Properties.Name -like 'Symbols Nerd Font*').Count) { return $true }
+    }
+    return $false
+}
+
+function Install-DalftuiNerdFont([string]$OhMyPosh) {
+    if (Test-DalftuiNerdFont) {
+        Write-Host 'Symbols Nerd Font already installed.'
+        return
+    }
+    # Installs for the current user; no administrator rights are needed.
+    & $OhMyPosh font install NerdFontsSymbolsOnly | Out-Host
+    if ($LASTEXITCODE -ne 0 -or -not (Test-DalftuiNerdFont)) {
+        throw 'Symbols Nerd Font installation failed; see the message above.'
+    }
+    Write-Host 'Symbols Nerd Font installed.'
+}
+
 function Test-DalftuiWindowsPlatform {
     return [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 }
@@ -294,10 +317,15 @@ function Invoke-DalftuiWindowsSetup {
         throw 'Install the Windows OpenSSH client first, then rerun setup.'
     }
     Update-DalftuiProcessPath
+    $ohMyPosh = Find-DalftuiApplication 'oh-my-posh'
+    if (-not $ohMyPosh) {
+        throw 'Install Oh My Posh first (winget install JanDeDobbeleer.OhMyPosh), then rerun setup.'
+    }
     $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
     foreach ($profilePath in $profilePaths) {
         Write-DalftuiProfile -Path $profilePath -Checkout $Checkout
     }
+    Install-DalftuiNerdFont -OhMyPosh $ohMyPosh.Source
     . (Join-Path $Checkout 'bin/profile.ps1')
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `

@@ -52,6 +52,20 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(editor['keys'], 'ctrl+shift+f3')
         self.assertEqual(editor['command'], {'action': 'sendInput', 'input': '\x02\x1bOR'})
 
+    def test_icon_font_follows_default_face_once(self):
+        for profiles, face in (
+                ('{"defaults": {"font": {"face": "Cascadia Code"}}, "list": []}', 'Cascadia Code, Symbols Nerd Font'),
+                ('{"defaults": {"fontFace": "Consolas"}, "list": []}', 'Consolas, Symbols Nerd Font'),
+                ('{"defaults": {"font": {"size": 11}}, "list": []}', 'Cascadia Mono, Symbols Nerd Font'),
+                ('{"list": []}', 'Cascadia Mono, Symbols Nerd Font'),
+                ('{"defaults": {"font": {"face": "X, Symbols Nerd Font"}}}', 'X, Symbols Nerd Font')):
+            with self.subTest(profiles=profiles):
+                updated = terminal.updated_settings('{"profiles": ' + profiles + '}', 'launcher')
+                self.assertEqual(self.settings(updated)['profiles']['defaults']['font']['face'], face)
+                self.assertEqual(terminal.updated_settings(updated, 'launcher'), updated)
+        legacy = self.settings(terminal.updated_settings('{"profiles": []}', 'launcher'))
+        self.assertEqual(legacy['profiles'], [])
+
     def test_modern_actions_and_bindings_keep_personal_entries(self):
         personal = '{"actions": [{"id":"Personal.Copy","command":"copy"}], "keybindings": [{"id":"Personal.Copy","keys":"ctrl+c"}]}'
         result = self.settings(terminal.updated_settings(personal, 'launcher'))
@@ -87,7 +101,7 @@ class TerminalSetupTests(unittest.TestCase):
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'},
             {'id': terminal.EDITOR_ACTION_ID, 'keys': 'ctrl+shift+f3'},
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+alt+s'},
-        ]})
+        ], 'profiles': {'defaults': {'font': {'face': 'Cascadia Mono, Symbols Nerd Font'}}}})
         self.assertEqual(terminal.updated_settings(personal, 'launcher'), personal)
 
     def test_shortcut_conflicts_preserve_settings_without_writing_or_backup(self):
