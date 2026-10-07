@@ -141,7 +141,10 @@ class Bootstrap:
                 if self.log:
                     self.log.close()
                 os.environ[PULLED] = f'{before[:7]}..{after[:7]}'
-                os.execv(sys.executable, [sys.executable, str(self.root / 'bootstrap'), *argv])
+                command = [sys.executable, str(self.root / 'bootstrap'), *argv]
+                if os.name == 'nt':  # execv returns to the console before the new process ends.
+                    raise SystemExit(subprocess.run(command, check=False).returncode)
+                os.execv(sys.executable, command)
                 return  # Reached only when execv is mocked.
         self.add('skipped', [f'dalftui ({reason})'])
 

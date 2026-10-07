@@ -64,7 +64,7 @@ Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall
 
 Details: [docs/install.md](docs/install.md).
 
-## Set up a new machine (Fedora, Debian, Ubuntu)
+## Set up a new machine (Fedora, Debian, Ubuntu, Windows)
 
 Opt-in, and the package lists are my personal tool set: edit
 [packages/fedora.txt](packages/fedora.txt) or [packages/debian.txt](packages/debian.txt)
@@ -82,6 +82,15 @@ The desktop mode works on Fedora and Debian 13; Debian 12 and Ubuntu 24.04 need
 listed packages with dnf or apt, installs or upgrades Oh My Posh and mise, updates the checkout with `git pull --ff-only`, then runs
 `./install` and `./bin/reload`. Run it again at any time to update. Options:
 `--dry-run`, `--tmux-only`. See [New machine](docs/install.md#new-machine-fedora-debian-ubuntu).
+
+On Windows, in a non-elevated Windows PowerShell, the same bootstrap uses Scoop
+([packages/windows.txt](packages/windows.txt)) and then runs `install.cmd`:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git python; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; python "$HOME\code\dalftui\bootstrap"
+```
+
+Rerun `python "$HOME\code\dalftui\bootstrap"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
 
 ## tmux bindings and look
 

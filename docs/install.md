@@ -9,7 +9,8 @@ Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
 desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
 and Oh My Posh. The installer configures software that is already installed. It
 uses no package manager, root access, or Python packages; on Fedora, Debian and
-Ubuntu, the separate [`./bootstrap`](#new-machine-fedora-debian-ubuntu) installs them with dnf or apt. The only download is
+Ubuntu, the separate [`./bootstrap`](#new-machine-fedora-debian-ubuntu) installs them with dnf or apt
+(on Windows, with [Scoop](#new-machine-windows)). The only download is
 the desktop mode's font: when `fc-list` does not show Hack Nerd Font, the
 installer runs `oh-my-posh font install Hack`.
 
@@ -166,6 +167,42 @@ GitHub CI runs the bootstrap twice in fresh Fedora 44 and Debian 13 containers
 (desktop) and Debian 12 and Ubuntu 24.04 containers (`--tmux-only`), weekly and
 when the bootstrap changes, and checks that the second run changes nothing. It
 also checks that Ubuntu 22.04 is refused.
+
+## New machine (Windows)
+
+The same `bootstrap` installs and updates the apps in
+[packages/windows.txt](../packages/windows.txt) with [Scoop](https://scoop.sh/),
+per user and without administrator rights, then runs `install.cmd`. In a
+non-elevated Windows PowerShell on a new Windows 10 or 11 machine:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git python; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; python "$HOME\code\dalftui\bootstrap"
+```
+
+Run `python "$HOME\code\dalftui\bootstrap"` again at any time to update (`--dry-run`
+previews). An elevated run is refused, as Scoop installs per user.
+
+Each run updates the checkout as on Linux, adds the `extras` bucket when it is
+missing, runs `scoop update`, installs each missing app with its own
+`scoop install`, and runs `scoop update APP` for each listed app that its bucket
+has newer; other apps are not updated. Installed versions, not Scoop's exit
+status, decide the result. It then registers Scoop's Python for `py`
+(`install-pep-514.reg`, current user), checks the Windows OpenSSH client and
+Windows Terminal, runs `install.cmd`, and prints the same summary. The log is
+`%LOCALAPPDATA%\dalftui\bootstrap.log`. A dry run changes nothing, compares
+with the buckets as of the last `scoop update`, and does not run `install.cmd`.
+
+Not installed, only reported: the Windows OpenSSH client (adding it needs an
+administrator: `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`;
+`Tag dalftui` needs 9.4+), and Windows Terminal (from the Microsoft Store on
+Windows 10; open it once so setup finds its settings). Scoop cannot update an
+app that is running: the Python running bootstrap, or PowerShell 7 when you run
+bootstrap from it, is reported as in use; close it and run `scoop update python`
+or `scoop update pwsh` from Windows PowerShell.
+
+GitHub CI runs the command on windows-latest as a standard user, twice, and
+checks that the second run and a dry run change nothing. It runs as a scheduled
+task, where msiexec is unavailable, so Scoop extracts MSIs with lessmsi there.
 
 ## macOS
 

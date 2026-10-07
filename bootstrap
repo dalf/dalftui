@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Install the packages and tools in packages/fedora.txt or packages/debian.txt, update this checkout, then run ./install."""
+"""Install the packages and tools in packages/fedora.txt, debian.txt or windows.txt, update this checkout, then run ./install or install.cmd."""
 import argparse
+import os
 import sys
 
 sys.dont_write_bytecode = True
 if sys.version_info < (3, 11):  # The bootstrap module needs Python 3.11 to import.
     raise SystemExit('Bootstrap failed: Python 3.11 or newer is required.')
-from dalftui.linux.bootstrap import bootstrap
+if os.name == 'nt':
+    from dalftui.windows.bootstrap import bootstrap
+else:
+    from dalftui.linux.bootstrap import bootstrap
 
 
 def main():

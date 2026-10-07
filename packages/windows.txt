@@ -1,0 +1,29 @@
+# Apps that bootstrap installs and updates with Scoop on Windows.
+# One app per line; an optional bucket/ prefix names a bucket other than main.
+
+# dalftui requirements
+git                # bootstrap's git pull; Scoop's buckets need it
+python             # runs bootstrap and the launcher; registered for py after each run
+oh-my-posh         # setup finds it on the persistent PATH
+extras/vscode      # VS Code (Microsoft's zip, portable); the editor shortcut
+pwsh               # PowerShell 7; optional, setup configures it when present
+
+# The owner's personal tools
+mise
+gsudo
+lsd
+less
+7zip
+diffutils
+nano
+wget2
+ripgrep
+bat
+btop               # btop4win
+jq
+yq
+fzf
+gh
+sqlite             # provides the sqlite3 command
+zip
+extras/mc
