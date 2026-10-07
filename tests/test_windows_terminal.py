@@ -274,5 +274,76 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertIn(json.dumps(both['actions'][0]), upgraded)
 
 
+    def test_vscode_terminal_font_is_added_once_and_keeps_comments_bom_and_crlf(self):
+        original = (b'\xef\xbb\xbf{\r\n    // personal\r\n    "editor.fontSize": 13, // mine\r\n'
+                    b'    "files.eol": "\\n",\r\n}\r\n')
+        self.path.write_bytes(original)
+        terminal.configure_vscode(self.path)
+        backups = list(self.root.glob('*.bak'))
+        self.assertEqual([backup.read_bytes() for backup in backups], [original])
+        installed = self.path.read_bytes()
+        self.assertTrue(installed.startswith(b'\xef\xbb\xbf'))
+        self.assertNotIn(b'\n', installed.replace(b'\r\n', b''))
+        text = installed.decode('utf-8-sig')
+        self.assertIn('// personal', text)
+        self.assertIn('// mine', text)
+        self.assertEqual(self.settings(text), {'editor.fontSize': 13, 'files.eol': '\n',
+                                               **terminal.VSCODE_SETTINGS})
+        with patch.object(Path, 'write_bytes') as write:
+            terminal.configure_vscode(self.path)
+        write.assert_not_called()
+        self.assertEqual(list(self.root.glob('*.bak')), backups)
+
+    def test_vscode_font_chosen_by_user_is_replaced(self):
+        personal = ('{"terminal.integrated.fontFamily": "Consolas", // mine\n'
+                    ' "terminal.integrated.fontSize": 14}')
+        updated = terminal.vscode_settings(personal)
+        self.assertEqual(updated, '{"terminal.integrated.fontFamily": "Hack Nerd Font", // mine\n'
+                                  ' "terminal.integrated.fontSize": 12}')
+        self.assertEqual(terminal.vscode_settings(updated), updated)
+
+    def test_vscode_duplicate_keys_replace_the_effective_value_only(self):
+        personal = ('{"terminal.integrated.fontSize": 10, "terminal.integrated.fontSize": 11,\n'
+                    ' "[python]": {"terminal.integrated.fontSize": 9, "editor.tabSize": 4, "editor.tabSize": 2}}')
+        updated = terminal.vscode_settings(personal)
+        self.assertTrue(updated.startswith('{"terminal.integrated.fontSize": 10, "terminal.integrated.fontSize": 12,\n'
+                                           ' "[python]": {"terminal.integrated.fontSize": 9, '))
+        self.assertEqual(self.settings(updated)['terminal.integrated.fontFamily'], 'Hack Nerd Font')
+        self.assertEqual(terminal.vscode_settings(updated), updated)
+
+    def test_vscode_empty_or_comment_only_settings(self):
+        for personal in ('', '\n', '// only a comment', '/* c */\n'):
+            with self.subTest(personal=personal):
+                updated = terminal.vscode_settings(personal)
+                if personal.strip():
+                    self.assertTrue(updated.startswith(personal))
+                self.assertEqual(self.settings(updated), terminal.VSCODE_SETTINGS)
+                self.assertEqual(terminal.vscode_settings(updated), updated)
+
+    def test_vscode_malformed_settings_remain_untouched(self):
+        for personal in ('{broken}', '[]'):
+            with self.subTest(personal=personal):
+                self.path.write_text(personal, encoding='utf-8')
+                with self.assertRaises(ValueError):
+                    terminal.configure_vscode(self.path)
+                self.assertEqual(self.path.read_text(encoding='utf-8'), personal)
+                self.assertFalse(list(self.root.glob('*.bak')))
+
+    def test_cli_creates_vscode_settings_without_terminal_settings(self):
+        missing = self.root / 'Code/User/settings.json'
+        command = [sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--shell', 'pwsh',
+                   '--vscode-settings', str(missing)]
+        environment = {**os.environ, 'LOCALAPPDATA': str(self.root / 'no terminal')}
+        result = subprocess.run(command, env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('VS Code settings created', result.stdout)
+        self.assertEqual(self.settings(missing.read_text(encoding='utf-8')), terminal.VSCODE_SETTINGS)
+        self.assertFalse(list(missing.parent.glob('*.bak')))
+        missing.write_text('{broken}', encoding='utf-8')
+        result = subprocess.run(command, env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('VS Code font setup failed', result.stderr)
+        self.assertIn('Windows Terminal settings not found', result.stdout)
+
 if __name__ == '__main__':
     unittest.main()

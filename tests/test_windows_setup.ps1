@@ -259,6 +259,18 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True ((Set-DalftuiVSCodeConfiguration -ConfigPath $editorConfig) -eq (Join-Path $portable 'Code.exe')) 'Repeated setup must prefer the configured installation over discovery'
     $configuredJson = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($editorConfig))
     Assert-True (Test-DalftuiFullyQualifiedPath ([string]$configuredJson.code)) 'The persisted VS Code path must be fully qualified'
+    $previousAppData = $env:APPDATA
+    try {
+        $portableApp = Join-Path $portable 'Code.exe'
+        $env:APPDATA = Join-Path $root 'roaming'
+        Assert-True ((Get-DalftuiVSCodeSettingsPath $portableApp) -eq (Join-Path $env:APPDATA 'Code\User\settings.json')) 'An installed VS Code must use its roaming settings'
+        $portableData = Join-Path $portable 'data'
+        [IO.Directory]::CreateDirectory($portableData) | Out-Null
+        Assert-True ((Get-DalftuiVSCodeSettingsPath $portableApp) -eq (Join-Path $portableData 'user-data\User\settings.json')) 'A portable VS Code must use the settings in its data folder'
+        [IO.Directory]::Delete($portableData)
+        $env:APPDATA = ''
+        Assert-True ($null -eq (Get-DalftuiVSCodeSettingsPath $portableApp 3>$null)) 'Without APPDATA, setup must not guess the VS Code settings'
+    } finally { $env:APPDATA = $previousAppData }
 
     [IO.File]::WriteAllText((Join-Path $portableBin 'code'), '')
     Assert-True ((Resolve-DalftuiVSCode (Join-Path $portableBin 'code')) -eq (Join-Path $portable 'Code.exe')) 'The Git Bash launcher must resolve to the installation executable'
@@ -405,13 +417,24 @@ function Invoke-DalftuiWindowsSetup {
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
             function Set-DalftuiTerminalShortcut([string]$Python, [string[]]$PythonArguments,
-                    [string]$Checkout, [string[]]$SettingsPaths, [string]$PowerShell7) {
+                    [string]$Checkout, [string[]]$SettingsPaths, [string]$PowerShell7,
+                    [string]$VSCodeSettingsPath) {
                 $script:terminalPwsh = $PowerShell7
+                $script:vscodeSettings = $VSCodeSettingsPath
             }
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -WarningAction SilentlyContinue
             Assert-True ($script:terminalPwsh -eq 'fake-pwsh') `
                 'Setup must pass the discovered PowerShell 7 to the Terminal profiles'
+            Assert-True (-not $script:vscodeSettings) 'Without VS Code, setup must not pass VS Code settings'
+            function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigPath) {
+                return 'fake Code.exe'
+            }
+            function Get-DalftuiVSCodeSettingsPath([string]$Application) { return "settings of $Application" }
+            Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
+                -WarningAction SilentlyContinue
+            Assert-True ($script:vscodeSettings -eq 'settings of fake Code.exe') `
+                'Setup must pass the configured VS Code settings to the font setup'
             Remove-Item Function:\Set-DalftuiTerminalShortcut
 
             # Run default installation twice against disposable profiles. Keep
@@ -664,6 +687,15 @@ function Invoke-DalftuiWindowsSetup {
         'An idempotent Terminal rerun must not create another backup'
     Assert-True (-not $settings.profiles.PSObject.Properties['list']) `
         'Without PowerShell 7, setup must not add Terminal profiles'
+    $vscodeSettingsPath = Join-Path $root 'vscode-settings.json'
+    [IO.File]::WriteAllText($vscodeSettingsPath, "{`r`n    // personal`r`n}`r`n")
+    Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+        -Checkout $checkout -SettingsPaths @($settingsPath) -VSCodeSettingsPath $vscodeSettingsPath
+    $vscodeText = [IO.File]::ReadAllText($vscodeSettingsPath)
+    Assert-True ($vscodeText.Contains('// personal') -and
+                 $vscodeText.Contains('"terminal.integrated.fontFamily": "Hack Nerd Font"') -and
+                 $vscodeText.Contains('"terminal.integrated.fontSize": 12')) `
+        "Setup must set the VS Code terminal font and keep comments: $vscodeText"
     $fakePwsh = Join-Path $root 'Power Shell\pwsh.exe'
     foreach ($run in 1, 2) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `

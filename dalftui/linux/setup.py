@@ -13,12 +13,13 @@ import tempfile
 import time
 
 from .alacritty_config import config_directory, load
+# Portable JSONC editing shared with the Windows setup.
+from ..windows.terminal_settings import PROMPT_FONT, vscode_settings
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
 PROFILES = ('desktop', 'tmux-only')
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
-SYMBOLS_FONT = 'Symbols Nerd Font'
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -49,6 +50,10 @@ class Paths:
     @property
     def bashrc(self):
         return self.home_dir / '.bashrc'
+
+    @property
+    def vscode_settings(self):
+        return self.config_dir / 'Code/User/settings.json'
 
 
 @dataclass(frozen=True)
@@ -162,16 +167,36 @@ def bashrc_with_prompt(paths, previous):
     return content + f'{PROMPT_MARKER}\n[ -f {loader} ] && . {loader}\n'.encode()
 
 
+def vscode_present(paths):
+    """Only desktops with VS Code get its settings file."""
+    return bool(shutil.which('code')) or paths.vscode_settings.parents[1].is_dir()
+
+
+def vscode_settings_bytes(path):
+    """Return the updated settings, or None when they are already set."""
+    previous = snapshot(path.resolve())
+    content = previous.value if previous and previous.kind == 'file' else b''
+    try:
+        text = content.decode('utf-8-sig')
+        updated = vscode_settings(text)
+    except ValueError as error:
+        raise ValueError(f'Fix the VS Code settings first: {path}: {error}') from error
+    if updated == text:
+        return None  # Also keeps a symlinked settings file.
+    bom = b'\xef\xbb\xbf' if content.startswith(b'\xef\xbb\xbf') else b''
+    return bom + updated.encode()
+
+
 def install_font(dry_run):
-    """Install the icons-only Nerd Font used by the prompt unless it is present."""
+    """Install the Nerd Font used by the prompt and VS Code unless it is present."""
     if shutil.which('fc-list'):
         result = subprocess.run(['fc-list', ':', 'family'], capture_output=True, text=True, timeout=30)
-        if any(SYMBOLS_FONT in line.split(',') for line in result.stdout.splitlines()):
+        if any(PROMPT_FONT in line.split(',') for line in result.stdout.splitlines()):
             return
     if dry_run:
-        print(f'Install font: {SYMBOLS_FONT}')
+        print(f'Install font: {PROMPT_FONT}')
         return
-    subprocess.run(['oh-my-posh', 'font', 'install', 'NerdFontsSymbolsOnly'], check=True, timeout=300)
+    subprocess.run(['oh-my-posh', 'font', 'install', 'Hack'], check=True, timeout=300)
 
 
 def install(paths=None, repo=None, *, dry_run=False, profile=None):
@@ -198,6 +223,10 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
         desired.append((paths.alacritty, Snapshot('file', alacritty)))
     # A symlinked ~/.bashrc is replaced like other managed paths, keeping its content.
     desired.append((paths.bashrc, Snapshot('file', bashrc_with_prompt(paths, snapshot(paths.bashrc.resolve())))))
+    if profile == 'desktop' and vscode_present(paths):
+        settings = vscode_settings_bytes(paths.vscode_settings)
+        if settings is not None:
+            desired.append((paths.vscode_settings, Snapshot('file', settings)))
     local_alacritty = paths.config_dir / 'alacritty/local.toml'
     local_tmux = paths.config_dir / 'tmux/local.conf'
     local_files = [(local_tmux, '# Personal tmux settings. Loaded after the shared dalftui configuration.\n')]

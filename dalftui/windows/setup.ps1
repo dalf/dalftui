@@ -162,6 +162,17 @@ function Set-DalftuiVSCodeConfiguration([string]$RequestedPath, [string]$ConfigP
     return $application
 }
 
+function Get-DalftuiVSCodeSettingsPath([string]$Application) {
+    # A data folder next to Code.exe makes VS Code portable, as Scoop installs it.
+    $data = Join-Path ([IO.Path]::GetDirectoryName($Application)) 'data'
+    if ([IO.Directory]::Exists($data)) { return Join-Path $data 'user-data\User\settings.json' }
+    if (-not (Test-DalftuiFullyQualifiedPath $env:APPDATA)) {
+        Write-Warning 'APPDATA is not set; the VS Code terminal font was not set.'
+        return $null
+    }
+    return Join-Path $env:APPDATA 'Code\User\settings.json'
+}
+
 function Update-DalftuiProcessPath {
     $entries = @($env:PATH,
         [Environment]::GetEnvironmentVariable('PATH', 'User'),
@@ -253,7 +264,7 @@ function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
 
 function Set-DalftuiTerminalShortcut {
     param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
-          [string[]]$SettingsPaths, [string]$PowerShell7)
+          [string[]]$SettingsPaths, [string]$PowerShell7, [string]$VSCodeSettingsPath)
     # Use the same PowerShell version as setup, without loading personal profiles.
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
@@ -262,8 +273,9 @@ function Set-DalftuiTerminalShortcut {
     $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'), '--shell', $shellPath)
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
     if ($PowerShell7) { $arguments += @('--pwsh', $PowerShell7) }
+    if ($VSCodeSettingsPath) { $arguments += @('--vscode-settings', $VSCodeSettingsPath) }
     & $Python @arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal shortcut setup failed; see the message above. dssh is already configured in PowerShell.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal or VS Code font setup failed; see the message above. dssh is already configured in PowerShell.' }
 }
 
 function Test-DalftuiNerdFont {
@@ -322,7 +334,7 @@ function Invoke-DalftuiWindowsSetup {
     if (-not $ohMyPosh) {
         throw 'Install Oh My Posh first (winget install JanDeDobbeleer.OhMyPosh), then rerun setup.'
     }
-    $null = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
+    $vscode = Set-DalftuiVSCodeConfiguration -RequestedPath $SelectedVSCodePath
     foreach ($profilePath in $profilePaths) {
         Write-DalftuiProfile -Path $profilePath -Checkout $Checkout
     }
@@ -331,7 +343,8 @@ function Invoke-DalftuiWindowsSetup {
     if (-not $NoTerminal) {
         Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
             -Checkout $Checkout -SettingsPaths $SettingsPaths `
-            -PowerShell7 (Find-DalftuiApplication 'pwsh').Source
+            -PowerShell7 (Find-DalftuiApplication 'pwsh').Source `
+            -VSCodeSettingsPath $(if ($vscode) { Get-DalftuiVSCodeSettingsPath $vscode })
     }
     Write-Host 'dssh HOST is ready.'
     Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'

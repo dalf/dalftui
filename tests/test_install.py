@@ -22,6 +22,7 @@ import dalftui.linux.alacritty_config as alacritty_config
 import dalftui.linux.setup as setup
 import dalftui.linux.shortcuts as shortcuts
 from dalftui.linux import tmux_editor
+from dalftui.windows import terminal_settings as terminal
 
 
 class DependencyTests(unittest.TestCase):
@@ -65,6 +66,10 @@ class DisposableSetup(unittest.TestCase):
         font = patch.object(setup, 'install_font')
         self.install_font = font.start()
         self.addCleanup(font.stop)
+        # Ignore a VS Code installed on the test machine; VSCodeTests enable it.
+        self.vscode_patch = patch.object(setup, 'vscode_present', return_value=False)
+        self.vscode_present = self.vscode_patch.start()
+        self.addCleanup(self.vscode_patch.stop)
 
     def install(self, **kwargs):
         with redirect_stdout(io.StringIO()):
@@ -303,21 +308,76 @@ class FontTests(unittest.TestCase):
     def test_font_is_skipped_when_present(self):
         with patch.object(setup.shutil, 'which', return_value='/usr/bin/fc-list'):
             with patch.object(setup.subprocess, 'run',
-                              return_value=self.fonts('DejaVu Sans\nSymbols Nerd Font,Symbols Nerd Font Mono\n')) as run:
+                              return_value=self.fonts('DejaVu Sans\nHack Nerd Font,Hack Nerd Font Mono\n')) as run:
                 setup.install_font(False)
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0][0], 'fc-list')
 
     def test_missing_font_is_installed_or_only_reported(self):
         with patch.object(setup.shutil, 'which', return_value='/usr/bin/fc-list'):
-            with patch.object(setup.subprocess, 'run', return_value=self.fonts('Symbols Nerd Font Mono\n')) as run:
+            with patch.object(setup.subprocess, 'run', return_value=self.fonts('Hack Nerd Font Mono\n')) as run:
                 output = io.StringIO()
                 with redirect_stdout(output):
                     setup.install_font(True)
-                self.assertIn('Install font: Symbols Nerd Font', output.getvalue())
+                self.assertIn('Install font: Hack Nerd Font', output.getvalue())
                 self.assertEqual(run.call_count, 1)
                 setup.install_font(False)
-        self.assertEqual(run.call_args.args[0], ['oh-my-posh', 'font', 'install', 'NerdFontsSymbolsOnly'])
+        self.assertEqual(run.call_args.args[0], ['oh-my-posh', 'font', 'install', 'Hack'])
+
+
+class VSCodeTests(DisposableSetup):
+    def setUp(self):
+        super().setUp()
+        self.vscode_present.return_value = True
+
+    def test_settings_are_created_then_left_alone(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            setup.install(self.paths, self.repo, dry_run=True)
+        self.assertIn(f'Create: {self.paths.vscode_settings}', output.getvalue())
+        self.assertFalse(self.paths.config_dir.exists())
+        self.install()
+        self.assertEqual(json.loads(self.paths.vscode_settings.read_text()), terminal.VSCODE_SETTINGS)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertIsNone(setup.install(self.paths, self.repo))
+        self.assertIn('Already installed', output.getvalue())
+
+    def test_existing_settings_are_backed_up_and_overwritten(self):
+        self.paths.vscode_settings.parent.mkdir(parents=True)
+        original = b'\xef\xbb\xbf{\r\n  // mine\r\n  "terminal.integrated.fontFamily": "Consolas",\r\n}\r\n'
+        self.paths.vscode_settings.write_bytes(original)
+        backup = self.install()
+        records = json.loads((backup / 'manifest.json').read_text())
+        saved = [backup / item['backup'] for item in records if item['original'] == str(self.paths.vscode_settings)]
+        self.assertEqual([path.read_bytes() for path in saved], [original])
+        installed = self.paths.vscode_settings.read_bytes()
+        self.assertTrue(installed.startswith(b'\xef\xbb\xbf{\r\n  // mine\r\n'))
+        self.assertEqual(json.loads(terminal.clean_jsonc(installed.decode('utf-8-sig'))), terminal.VSCODE_SETTINGS)
+
+    def test_malformed_settings_stop_before_any_change(self):
+        self.paths.vscode_settings.parent.mkdir(parents=True)
+        self.paths.vscode_settings.write_text('{broken')
+        with self.assertRaisesRegex(ValueError, 'Fix the VS Code settings first'):
+            self.install()
+        self.assertEqual(self.paths.vscode_settings.read_text(), '{broken')
+        self.assertFalse(self.paths.tmux.exists())
+
+    def test_servers_and_desktops_without_vscode_get_no_settings(self):
+        self.install(profile='tmux-only')
+        self.vscode_present.return_value = False
+        self.install(profile='desktop')
+        self.assertFalse(self.paths.vscode_settings.exists())
+
+    def test_vscode_is_detected_by_command_or_configuration(self):
+        self.vscode_patch.stop()
+        with patch.object(setup.shutil, 'which', return_value=None):
+            self.assertFalse(setup.vscode_present(self.paths))
+            self.paths.vscode_settings.parents[1].mkdir(parents=True)
+            self.assertTrue(setup.vscode_present(self.paths))
+        self.paths.vscode_settings.parents[1].rmdir()
+        with patch.object(setup.shutil, 'which', return_value='/usr/bin/code'):
+            self.assertTrue(setup.vscode_present(self.paths))
 
 
 class RelocationTests(DisposableSetup):

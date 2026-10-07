@@ -12,8 +12,8 @@ Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
 desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
 and Oh My Posh. The installer configures software that is already installed. It
 uses no package manager, root access, or Python packages. The only download is
-the desktop mode's icon font: when `fc-list` does not show Symbols Nerd Font,
-the installer runs `oh-my-posh font install NerdFontsSymbolsOnly`.
+the desktop mode's font: when `fc-list` does not show Hack Nerd Font, the
+installer runs `oh-my-posh font install Hack`.
 
 Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
 
@@ -43,6 +43,10 @@ The installer creates these connections:
 The `~/.bashrc` line is added once, after the existing content, and marked
 `# dalftui: Oh My Posh prompt`; the rest of the file is kept. Remove your own
 `oh-my-posh init` line to avoid initializing the prompt twice.
+
+When the `code` command or `~/.config/Code` exists, the desktop mode sets
+`terminal.integrated.fontFamily` and `terminal.integrated.fontSize` in VS Code's
+user settings, replacing your values and keeping the rest of the file.
 
 `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when they contain absolute
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
@@ -637,6 +641,9 @@ The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
 Setup installs Hack Nerd Font for the current user when it is missing, and sets
 it as the font face in Windows Terminal's `profiles.defaults`. A profile with its
 own font face keeps it.
+It also sets `terminal.integrated.fontFamily` to Hack Nerd Font and
+`terminal.integrated.fontSize` to 12 in the configured VS Code's `settings.json`
+(in `data\user-data` for a portable installation), creating the file when needed.
 
 The profile enables bash-like Emacs line editing, with **Ctrl+Left/Right** moving
 by word and history suggestions where PSReadLine supports them. As in tmux,

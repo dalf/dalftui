@@ -17,6 +17,8 @@ EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 EDITOR_SHORTCUT = 'ctrl+shift+f3'
 EDITOR_INPUT = '\x02\x1bOR'
 PROMPT_FONT = 'Hack Nerd Font'
+# Also applied by the Linux desktop installer.
+VSCODE_SETTINGS = {'terminal.integrated.fontFamily': PROMPT_FONT, 'terminal.integrated.fontSize': 12}
 # Windows Terminal's own PowerShell 7 profile, and a dalftui-owned elevated copy.
 PWSH_GUID = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
 ADMIN_GUID = '{267e52e6-0ec9-495c-a8b0-e4437770bc55}'
@@ -266,6 +268,18 @@ def append_entry(text, items, end, encoded, newline, edits):
     edits.append((end, end, prefix + newline + '    ' + encoded + newline))
 
 
+def save(path, original, updated, label):
+    """Back up and replace settings read as original; return the backup path."""
+    encoding = 'utf-8-sig' if original.startswith(b'\xef\xbb\xbf') else 'utf-8'
+    backup = path.with_name(path.name + '.dalftui-' + uuid.uuid4().hex + '.bak')
+    # Check for edits made while setup was reading the settings.
+    if path.read_bytes() != original:
+        raise ValueError(f'{label} settings changed during setup. Rerun setup.')
+    shutil.copyfile(path, backup)
+    path.write_bytes(updated.encode(encoding))
+    return backup
+
+
 def configure(path, commandline, pwsh=None):
     original = path.read_bytes()
     text = original.decode('utf-8-sig')
@@ -273,19 +287,56 @@ def configure(path, commandline, pwsh=None):
     if updated == text:
         print(f'Terminal shortcut already configured: {path}')
         return
-    encoding = 'utf-8-sig' if original.startswith(b'\xef\xbb\xbf') else 'utf-8'
-    backup = path.with_name(path.name + '.dalftui-' + uuid.uuid4().hex + '.bak')
-    # Check for edits made while setup was reading the settings.
-    if path.read_bytes() != original:
-        raise ValueError('Terminal settings changed during setup. Rerun setup.')
-    shutil.copyfile(path, backup)
-    path.write_bytes(updated.encode(encoding))
+    backup = save(path, original, updated, 'Terminal')
     print(f'Terminal backup: {backup}')
     print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
     print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
     print(f'Default profile font: {PROMPT_FONT}')
     if pwsh:
         print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
+
+
+def vscode_settings(text):
+    """Set the VS Code terminal font, replacing the effective top-level values."""
+    newline = '\r\n' if '\r\n' in text else '\n'
+    if not clean_jsonc(text).strip():  # VS Code reads an empty file as no settings.
+        text = (text + newline if text.strip() else '') + '{}'
+    clean = clean_jsonc(text)
+    settings = json.loads(clean)  # VS Code accepts duplicate keys; the last one wins.
+    if not isinstance(settings, dict):
+        raise ValueError('VS Code settings must be a JSON object.')
+    edits = []
+    missing = []
+    items, end = members(clean, skip_space(clean, 0), object_mode=True)
+    for key, value in VSCODE_SETTINGS.items():
+        found = [item for item in items if item[0] == key]
+        if not found:
+            missing.append(json.dumps(key) + ': ' + json.dumps(value))
+        elif found[-1][1] != value:
+            edits.append((found[-1][2], found[-1][3], json.dumps(value)))
+    if missing:
+        append_entry(text, items, end, (',' + newline + '    ').join(missing), newline, edits)
+    for begin, finish, replacement in sorted(edits, reverse=True):
+        text = text[:begin] + replacement + text[finish:]
+    json.loads(clean_jsonc(text))
+    return text
+
+
+def configure_vscode(path):
+    original = path.read_bytes() if path.exists() else None
+    text = (original or b'').decode('utf-8-sig')
+    updated = vscode_settings(text)
+    if updated == text:
+        print(f'VS Code terminal font already set: {path}')
+        return
+    if original is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('xb') as stream:  # Never replace a file created meanwhile.
+            stream.write(updated.encode())
+        print(f'VS Code settings created: {path}')
+    else:
+        print(f'VS Code backup: {save(path, original, updated, "VS Code")}')
+    print(f'VS Code terminal font: {PROMPT_FONT}, size 12')
 
 
 def settings_paths(local_app_data):
@@ -307,7 +358,15 @@ def main():
     parser.add_argument('--shell', required=True)
     parser.add_argument('--settings', action='append', type=Path)
     parser.add_argument('--pwsh', help='PowerShell 7 path for the Terminal profiles')
+    parser.add_argument('--vscode-settings', type=Path, help='VS Code settings.json to set the terminal font in')
     args = parser.parse_args()
+    status = 0
+    if args.vscode_settings:
+        try:
+            configure_vscode(args.vscode_settings)
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f'VS Code font setup failed: {error}', file=sys.stderr)
+            status = 1
     launcher = CHECKOUT_ROOT / 'bin/ssh-tab.ps1'
     commandline = subprocess.list2cmdline([
         args.shell, '-NoLogo', '-NoProfile', '-File', str(launcher)])
@@ -317,14 +376,14 @@ def main():
     paths = args.settings or settings_paths(os.environ.get('LOCALAPPDATA', ''))
     if not paths:
         print('Windows Terminal settings not found. Open Terminal once, then rerun setup. For a portable installation use -TerminalSettingsPath PATH. dssh remains available in PowerShell.')
-        return 0
+        return status
     try:
         for path in dict.fromkeys(paths):
             configure(path, commandline, pwsh)
     except (OSError, UnicodeError, ValueError) as error:
         print(f'Terminal shortcut setup failed: {error}', file=sys.stderr)
         return 1
-    return 0
+    return status
 
 
 if __name__ == '__main__':
