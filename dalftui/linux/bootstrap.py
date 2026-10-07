@@ -14,6 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 PACKAGES = REPO / 'packages'
 OH_MY_POSH_INSTALLER = 'https://ohmyposh.dev/install.sh'
 MISE_INSTALLER = 'https://mise.run'
+UV_INSTALLER = 'https://astral.sh/uv/install.sh'
 # sudo drops DEBIAN_FRONTEND; stdin is closed, so conffile prompts must not be asked.
 APT = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', '-y', '-o', 'DPkg::Lock::Timeout=300',
        '-o', 'Dpkg::Options::=--force-confdef', '-o', 'Dpkg::Options::=--force-confold']
@@ -247,6 +248,9 @@ class Bootstrap:
     def mise(self):
         self.user_tool('mise', f'curl -fsSL {MISE_INSTALLER} | sh', ['self-update', '--yes', '--no-plugins'])
 
+    def uv(self):
+        self.user_tool('uv', f'curl -fsSL {UV_INSTALLER} | sh', ['self', 'update'])
+
     def user_tool(self, name, installer, upgrade):
         """Official installer into ~/.local/bin; the tool's own upgrade command afterwards."""
         path = shutil.which(name)
@@ -319,7 +323,7 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     if system is None or not shutil.which('sudo'):
         print('Bootstrap failed: this needs Fedora, Debian or Ubuntu with sudo.', file=sys.stderr)
         return 1
-    # The official oh-my-posh and mise installers write to ~/.local/bin; install must find it there.
+    # The official oh-my-posh, mise and uv installers write to ~/.local/bin; install must find it there.
     local_bin = str(Path.home() / '.local/bin')
     if local_bin not in os.environ.get('PATH', '').split(os.pathsep):
         os.environ['PATH'] = local_bin + os.pathsep + os.environ.get('PATH', '')
@@ -332,5 +336,6 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     run.packages(read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only))
     run.oh_my_posh()
     run.mise()
+    run.uv()
     run.install(tmux_only=tmux_only)
     return run.report()

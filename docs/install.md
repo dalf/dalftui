@@ -143,10 +143,11 @@ Each run, in order (a failed step does not stop the next ones):
    `apt-get install` (after one `apt-get update`), so one failure does not stop
    the others, and upgrades the listed installed packages with `dnf upgrade` or
    `apt-get install --only-upgrade`. Other system packages are not upgraded.
-4. Installs Oh My Posh and mise with their official installers
-   ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html))
-   into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`
-   and `mise self-update --yes --no-plugins`. A copy that the user cannot write,
+4. Installs Oh My Posh, mise and uv with their official installers
+   ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html),
+   [uv](https://docs.astral.sh/uv/getting-started/installation/))
+   into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`,
+   `mise self-update --yes --no-plugins` and `uv self update`. A copy that the user cannot write,
    such as an rpm, is left alone.
 5. Runs `./install` (with `--tmux-only` when given; otherwise the existing
    profile, or desktop on a new machine), then `./bin/reload`.

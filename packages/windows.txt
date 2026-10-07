@@ -10,6 +10,7 @@ pwsh               # PowerShell 7; optional, setup configures it when present
 
 # The owner's personal tools
 mise
+uv
 gsudo
 lsd
 less

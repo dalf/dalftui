@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
-    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu and Scoop package names, the VS Code repository and the oh-my-posh and mise installers can change.
+    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu and Scoop package names, the VS Code repository and the oh-my-posh, mise and uv installers can change.
   workflow_dispatch:
 
 permissions:
@@ -24,19 +24,19 @@ jobs:
         include:
           - image: fedora:44
             prereq: dnf install -y python3 git sudo
-            tools: fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise code alacritty
+            tools: fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
             desktop: true
           - image: debian:13
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise code alacritty
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
             desktop: true
           - image: debian:12
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
             flags: --tmux-only
           - image: ubuntu:24.04
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
             flags: --tmux-only
     steps:
       - name: Install the documented prerequisites
@@ -189,7 +189,7 @@ jobs:
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
           $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
-          foreach ($tool in 'git', 'python', 'oh-my-posh', 'mise', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less') {
+          foreach ($tool in 'git', 'python', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less') {
               $path = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
               "$tool ..."
               $version = @($null | & $tool --version)[0]

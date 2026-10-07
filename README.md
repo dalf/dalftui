@@ -79,7 +79,7 @@ The desktop mode works on Fedora and Debian 13; Debian 12 and Ubuntu 24.04 need
 `--tmux-only`; Ubuntu 22.04 is refused (Python 3.10).
 
 `./bootstrap` adds Microsoft's VS Code repository, installs and upgrades the
-listed packages with dnf or apt, installs or upgrades Oh My Posh and mise, updates the checkout with `git pull --ff-only`, then runs
+listed packages with dnf or apt, installs or upgrades Oh My Posh, mise and uv, updates the checkout with `git pull --ff-only`, then runs
 `./install` and `./bin/reload`. Run it again at any time to update. Options:
 `--dry-run`, `--tmux-only`. See [New machine](docs/install.md#new-machine-fedora-debian-ubuntu).
 

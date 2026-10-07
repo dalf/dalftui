@@ -218,7 +218,7 @@ class StartTests(unittest.TestCase):
 
 
 class UserToolTests(unittest.TestCase):
-    """oh-my-posh and mise: official installer when missing, their own upgrade command afterwards."""
+    """oh-my-posh, mise and uv: official installer when missing, their own upgrade command afterwards."""
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -264,6 +264,15 @@ class UserToolTests(unittest.TestCase):
         run = self.run_step(installed=True, before='2026.9.1', after='2026.10.3', step='mise')
         self.assertEqual(run.commands, [[str(self.binary), 'self-update', '--yes', '--no-plugins']])
         self.assertEqual(run.summary['upgraded'], ['mise (2026.9.1 -> 2026.10.3)'])
+
+    def test_uv_uses_astral_installer_then_self_update(self):
+        self.binary = self.home / '.local/bin/uv'
+        run = self.run_step(installed=False, step='uv')
+        self.assertEqual(run.commands, [['bash', '-c', 'set -o pipefail; curl -fsSL https://astral.sh/uv/install.sh | sh']])
+        self.assertEqual(run.summary['installed'], ['uv'])
+        run = self.run_step(installed=True, before='uv 0.12.19', after='uv 0.12.23', step='uv')
+        self.assertEqual(run.commands, [[str(self.binary), 'self', 'update']])
+        self.assertEqual(run.summary['upgraded'], ['uv (uv 0.12.19 -> uv 0.12.23)'])
 
     def test_present_upgrades_and_reports_versions(self):
         run = self.run_step(installed=True, before='31.4.0', after='31.5.0')
