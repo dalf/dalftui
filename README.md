@@ -54,6 +54,9 @@ Terminal `settings.json` and VS Code `settings.json` are copied to
 Update: `git pull --ff-only && ./bin/reload` on Linux. On Windows,
 `git pull --ff-only`, then open a new PowerShell session.
 
+Uninstall: `./install --uninstall` on Linux, `.\install.cmd -Uninstall` on Windows
+(preview with `--dry-run` or `-DryRun`); see [Uninstall](docs/install.md#uninstall).
+
 Details: [docs/install.md](docs/install.md).
 
 ## tmux bindings and look

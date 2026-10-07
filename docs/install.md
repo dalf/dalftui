@@ -166,6 +166,52 @@ Each backup directory contains the original files or symlinks and a
 `manifest.json` mapping them to their original paths. The backup directories are
 private. Backups and Python caches are excluded from Git.
 
+## Uninstall
+
+Uninstall removes what the installer created, only while it still holds the
+installer's content, and backs up every file it changes or removes. Preview it first:
+
+```sh
+./install --uninstall --dry-run
+./install --uninstall
+```
+
+On Linux it removes the `~/.config/dalftui` link, the `~/.config/tmux/shortcuts.py`
+link, the generated `~/.tmux.conf` and Alacritty loaders, the marked prompt line
+pair in `~/.bashrc`, and VS Code's `terminal.integrated.fontFamily` and
+`terminal.integrated.fontSize` while they are still `Hack Nerd Font` and `12`.
+When a backup holds the `~/.tmux.conf` or `alacritty.toml` file or link you had
+before dalftui, it is put back. An edited loader (with the `~/.config/dalftui` link
+it sources), an edited prompt line, symlinks the
+installer did not create, and personal `local.conf` and `local.toml` files are kept
+and reported; the override files are removed only while they are the unchanged
+templates. The removed VS Code values may have replaced your own: the earlier
+values are in the backups. Fonts, Oh My Posh, the backups, and the checkout are
+kept. Running tmux and Alacritty keep their current configuration until restarted.
+
+On Windows:
+
+```powershell
+.\install.cmd -Uninstall -DryRun
+.\install.cmd -Uninstall
+```
+
+This removes the managed block from each PowerShell profile (or the one given
+with `-ProfilePath`). A block that contains other lines is kept and reported. It
+removes the Ctrl+Shift+F2 and F3 actions and their keybindings from Windows
+Terminal, the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
+PowerShell 7 profile, and the default `Hack Nerd Font` face, and the VS Code font
+settings above, in each case while they still hold the values setup wrote.
+`-TerminalSettingsPath`, `-VSCodePath` and `-SkipTerminal` work as for setup;
+`-VSCodePath` may name a directory whose `Code.exe` was removed.
+Each changed file is first copied to `<file>.dalftui-<id>.bak`, where earlier
+values can be found. `%LOCALAPPDATA%\dalftui\config.json`, the font, and the
+checkout are kept. PowerShell sessions that are already open keep `dssh` until
+you open a new one.
+
+Running uninstall again reports that nothing is left to remove, and installing
+again afterwards works as a fresh installation.
+
 ## Windows
 
 The Windows launcher runs in PowerShell or Command Prompt. It needs Python

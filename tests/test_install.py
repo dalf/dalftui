@@ -676,5 +676,153 @@ class ServerTmuxTests(TmuxFixture):
         self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
 
 
+class UninstallTests(DisposableSetup):
+    def uninstall(self, **kwargs):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            setup.uninstall(self.paths, **kwargs)
+        return output.getvalue()
+
+    def tree(self):
+        """Every path under the disposable directory with its content or link target."""
+        result = {}
+        for path in sorted(self.directory.rglob('*')):
+            if path.is_relative_to(self.repo):
+                continue
+            result[path] = (os.readlink(path) if path.is_symlink() else
+                            path.read_bytes() if path.is_file() else None)
+        return result
+
+    def test_install_then_uninstall_leaves_only_user_content(self):
+        self.paths.bashrc.write_text('alias ll="ls -l"\n')
+        self.paths.bashrc.chmod(0o600)
+        self.paths.tmux.write_text('set -g mouse off\n')
+        self.install()
+        local_tmux = self.paths.config_dir / 'tmux/local.conf'
+        local_tmux.write_text('set -g history-limit 4321\n')
+        output = self.uninstall()
+        self.assertEqual(self.paths.bashrc.read_text(), 'alias ll="ls -l"\n')
+        self.assertEqual(stat.S_IMODE(self.paths.bashrc.stat().st_mode), 0o600)
+        self.assertEqual(self.paths.tmux.read_text(), 'set -g mouse off\n')
+        self.assertIn(f'Restore {self.paths.tmux} from ', output)
+        for path in (self.paths.root, self.paths.alacritty, self.paths.config_dir / 'tmux/shortcuts.py',
+                     self.paths.config_dir / 'alacritty/local.toml'):
+            self.assertFalse(path.exists() or path.is_symlink(), path)
+        self.assertEqual(local_tmux.read_text(), 'set -g history-limit 4321\n')
+        self.assertIn(f'Kept personal settings: {local_tmux}', output)
+        self.assertIn('keep their current configuration until restarted', output)
+        backups = list((self.paths.state_dir / 'dalftui/backups').iterdir())
+        self.assertEqual(len(backups), 2)  # Install, then uninstall.
+
+        before = self.tree()
+        self.assertIn('Nothing to uninstall.', self.uninstall())
+        self.assertEqual(self.tree(), before)
+        self.install()
+        self.assertEqual(self.paths.root.resolve(), self.repo)
+        self.assertEqual(self.paths.bashrc.read_text().count(setup.PROMPT_MARKER), 1)
+        self.assertEqual(setup.installed_profile(self.paths), 'desktop')
+
+    def test_uninstall_without_earlier_files_removes_everything_created(self):
+        self.install(profile='tmux-only')
+        self.uninstall()
+        self.assertEqual(self.paths.bashrc.read_text(), '')
+        self.assertFalse(self.paths.tmux.exists())
+        self.assertEqual([path for path in self.paths.config_dir.rglob('*') if not path.is_dir()], [])
+
+    def test_dry_run_changes_nothing(self):
+        self.install()
+        before = self.tree()
+        output = self.uninstall(dry_run=True)
+        self.assertIn(f'Back up and remove: {self.paths.root}', output)
+        self.assertIn(f'Back up and replace: {self.paths.bashrc}', output)
+        self.assertIn('Dry run: no files changed.', output)
+        self.assertEqual(self.tree(), before)
+
+    def test_edited_and_user_files_are_kept(self):
+        self.install()
+        self.paths.alacritty.write_text(self.paths.alacritty.read_text() + '[font]\nsize = 9.0\n')
+        bashrc = self.paths.bashrc.read_text().replace('] && .', '] && source')
+        self.paths.bashrc.write_text(bashrc)
+        guide = self.paths.config_dir / 'tmux/shortcuts.py'
+        guide.unlink()
+        guide.symlink_to('/my/own/guide.py')
+        output = self.uninstall()
+        self.assertIn(f'Kept edited loader: {self.paths.alacritty}', output)
+        self.assertIn('[font]\nsize = 9.0\n', self.paths.alacritty.read_text())
+        self.assertEqual(self.paths.bashrc.read_text(), bashrc)
+        self.assertIn('Kept an edited', output)
+        self.assertEqual(os.readlink(guide), '/my/own/guide.py')
+        self.assertFalse(self.paths.tmux.exists())
+        self.assertIn(f'Kept {self.paths.root}: the edited loader still sources it', output)
+        self.assertEqual(self.paths.root.resolve(), self.repo)
+
+    def test_newest_original_is_restored_even_when_it_is_a_link(self):
+        self.paths.tmux.write_text('OLD FILE\n')
+        self.install(profile='tmux-only')
+        self.uninstall()
+        self.paths.tmux.unlink()
+        self.paths.tmux.symlink_to('dotfiles/tmux.conf')
+        self.install(profile='tmux-only')
+        self.uninstall()
+        self.assertEqual(os.readlink(self.paths.tmux), 'dotfiles/tmux.conf')
+
+    def test_user_owned_tmux_conf_and_directory_root_are_kept(self):
+        self.paths.tmux.write_text('set -g mouse on\n')
+        self.paths.root.mkdir(parents=True)
+        self.assertIn(f'Kept, not a dalftui link: {self.paths.root}', self.uninstall())
+        self.assertEqual(self.paths.tmux.read_text(), 'set -g mouse on\n')
+
+    def test_failure_rolls_back_removed_files(self):
+        self.install()
+        original_write = setup.write
+
+        def fail_on_bashrc(path, item):
+            if path == self.paths.bashrc:
+                raise OSError('simulated uninstall failure')
+            original_write(path, item)
+
+        def outside_state(tree):
+            return {path: value for path, value in tree.items() if not path.is_relative_to(self.paths.state_dir)}
+        before = outside_state(self.tree())
+        with patch.object(setup, 'write', side_effect=fail_on_bashrc):
+            with self.assertRaisesRegex(OSError, 'simulated'):
+                self.uninstall()
+        self.assertEqual(outside_state(self.tree()), before)
+
+    def test_vscode_values_are_removed_only_while_they_are_dalftui_values(self):
+        self.vscode_present.return_value = True
+        self.paths.vscode_settings.parent.mkdir(parents=True)
+        original = b'\xef\xbb\xbf{\r\n  // mine\r\n  "editor.fontSize": 14,\r\n}\r\n'
+        self.paths.vscode_settings.write_bytes(original)
+        self.install()
+        installed = self.paths.vscode_settings.read_bytes()
+        self.paths.vscode_settings.write_bytes(installed.replace(b'": 12', b'": 15'))
+        output = self.uninstall()
+        updated = self.paths.vscode_settings.read_bytes()
+        self.assertTrue(updated.startswith(b'\xef\xbb\xbf{\r\n  // mine\r\n'))
+        self.assertEqual(json.loads(terminal.clean_jsonc(updated.decode('utf-8-sig'))),
+                         {'editor.fontSize': 14, 'terminal.integrated.fontSize': 15})
+        self.assertIn('Earlier VS Code font settings', output)
+
+    def test_cli_uninstalls_without_dependencies_and_rejects_modes(self):
+        self.install()
+        loader = SourceFileLoader('installer_entry', str(ROOT / 'install'))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with patch.dict(os.environ, {'PATH': str(self.directory / 'empty')}):
+            with patch.object(setup.Paths, 'current', return_value=self.paths):
+                for flags in [['--uninstall', '--dry-run'], ['--uninstall']]:
+                    with patch.object(sys, 'argv', ['install', *flags]):
+                        with redirect_stdout(io.StringIO()) as output:
+                            self.assertEqual(installer.main(), 0)
+                    self.assertNotIn('./bin/reload', output.getvalue())
+                    self.assertEqual(self.paths.root.is_symlink(), '--dry-run' in flags)
+                with patch.object(sys, 'argv', ['install', '--uninstall', '--tmux-only']):
+                    with redirect_stdout(io.StringIO()), patch('sys.stderr', io.StringIO()):
+                        with self.assertRaises(SystemExit):
+                            installer.main()
+
+
 if __name__ == '__main__':
     unittest.main()

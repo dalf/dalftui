@@ -14,13 +14,16 @@ import time
 
 from .alacritty_config import config_directory, load
 # Portable JSONC editing shared with the Windows setup.
-from ..windows.terminal_settings import PROMPT_FONT, vscode_settings
+from ..windows.terminal_settings import PROMPT_FONT, removed_vscode_settings, vscode_settings
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
 PROFILES = ('desktop', 'tmux-only')
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
 REPO = Path(__file__).resolve().parents[2]
+LOCAL_TMUX = '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'
+LOCAL_ALACRITTY = ('# Personal Alacritty settings. This file stays outside the repository.\n'
+                   '# Example:\n# [font]\n# size = 11.0\n')
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,10 @@ def loaders(paths, profile='desktop', *, legacy=False):
     return alacritty.encode(), tmux.encode()
 
 
+def known_tmux(paths):
+    return {loaders(paths, mode)[1] for mode in PROFILES} | {loaders(paths, legacy=True)[1]}
+
+
 def dependencies(profile='desktop'):
     if profile not in PROFILES:
         raise ValueError(f'Unknown installation mode: {profile}')
@@ -167,6 +174,21 @@ def bashrc_with_prompt(paths, previous):
     return content + f'{PROMPT_MARKER}\n[ -f {loader} ] && . {loader}\n'.encode()
 
 
+def bashrc_without_prompt(content):
+    """Remove each marker line that is followed by its prompt loader line."""
+    lines = content.splitlines(keepends=True)
+    loader = re.compile(rb"\[ -f (.+/dalftui/config/prompt\.bash'?) \] && \. \1\r?\n?")
+    kept, index = [], 0
+    while index < len(lines):
+        if (lines[index].rstrip(b'\r\n') == PROMPT_MARKER.encode() and index + 1 < len(lines)
+                and loader.fullmatch(lines[index + 1])):
+            index += 2
+        else:
+            kept.append(lines[index])
+            index += 1
+    return b''.join(kept)
+
+
 def vscode_present(paths):
     """Only desktops with VS Code get its settings file."""
     return bool(shutil.which('code')) or paths.vscode_settings.parents[1].is_dir()
@@ -199,6 +221,47 @@ def install_font(dry_run):
     subprocess.run(['oh-my-posh', 'font', 'install', 'Hack'], check=True, timeout=300)
 
 
+def apply(paths, changes, *, dry_run, check=None):
+    """Back up, then write or remove (wanted None) each path; roll back on failure."""
+    if dry_run:
+        for path, previous, wanted in changes:
+            action = 'Create' if not previous else 'Back up and ' + ('remove' if wanted is None else 'replace')
+            print(f'{action}: {path}')
+        print('Dry run: no files changed.')
+        return None
+    backup = None
+    if any(previous is not None for _, previous, _ in changes):
+        backup = paths.state_dir / 'dalftui/backups' / str(time.time_ns())
+        backup.mkdir(parents=True, mode=0o700)
+        os.chmod(backup, 0o700)
+        records = []
+        for index, (path, previous, _) in enumerate(changes):
+            if previous is not None:
+                filename = f'{index:02d}-{path.name}'
+                write(backup / filename, previous)
+                records.append({'original': str(path), 'backup': filename, 'kind': previous.kind})
+        (backup / 'manifest.json').write_text(json.dumps(records, indent=2) + '\n')
+
+    written = []
+    try:
+        for path, previous, wanted in changes:
+            if wanted is None:
+                path.unlink()
+            else:
+                write(path, wanted)
+            written.append((path, previous))
+        if check:
+            check()
+    except BaseException:
+        for path, previous in reversed(written):
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                write(path, previous)
+        raise
+    return backup
+
+
 def install(paths=None, repo=None, *, dry_run=False, profile=None):
     paths = paths or Paths.current()
     profile = profile or installed_profile(paths)
@@ -229,11 +292,9 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             desired.append((paths.vscode_settings, Snapshot('file', settings)))
     local_alacritty = paths.config_dir / 'alacritty/local.toml'
     local_tmux = paths.config_dir / 'tmux/local.conf'
-    local_files = [(local_tmux, '# Personal tmux settings. Loaded after the shared dalftui configuration.\n')]
+    local_files = [(local_tmux, LOCAL_TMUX)]
     if profile == 'desktop':
-        local_files.append((local_alacritty,
-                            '# Personal Alacritty settings. This file stays outside the repository.\n'
-                            '# Example:\n# [font]\n# size = 11.0\n'))
+        local_files.append((local_alacritty, LOCAL_ALACRITTY))
     for path, content in local_files:
         existing = snapshot(path)
         if existing is None:
@@ -250,9 +311,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             continue
         if (path in (paths.alacritty, paths.tmux) and previous and previous.kind == 'file'
                 and previous.value.startswith(MARKER.encode())):
-            known_tmux = {loaders(paths, mode)[1] for mode in PROFILES}
-            known_tmux.add(loaders(paths, legacy=True)[1])
-            if path != paths.tmux or previous.value not in known_tmux:
+            if path != paths.tmux or previous.value not in known_tmux(paths):
                 raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
         changes.append((path, previous, wanted))
     if profile == 'desktop':
@@ -260,39 +319,10 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
     if not changes:
         print('Already installed; personal overrides preserved.')
         return None
+    check = (lambda: load(paths.alacritty, home_dir=paths.home_dir)) if profile == 'desktop' else None
+    backup = apply(paths, changes, dry_run=dry_run, check=check)
     if dry_run:
-        for path, previous, wanted in changes:
-            print(f'{"Back up and replace" if previous else "Create"}: {path}')
-        print('Dry run: no files changed.')
         return None
-
-    backup = None
-    if any(previous is not None for _, previous, _ in changes):
-        backup = paths.state_dir / 'dalftui/backups' / str(time.time_ns())
-        backup.mkdir(parents=True, mode=0o700)
-        os.chmod(backup, 0o700)
-        records = []
-        for index, (path, previous, _) in enumerate(changes):
-            if previous is not None:
-                filename = f'{index:02d}-{path.name}'
-                write(backup / filename, previous)
-                records.append({'original': str(path), 'backup': filename, 'kind': previous.kind})
-        (backup / 'manifest.json').write_text(json.dumps(records, indent=2) + '\n')
-
-    written = []
-    try:
-        for path, previous, wanted in changes:
-            write(path, wanted)
-            written.append((path, previous))
-        if profile == 'desktop':
-            load(paths.alacritty, home_dir=paths.home_dir)
-    except BaseException:
-        for path, previous in reversed(written):
-            if previous is None:
-                path.unlink(missing_ok=True)
-            else:
-                write(path, previous)
-        raise
     print(f'Installed ({profile}): {paths.root} -> {repo}')
     if backup:
         print(f'Original configurations backed up in {backup}')
@@ -300,6 +330,89 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
     if profile == 'desktop':
         personal.insert(0, str(local_alacritty))
     print('Personal settings: ' + ' and '.join(personal))
+    return backup
+
+
+def original_file(paths, path):
+    """Return the newest backup of path that dalftui did not generate, and its location."""
+    found = None
+    manifests = (paths.state_dir / 'dalftui/backups').glob('*/manifest.json')
+    for manifest in sorted(manifests, key=lambda item: item.parent.name.zfill(32)):
+        try:
+            for record in json.loads(manifest.read_text()):
+                saved = manifest.parent / record['backup']
+                if record['original'] == str(path):
+                    item = snapshot(saved)  # dalftui never links a loader, so a link is the user's.
+                    if item and (item.kind == 'link' or not item.value.startswith(MARKER.encode())):
+                        found = item, saved
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # An unreadable manifest only means nothing is restored from it.
+    return found
+
+
+def uninstall(paths=None, *, dry_run=False):
+    """Remove what install created while it is unchanged; keep personal files and backups."""
+    paths = paths or Paths.current()
+    changes, notes, edited = [], [], False
+    alacritty = loaders(paths)[0]
+    for path, known in ((paths.tmux, known_tmux(paths)), (paths.alacritty, {alacritty})):
+        previous = snapshot(path)
+        if not previous or previous.kind != 'file' or not previous.value.startswith(MARKER.encode()):
+            continue
+        if previous.value not in known:
+            notes.append(f'Kept edited loader: {path}')
+            edited = True
+            continue
+        restored = original_file(paths, path)
+        if restored:
+            notes.append(f'Restore {path} from {restored[1]}')
+        changes.append((path, previous, restored and restored[0]))
+    guide = paths.config_dir / 'tmux/shortcuts.py'
+    previous = snapshot(guide)
+    if previous and previous.kind == 'link' and previous.value in (
+            str(paths.root / 'bin/shortcuts.py'), str(paths.root / 'shortcuts.py')):
+        changes.append((guide, previous, None))
+    previous = snapshot(paths.bashrc)  # Install writes a file; a symlink is not its own.
+    if previous and previous.kind == 'file':
+        content = bashrc_without_prompt(previous.value)
+        if content != previous.value:
+            changes.append((paths.bashrc, previous, replace(previous, value=content)))
+        if PROMPT_MARKER.encode() in content:
+            notes.append(f'Kept an edited "{PROMPT_MARKER}" line: {paths.bashrc}')
+    previous = snapshot(paths.vscode_settings)
+    if previous and previous.kind == 'file':
+        bom = b'\xef\xbb\xbf' if previous.value.startswith(b'\xef\xbb\xbf') else b''
+        try:
+            text = previous.value.decode('utf-8-sig')
+            content = bom + removed_vscode_settings(text).encode()
+        except ValueError as error:
+            raise ValueError(f'Fix the VS Code settings first: {paths.vscode_settings}: {error}') from error
+        if content != previous.value:
+            changes.append((paths.vscode_settings, previous, replace(previous, value=content)))
+            notes.append(f'Earlier VS Code font settings, if any, are backed up in {paths.state_dir / "dalftui/backups"}')
+    for path, template in ((paths.config_dir / 'tmux/local.conf', LOCAL_TMUX),
+                           (paths.config_dir / 'alacritty/local.toml', LOCAL_ALACRITTY)):
+        previous = snapshot(path)
+        if previous and previous.kind == 'file' and previous.value == template.encode():
+            changes.append((path, previous, None))
+        elif previous:
+            notes.append(f'Kept personal settings: {path}')
+    if paths.root.is_symlink() and edited:
+        notes.append(f'Kept {paths.root}: the edited loader still sources it')
+    elif paths.root.is_symlink():  # Last: the other files refer to this link.
+        changes.append((paths.root, snapshot(paths.root), None))
+    elif paths.root.exists():
+        notes.append(f'Kept, not a dalftui link: {paths.root}')
+    for note in notes:
+        print(note)
+    if not changes:
+        print('Nothing to uninstall.')
+        return None
+    backup = apply(paths, changes, dry_run=dry_run)
+    if dry_run:
+        return None
+    print(f'Uninstalled dalftui configuration. Removed files are backed up in {backup}')
+    print('Running tmux and Alacritty keep their current configuration until restarted.')
     return backup
 
 

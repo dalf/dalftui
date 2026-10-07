@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Install dalftui configuration links and loaders; existing files are backed up."""
+"""Install or uninstall dalftui configuration links and loaders; changed files are backed up."""
 import argparse
 import sys
 import subprocess
 
 sys.dont_write_bytecode = True
-from dalftui.linux.setup import dependencies, install, installed_profile
+from dalftui.linux.setup import dependencies, install, installed_profile, uninstall
 
 
 def main():
@@ -16,7 +16,16 @@ def main():
                       help='Configure tmux for a server without requiring Alacritty or an SSH picker')
     mode.add_argument('--desktop', dest='profile', action='store_const', const='desktop',
                       help='Configure Alacritty and tmux (the default for a new installation)')
+    mode.add_argument('--uninstall', action='store_true',
+                      help='Remove the links, loaders and settings that install added')
     args = parser.parse_args()
+    if args.uninstall:
+        try:
+            uninstall(dry_run=args.dry_run)
+        except (OSError, ValueError) as error:
+            print(f'Uninstall failed: {error}', file=sys.stderr)
+            return 1
+        return 0
     try:
         profile = args.profile or installed_profile()
         dependencies(profile)

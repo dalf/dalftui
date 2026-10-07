@@ -1,18 +1,22 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts.
+Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts, or remove them with -Uninstall.
 .EXAMPLE
 .\install.ps1
 .EXAMPLE
 .\install.ps1 -VSCodePath 'C:\Tools\VS Code Portable'
+.EXAMPLE
+.\install.ps1 -Uninstall -DryRun
 #>
 [CmdletBinding()]
 param(
     [string]$VSCodePath,
     [string]$ProfilePath,
     [switch]$SkipTerminal,
-    [string[]]$TerminalSettingsPath
+    [string[]]$TerminalSettingsPath,
+    [switch]$Uninstall,
+    [switch]$DryRun
 )
 
 $dalftuiSetupWasDotSourced = $MyInvocation.InvocationName -eq '.'
@@ -23,9 +27,10 @@ if (-not $dalftuiSetupWasDotSourced) {
     try {
         Invoke-DalftuiWindowsSetup -TargetProfile $ProfilePath -Checkout $dalftuiSetupCheckout `
             -NoTerminal:$SkipTerminal -SettingsPaths $TerminalSettingsPath `
-            -SelectedVSCodePath $VSCodePath
+            -SelectedVSCodePath $VSCodePath -Uninstall:$Uninstall -DryRun:$DryRun
     } catch {
-        Write-Error ("Setup failed: " + $_.Exception.Message) -ErrorAction Continue
+        $action = if ($Uninstall) { 'Uninstall' } else { 'Setup' }
+        Write-Error ("$action failed: " + $_.Exception.Message) -ErrorAction Continue
         exit 1
     }
 }

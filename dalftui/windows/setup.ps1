@@ -262,9 +262,41 @@ function Write-DalftuiProfile([string]$Path, [string]$Checkout) {
     Write-Host "PowerShell profile configured: $Path"
 }
 
+function Remove-DalftuiProfile([string]$Path, [switch]$DryRun) {
+    $Path = [IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Write-Host "No PowerShell profile: $Path"
+        return
+    }
+    $reader = [IO.StreamReader]::new($Path, [Text.Encoding]::Default, $true)
+    try { $content = $reader.ReadToEnd(); $encoding = $reader.CurrentEncoding } finally { $reader.Dispose() }
+    $starts = [regex]::Matches($content, '(?m)^# >>> dalftui >>>\r?$')
+    $ends = [regex]::Matches($content, '(?m)^# <<< dalftui <<<\r?$')
+    if (-not ($starts.Count -or $ends.Count)) {
+        Write-Host "No dalftui block in PowerShell profile: $Path"
+        return
+    }
+    # Keep the block when it is malformed or holds more than setup's loader line.
+    $block = [regex]::Match($content, "(?m)^# >>> dalftui >>>\r?\n\. '(?:[^'\r\n]|'')*\.ps1'\r?\n# <<< dalftui <<<(?:\r?\n|\z)")
+    if ($starts.Count -ne 1 -or $ends.Count -ne 1 -or -not $block.Success) {
+        Write-Warning "The dalftui block in $Path was edited, incomplete or duplicated; it was left unchanged."
+        return
+    }
+    if ($DryRun) {
+        Write-Host "Back up and remove the dalftui block: $Path"
+        return
+    }
+    $backup = $Path + '.dalftui-' + [guid]::NewGuid().ToString('N') + '.bak'
+    [IO.File]::Copy($Path, $backup)
+    Write-Host "Profile backup: $backup"
+    [IO.File]::WriteAllText($Path, $content.Remove($block.Index, $block.Length), $encoding)
+    Write-Host "Removed the dalftui block from PowerShell profile: $Path"
+}
+
 function Set-DalftuiTerminalShortcut {
     param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
-          [string[]]$SettingsPaths, [string]$PowerShell7, [string]$VSCodeSettingsPath)
+          [string[]]$SettingsPaths, [string]$PowerShell7, [string]$VSCodeSettingsPath,
+          [switch]$Uninstall, [switch]$DryRun)
     # Use the same PowerShell version as setup, without loading personal profiles.
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
@@ -274,7 +306,10 @@ function Set-DalftuiTerminalShortcut {
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
     if ($PowerShell7) { $arguments += @('--pwsh', $PowerShell7) }
     if ($VSCodeSettingsPath) { $arguments += @('--vscode-settings', $VSCodeSettingsPath) }
+    if ($Uninstall) { $arguments += '--uninstall' }
+    if ($DryRun) { $arguments += '--dry-run' }
     & $Python @arguments | Out-Host
+    if ($LASTEXITCODE -ne 0 -and $Uninstall) { throw 'Some Windows Terminal or VS Code settings were not changed; see the message above.' }
     if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal or VS Code font setup failed; see the message above. dssh is already configured in PowerShell.' }
 }
 
@@ -305,17 +340,7 @@ function Test-DalftuiWindowsPlatform {
     return [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 }
 
-function Invoke-DalftuiWindowsSetup {
-    [CmdletBinding()]
-    param([string]$TargetProfile,
-          [string]$Checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')),
-          [switch]$NoTerminal,
-          [string[]]$SettingsPaths, [string]$SelectedVSCodePath)
-    $ErrorActionPreference = 'Stop'
-    if (-not (Test-DalftuiWindowsPlatform)) {
-        throw 'This setup script targets Windows. On Linux, use ./install.'
-    }
-    $profilePaths = @(Get-DalftuiProfilePaths -TargetProfile $TargetProfile)
+function Find-DalftuiPython {
     $python = Find-DalftuiApplication 'py'
     $pythonArguments = @('-3')
     if (-not $python) {
@@ -325,6 +350,84 @@ function Invoke-DalftuiWindowsSetup {
     if (-not $python) { throw 'Install Python 3.11+ first, then open a new terminal.' }
     & $python.Source @pythonArguments -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.11 or newer is required.' }
+    return [pscustomobject]@{Source = $python.Source; Arguments = $pythonArguments}
+}
+
+function Get-DalftuiInstalledVSCodeSettingsPath([string]$RequestedPath) {
+    # Uninstall still finds the settings when VS Code itself was removed.
+    $application = $null
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        if ([IO.Path]::DirectorySeparatorChar -eq [char]92 -and
+            $RequestedPath -match '\A/([A-Za-z])/(.*)\z') {
+            $RequestedPath = $Matches[1] + ':/' + $Matches[2]
+        }
+        try { $application = Resolve-DalftuiVSCode $RequestedPath }
+        catch {
+            # A removed VS Code leaves no Code.exe, but its directory may keep portable data.
+            if (-not (Test-DalftuiFullyQualifiedPath $RequestedPath) -or
+                -not [IO.Directory]::Exists($RequestedPath)) {
+                Write-Warning "VS Code settings were not checked: $($_.Exception.Message)"
+                return $null
+            }
+            $application = Join-Path ([IO.Path]::GetFullPath($RequestedPath)) 'Code.exe'
+        }
+    } else {
+        $configPath = Get-DalftuiVSCodeConfigPath
+        if ([IO.File]::Exists($configPath)) {
+            try { $application = [string](ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($configPath))).code }
+            catch { Write-Warning "Ignoring the unreadable $configPath." }
+        }
+    }
+    if (Test-DalftuiFullyQualifiedPath $application) { return Get-DalftuiVSCodeSettingsPath $application }
+    if (Test-DalftuiFullyQualifiedPath $env:APPDATA) { return Join-Path $env:APPDATA 'Code\User\settings.json' }
+    return $null
+}
+
+function Invoke-DalftuiWindowsUninstall {
+    param([string]$TargetProfile, [string]$Checkout, [switch]$NoTerminal,
+          [string[]]$SettingsPaths, [string]$SelectedVSCodePath, [switch]$DryRun)
+    $profilePaths = @(Get-DalftuiProfilePaths -TargetProfile $TargetProfile)
+    if (-not $NoTerminal) {
+        # Check everything that can fail before changing any profile.
+        $python = Find-DalftuiPython
+        $vscodeSettings = Get-DalftuiInstalledVSCodeSettingsPath $SelectedVSCodePath
+    }
+    foreach ($profilePath in $profilePaths) {
+        Remove-DalftuiProfile -Path $profilePath -DryRun:$DryRun
+    }
+    if (-not $NoTerminal) {
+        Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $python.Arguments `
+            -Checkout $Checkout -SettingsPaths $SettingsPaths -VSCodeSettingsPath $vscodeSettings `
+            -Uninstall -DryRun:$DryRun
+    }
+    if ($DryRun) {
+        Write-Host 'Dry run: no files changed.'
+        return
+    }
+    Write-Host 'Fonts, Oh My Posh, backups and this checkout were kept.'
+    Write-Host 'PowerShell sessions already open keep dssh and Ctrl+Shift+F3 until you open a new session.'
+}
+
+function Invoke-DalftuiWindowsSetup {
+    [CmdletBinding()]
+    param([string]$TargetProfile,
+          [string]$Checkout = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')),
+          [switch]$NoTerminal,
+          [string[]]$SettingsPaths, [string]$SelectedVSCodePath,
+          [switch]$Uninstall, [switch]$DryRun)
+    $ErrorActionPreference = 'Stop'
+    if (-not (Test-DalftuiWindowsPlatform)) {
+        throw 'This setup script targets Windows. On Linux, use ./install.'
+    }
+    if ($Uninstall) {
+        Invoke-DalftuiWindowsUninstall -TargetProfile $TargetProfile -Checkout $Checkout `
+            -NoTerminal:$NoTerminal -SettingsPaths $SettingsPaths `
+            -SelectedVSCodePath $SelectedVSCodePath -DryRun:$DryRun
+        return
+    }
+    if ($DryRun) { throw '-DryRun is supported with -Uninstall only.' }
+    $profilePaths = @(Get-DalftuiProfilePaths -TargetProfile $TargetProfile)
+    $python = Find-DalftuiPython
     $ssh = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe'
     if (-not (Test-Path -LiteralPath $ssh) -and -not (Find-DalftuiApplication 'ssh')) {
         throw 'Install the Windows OpenSSH client first, then rerun setup.'
@@ -341,7 +444,7 @@ function Invoke-DalftuiWindowsSetup {
     Install-DalftuiNerdFont -OhMyPosh $ohMyPosh.Source
     . (Join-Path $Checkout 'bin/profile.ps1')
     if (-not $NoTerminal) {
-        Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+        Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $python.Arguments `
             -Checkout $Checkout -SettingsPaths $SettingsPaths `
             -PowerShell7 (Find-DalftuiApplication 'pwsh').Source `
             -VSCodeSettingsPath $(if ($vscode) { Get-DalftuiVSCodeSettingsPath $vscode })

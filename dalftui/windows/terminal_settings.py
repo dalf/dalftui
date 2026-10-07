@@ -28,13 +28,16 @@ JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
 
 
-def clean_jsonc(text):
+def without_comments(text):
     # Keep character offsets so edits preserve comments and unrelated formatting.
     def comments(match):
         part = match.group()
         return part if part.startswith('"') else re.sub(r'[^\r\n]', ' ', part)
-    text = JSONC_PARTS.sub(comments, text)
-    return TRAILING_COMMAS.sub(lambda m: m.group(1) or ' ', text)
+    return JSONC_PARTS.sub(comments, text)
+
+
+def clean_jsonc(text):
+    return TRAILING_COMMAS.sub(lambda m: m.group(1) or ' ', without_comments(text))
 
 
 def unique_object(pairs):
@@ -268,6 +271,156 @@ def append_entry(text, items, end, encoded, newline, edits):
     edits.append((end, end, prefix + newline + '    ' + encoded + newline))
 
 
+def item_start(clean, begin):
+    """Return where the member whose value starts at begin starts, including its key."""
+    index = begin - 1
+    while clean[index].isspace():
+        index -= 1
+    if clean[index] != ':':
+        return begin  # An array element.
+    index -= 1
+    while clean[index].isspace():
+        index -= 1
+    index -= 1  # Before the key's closing quote; quotes inside the key are escaped.
+    while True:
+        slashes = 0
+        while clean[index - 1 - slashes] == '\\':
+            slashes += 1
+        if clean[index] == '"' and slashes % 2 == 0:
+            return index
+        index -= 1
+
+
+def remove_item(text, items, index):
+    """Remove items[index] from a members() list, keeping comments and other items."""
+    bare = without_comments(text)  # Unlike clean_jsonc, keeps trailing commas.
+    begin, finish = item_start(bare, items[index][2]), items[index][3]
+    comma = None
+    after = skip_space(bare, finish)
+    if bare[after] == ',':
+        finish = after + 1
+    elif index:
+        comma = bare.rindex(',', items[index - 1][3], begin)
+    # Drop the whole line when the item is alone on it.
+    line = text.rfind('\n', 0, begin) + 1
+    end = text.find('\n', finish)
+    end = len(text) if end < 0 else end
+    if not text[line:begin].strip() and not text[finish:end].strip():
+        begin, finish = line, min(end + 1, len(text))
+    text = text[:begin] + text[finish:]
+    if comma is not None:
+        text = text[:comma] + text[comma + 1:]
+    return text
+
+
+def container_items(clean, path):
+    """Return members() of the object or array at path (keys or list indexes), or None."""
+    begin, value = skip_space(clean, 0), True
+    items = None
+    for key in (None, *path):
+        if key is not None:
+            found = [item for number, item in enumerate(items)
+                     if (number == key if isinstance(key, int) else item[0] == key)]
+            if not found:
+                return None
+            _, value, begin, _ = found[-1]  # VS Code uses the last duplicate key.
+        if not isinstance(value, (dict, list)) and key is not None:
+            return None
+        items, _ = members(clean, begin, object_mode=key is None or isinstance(value, dict))
+    return items
+
+
+def remove_matching(text, path, match):
+    """Remove every item of the container at path for which match(item) is true."""
+    while True:
+        clean = clean_jsonc(text)
+        items = container_items(clean, path) or []
+        index = next((number for number, item in enumerate(items) if match(item)), None)
+        if index is None:
+            return text
+        text = remove_item(text, items, index)
+
+
+def has_guid(item, guid):
+    return isinstance(item[1], dict) and str(item[1].get('guid')).lower() == guid
+
+
+def removed_settings(text):
+    """Remove what setup added to Terminal settings, while it still holds dalftui's values."""
+    if not isinstance(json.loads(clean_jsonc(text), object_pairs_hook=unique_object), dict):
+        raise ValueError('Terminal settings must be a JSON object.')
+    ids = (ACTION_ID, EDITOR_ACTION_ID)
+    for name in ('actions', 'keybindings'):
+        text = remove_matching(text, (name,), lambda item: isinstance(item[1], dict) and item[1].get('id') in ids)
+    profiles = ('profiles', 'list')
+    text = remove_matching(text, profiles, lambda item: has_guid(item, ADMIN_GUID))
+    # Terminal regenerates its own stub; keep one that has other settings.
+    created = {'guid', 'source', 'antialiasingMode'}
+    text = remove_matching(text, profiles, lambda item: has_guid(item, PWSH_GUID) and set(item[1]) == created
+                           and item[1]['antialiasingMode'] == 'cleartype')
+    for number, item in enumerate(container_items(clean_jsonc(text), profiles) or []):
+        if has_guid(item, PWSH_GUID):
+            text = remove_matching(text, (*profiles, number),
+                                   lambda member: member[0] == 'antialiasingMode' and member[1] == 'cleartype')
+    text = remove_matching(text, ('profiles', 'defaults', 'font'),
+                           lambda item: item[0] == 'face' and item[1] == PROMPT_FONT)
+    json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    return text
+
+
+def removed_vscode_settings(text):
+    """Remove the effective VS Code terminal font values while they are dalftui's."""
+    if not clean_jsonc(text).strip():
+        return text
+    if not isinstance(json.loads(clean_jsonc(text)), dict):
+        raise ValueError('VS Code settings must be a JSON object.')
+    for key, value in VSCODE_SETTINGS.items():
+        clean = clean_jsonc(text)
+        items = container_items(clean, ())
+        found = [number for number, item in enumerate(items) if item[0] == key]
+        if found and items[found[-1]][1] == value:
+            text = remove_item(text, items, found[-1])
+    json.loads(clean_jsonc(text))
+    return text
+
+
+def unconfigure(path, label, remove, dry_run):
+    """Remove dalftui's settings from one file; return whether anything changed."""
+    original = path.read_bytes()
+    text = original.decode('utf-8-sig')
+    updated = remove(text)
+    if updated == text:
+        print(f'No dalftui {label} settings: {path}')
+        return False
+    if dry_run:
+        print(f'Back up and remove dalftui {label} settings: {path}')
+        return True
+    print(f'{label} backup: {save(path, original, updated, label)}')
+    print(f'Removed dalftui {label} settings: {path}')
+    print(f'Earlier values, if any, are in {path.name}.dalftui-*.bak next to it.')
+    return True
+
+
+def uninstall(paths, vscode, dry_run):
+    status = 0
+    if vscode and vscode.is_file():
+        try:
+            unconfigure(vscode, 'VS Code', removed_vscode_settings, dry_run)
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f'VS Code settings were not changed: {error}', file=sys.stderr)
+            status = 1
+    if not paths:
+        print('Windows Terminal settings not found; Terminal was not checked. '
+              'For a portable installation use -TerminalSettingsPath PATH.')
+    for path in dict.fromkeys(paths):
+        try:
+            unconfigure(path, 'Terminal', removed_settings, dry_run)
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f'Terminal settings were not changed: {error}', file=sys.stderr)
+            status = 1
+    return status
+
+
 def save(path, original, updated, label):
     """Back up and replace settings read as original; return the backup path."""
     encoding = 'utf-8-sig' if original.startswith(b'\xef\xbb\xbf') else 'utf-8'
@@ -355,11 +508,18 @@ def main():
     sys.stdout.reconfigure(errors='backslashreplace')
     sys.stderr.reconfigure(errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--shell', required=True)
+    parser.add_argument('--shell')
     parser.add_argument('--settings', action='append', type=Path)
     parser.add_argument('--pwsh', help='PowerShell 7 path for the Terminal profiles')
     parser.add_argument('--vscode-settings', type=Path, help='VS Code settings.json to set the terminal font in')
+    parser.add_argument('--uninstall', action='store_true', help='Remove the settings that setup added')
+    parser.add_argument('--dry-run', action='store_true', help='With --uninstall, show changes without writing files')
     args = parser.parse_args()
+    if args.uninstall:
+        return uninstall(args.settings or settings_paths(os.environ.get('LOCALAPPDATA', '')),
+                         args.vscode_settings, args.dry_run)
+    if not args.shell:
+        parser.error('--shell is required')
     status = 0
     if args.vscode_settings:
         try:

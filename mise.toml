@@ -63,6 +63,17 @@ raw_args = true
 env = { PSModulePath = "" }
 run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./install.ps1"
 
+[tasks."uninstall:linux"]
+description = "Remove the Linux configuration that install added (accepts --dry-run)"
+raw_args = true
+run = "./install --uninstall"
+
+[tasks."uninstall:windows"]
+description = "Remove the PowerShell profile block and Terminal/VS Code entries that setup added (accepts -DryRun)"
+raw_args = true
+env = { PSModulePath = "" }
+run = "{{ vars.powershell }} -NoProfile -ExecutionPolicy Bypass -File ./install.ps1 -Uninstall"
+
 [tasks."reload:linux"]
 description = "Reload Linux configuration (accepts --socket PATH)"
 raw_args = true

@@ -345,5 +345,107 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertIn('VS Code font setup failed', result.stderr)
         self.assertIn('Windows Terminal settings not found', result.stdout)
 
+    def test_uninstall_removes_only_setup_entries_and_keeps_comments(self):
+        personal = '''{
+    // Keep my defaults and shortcuts.
+    "defaultProfile": "wsl-guid",
+    "profiles": {"defaults": {"font": {"face": "Cascadia Code", "size": 11}}, "list": [
+        {"guid": "wsl-guid", "name": "Ubuntu"} // mine
+    ]},
+    "actions": [
+        {"command": "copy", "keys": "ctrl+shift+c"}, // my binding
+    ], /* leave this here */
+}'''
+        installed = terminal.updated_settings(personal, 'launcher', 'pwsh.exe')
+        removed = terminal.removed_settings(installed)
+        for line in ('// Keep my defaults and shortcuts.', '// my binding', '/* leave this here */', '// mine'):
+            self.assertIn(line, removed)
+        self.assertNotIn('Dalftui', removed)
+        result = self.settings(removed)
+        self.assertEqual(result['actions'], [{'command': 'copy', 'keys': 'ctrl+shift+c'}])
+        self.assertEqual(result['profiles']['list'], [{'guid': 'wsl-guid', 'name': 'Ubuntu'}])
+        self.assertEqual(result['profiles']['defaults'], {'font': {'size': 11}})
+        self.assertEqual(terminal.removed_settings(removed), removed)
+
+    def test_uninstall_keeps_values_changed_after_setup(self):
+        installed = terminal.updated_settings('{"keybindings": []}', 'launcher', 'pwsh.exe')
+        settings = self.settings(installed)
+        stub, admin = settings['profiles']['list']
+        stub['hidden'] = False
+        admin['name'] = 'Renamed admin'
+        settings['profiles']['defaults'] = {'font': {'face': 'Consolas'}}
+        settings['keybindings'][0]['keys'] = 'ctrl+alt+s'  # Rebound in Terminal's UI.
+        settings['profiles']['list'].append({'guid': '{gist-guid}', 'name': terminal.ADMIN_NAME})
+        result = self.settings(terminal.removed_settings(json.dumps(settings, indent=4)))
+        self.assertEqual(result['actions'], [])
+        self.assertEqual(result['keybindings'], [])
+        self.assertEqual(result['profiles']['defaults'], {'font': {'face': 'Consolas'}})
+        self.assertEqual(result['profiles']['list'], [
+            {'guid': terminal.PWSH_GUID, 'source': 'Windows.Terminal.PowershellCore', 'hidden': False},
+            {'guid': '{gist-guid}', 'name': terminal.ADMIN_NAME}])
+        grayscale = {'profiles': {'list': [{'guid': terminal.PWSH_GUID.upper(), 'source': 'x',
+                                            'antialiasingMode': 'grayscale'}]}}
+        text = json.dumps(grayscale)
+        self.assertEqual(terminal.removed_settings(text), text)
+
+    def test_uninstall_cli_backs_up_keeps_bom_crlf_and_supports_dry_run(self):
+        original = b'\xef\xbb\xbf{\r\n  // personal\r\n  "theme": "dark",\r\n}\r\n'
+        self.path.write_bytes(original)
+        terminal.configure(self.path, 'launcher', 'pwsh.exe')
+        vscode = self.root / 'vscode.json'
+        vscode.write_bytes(b'\xef\xbb\xbf{\r\n  "editor.fontSize": 14, // mine\r\n}\r\n')
+        terminal.configure_vscode(vscode)
+        for backup in self.root.glob('*.bak'):
+            backup.unlink()
+        command = [sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--uninstall',
+                   '--settings', str(self.path), '--vscode-settings', str(vscode)]
+        installed = self.path.read_bytes(), vscode.read_bytes()
+        result = subprocess.run([*command, '--dry-run'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Back up and remove dalftui Terminal settings', result.stdout)
+        self.assertEqual((self.path.read_bytes(), vscode.read_bytes()), installed)
+        self.assertFalse(list(self.root.glob('*.bak')))
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('settings.json.dalftui-*.bak', result.stdout)
+        self.assertEqual(sorted(path.read_bytes() for path in self.root.glob('*.bak')), sorted(installed))
+        for path, comment in ((self.path, b'// personal'), (vscode, b'// mine')):
+            content = path.read_bytes()
+            self.assertTrue(content.startswith(b'\xef\xbb\xbf{\r\n'))
+            self.assertNotIn(b'\n', content.replace(b'\r\n', b''))
+            self.assertIn(comment, content)
+            self.assertNotIn(b'Hack Nerd Font', content)
+        self.assertEqual(self.settings(vscode.read_text(encoding='utf-8-sig')), {'editor.fontSize': 14})
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No dalftui Terminal settings', result.stdout)
+        self.assertIn('No dalftui VS Code settings', result.stdout)
+        self.assertEqual(len(list(self.root.glob('*.bak'))), 2)
+
+    def test_uninstall_vscode_removes_only_effective_dalftui_values(self):
+        text = '{\n  "terminal.integrated.fontSize": 11,\n  "terminal.integrated.fontSize": 12,\n' \
+               '  "terminal.integrated.fontFamily": "Consolas"\n}'
+        self.assertEqual(self.settings(terminal.removed_vscode_settings(text)),
+                         {'terminal.integrated.fontSize': 11, 'terminal.integrated.fontFamily': 'Consolas'})
+        for unchanged in ('', '// only a comment\n', '{"terminal.integrated.fontSize": 12, "terminal.integrated.fontSize": 13}'):
+            self.assertEqual(terminal.removed_vscode_settings(unchanged), unchanged)
+        with self.assertRaises(ValueError):
+            terminal.removed_vscode_settings('{broken')
+
+    def test_uninstall_cli_reports_malformed_settings_without_writing(self):
+        self.path.write_text('{"actions": [}', encoding='utf-8')
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--uninstall',
+                                 '--settings', str(self.path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Terminal settings were not changed', result.stderr)
+        self.assertEqual(self.path.read_text(encoding='utf-8'), '{"actions": [}')
+        self.assertFalse(list(self.root.glob('*.bak')))
+
+    def test_uninstall_cli_reports_missing_terminal_settings(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--uninstall'],
+                                capture_output=True, text=True, env={**os.environ, 'LOCALAPPDATA': str(self.root)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Windows Terminal settings not found', result.stdout)
+
 if __name__ == '__main__':
     unittest.main()

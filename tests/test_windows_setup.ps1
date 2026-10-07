@@ -55,12 +55,14 @@ function Invoke-DalftuiWindowsSetup {
     [CmdletBinding()]
     param([string]$TargetProfile,
           [string]$Checkout, [switch]$NoTerminal, [string[]]$SettingsPaths,
-          [string]$SelectedVSCodePath)
+          [string]$SelectedVSCodePath, [switch]$Uninstall, [switch]$DryRun)
     if ($env:DALFTUI_SETUP_PROBE_FAIL) { throw 'probe failure' }
     $result = [ordered]@{
         TargetProfile = $TargetProfile
         Checkout = $Checkout
         NoTerminal = [bool]$NoTerminal
+        Uninstall = [bool]$Uninstall
+        DryRun = [bool]$DryRun
         SettingsPaths = @($SettingsPaths)
         SelectedVSCodePath = $SelectedVSCodePath
         ProcessPolicy = (Get-ExecutionPolicy -Scope Process).ToString()
@@ -123,6 +125,15 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True (-not $forwarded.NoTerminal -and -not $forwarded.TargetProfile -and
                  $forwarded.Checkout -eq $forwardingCheckout) `
         'The public setup wrapper must leave profile discovery to the installer by default'
+    Assert-True (-not $forwarded.Uninstall -and -not $forwarded.DryRun) 'Setup must not uninstall by default'
+    [IO.File]::WriteAllLines($runner, @(('& ' + $wrapperLiteral + ' -Uninstall -DryRun -SkipTerminal'),
+        'exit $LASTEXITCODE'), [Text.UTF8Encoding]::new($true))
+    $null = & $probeShell -NoLogo -NoProfile -File $runner
+    $forwarded = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($probeLog))
+    Assert-True ($LASTEXITCODE -eq 0 -and $forwarded.Uninstall -and $forwarded.DryRun -and $forwarded.NoTerminal) `
+        'The public setup wrapper must forward -Uninstall and -DryRun'
+    [IO.File]::WriteAllLines($runner, @(('& ' + $wrapperLiteral), 'exit $LASTEXITCODE'),
+        [Text.UTF8Encoding]::new($true))
     $env:DALFTUI_SETUP_PROBE_FAIL = '1'
     # Windows PowerShell 5.1 turns captured native stderr into error records.
     # Allow the expected failure output while still checking its exit status.
@@ -710,6 +721,64 @@ function Invoke-DalftuiWindowsSetup {
                  $profiles[1].name -eq 'Windows PowerShell 7 (Admin)' -and $profiles[1].elevate -and
                  $profiles[1].commandline -eq ('"' + $fakePwsh + '"')) `
         "Setup must customize PowerShell 7 and add an elevated copy: $($profiles | ConvertTo-Json -Compress)"
+    # Uninstall removes only setup's block, keeps the rest and reports a second run.
+    $uninstallProfile = Join-Path $root 'uninstall profile.ps1'
+    $personalText = "# personal " + [char]0xe9 + "`r`nfunction dssh { 'old' }`r`n"
+    [IO.File]::WriteAllText($uninstallProfile, $personalText, [Text.Encoding]::Unicode)
+    Write-DalftuiProfile -Path $uninstallProfile -Checkout $checkout
+    $installedBytes = [IO.File]::ReadAllBytes($uninstallProfile)
+    Remove-DalftuiProfile -Path $uninstallProfile -DryRun
+    Assert-True ([Convert]::ToBase64String($installedBytes) -eq
+                 [Convert]::ToBase64String([IO.File]::ReadAllBytes($uninstallProfile))) 'A dry run must leave the profile unchanged'
+    $backupCount = @(Get-ChildItem -LiteralPath $root -Filter 'uninstall profile.ps1*.bak').Count
+    Remove-DalftuiProfile -Path $uninstallProfile
+    Assert-True ([IO.File]::ReadAllText($uninstallProfile) -eq $personalText) 'Uninstall must keep personal profile text and line endings'
+    Assert-True (@(Get-ChildItem -LiteralPath $root -Filter 'uninstall profile.ps1*.bak').Count -eq $backupCount + 1) `
+        'Uninstall must back up the profile it changes'
+    $uninstalledBytes = [IO.File]::ReadAllBytes($uninstallProfile)
+    Assert-True ($uninstalledBytes[0] -eq 0xEF -and $uninstalledBytes[1] -eq 0xBB) 'Uninstall must keep the profile encoding'
+    $output = Remove-DalftuiProfile -Path $uninstallProfile 6>&1 | Out-String
+    Assert-True ($output.Contains('No dalftui block') -and
+                 @(Get-ChildItem -LiteralPath $root -Filter 'uninstall profile.ps1*.bak').Count -eq $backupCount + 1) `
+        'A second uninstall must report nothing to remove'
+    $editedBlock = "# >>> dalftui >>>`n. 'C:\old\bin/profile.ps1'`nSet-Alias x y`n# <<< dalftui <<<`n"
+    [IO.File]::WriteAllText($uninstallProfile, $editedBlock)
+    Remove-DalftuiProfile -Path $uninstallProfile -WarningAction SilentlyContinue
+    Assert-True ([IO.File]::ReadAllText($uninstallProfile) -eq $editedBlock) 'A block with personal lines must be kept'
+
+    # Exercise -Uninstall end to end on the settings installed above.
+    Write-DalftuiProfile -Path $uninstallProfile -Checkout $checkout
+    [IO.File]::WriteAllText($uninstallProfile, "# mine`n" + [IO.File]::ReadAllText($uninstallProfile))
+    $before = @($uninstallProfile, $settingsPath, $vscodeSettingsPath) | ForEach-Object { [Convert]::ToBase64String([IO.File]::ReadAllBytes($_)) }
+    & {
+        function Test-DalftuiWindowsPlatform { return $true }
+        function Get-DalftuiInstalledVSCodeSettingsPath([string]$RequestedPath) { return $vscodeSettingsPath }
+        Invoke-DalftuiWindowsSetup -Uninstall -DryRun -TargetProfile $uninstallProfile -Checkout $checkout `
+            -SettingsPaths @($settingsPath) | Out-Null
+        $after = @($uninstallProfile, $settingsPath, $vscodeSettingsPath) | ForEach-Object { [Convert]::ToBase64String([IO.File]::ReadAllBytes($_)) }
+        Assert-True (($before -join ',') -eq ($after -join ',')) 'An uninstall dry run must change no file'
+        Invoke-DalftuiWindowsSetup -Uninstall -TargetProfile $uninstallProfile -Checkout $checkout `
+            -SettingsPaths @($settingsPath) | Out-Null
+    }
+    Assert-True ([IO.File]::ReadAllText($uninstallProfile) -eq "# mine`n") 'Uninstall must remove the profile block'
+    $terminalText = [IO.File]::ReadAllText($settingsPath)
+    Assert-True (-not $terminalText.Contains('Dalftui') -and -not $terminalText.Contains('Hack Nerd Font') -and
+                 -not $terminalText.Contains('Windows PowerShell 7 (Admin)')) "Uninstall must remove Terminal entries: $terminalText"
+    $vscodeText = [IO.File]::ReadAllText($vscodeSettingsPath)
+    Assert-True ($vscodeText.Contains('// personal') -and -not $vscodeText.Contains('terminal.integrated')) `
+        "Uninstall must remove the VS Code font and keep comments: $vscodeText"
+    # A -VSCodePath whose Code.exe was removed still finds portable data, or is skipped.
+    $removedCode = Join-Path $root 'removed VS Code'
+    [IO.Directory]::CreateDirectory((Join-Path $removedCode 'data')) | Out-Null
+    Assert-True ((Get-DalftuiInstalledVSCodeSettingsPath $removedCode) -eq
+                 (Join-Path $removedCode 'data\user-data\User\settings.json')) 'Uninstall must find portable data without Code.exe'
+    Assert-True ($null -eq (Get-DalftuiInstalledVSCodeSettingsPath (Join-Path $root 'missing') 3>$null)) `
+        'A missing -VSCodePath must skip VS Code instead of failing'
+    & {
+        function Test-DalftuiWindowsPlatform { return $true }
+        Assert-Throws { Invoke-DalftuiWindowsSetup -DryRun -TargetProfile $uninstallProfile -NoTerminal } `
+            '-DryRun without -Uninstall must be rejected'
+    }
     Write-Host "Passed $checks Windows setup assertions."
     # The exit-status test above deliberately ran a failing native command.
     $global:LASTEXITCODE = 0

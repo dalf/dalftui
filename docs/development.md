@@ -161,6 +161,8 @@ mise tasks
 | `mise run test:powershell` | Windows setup and profile integration |
 | `mise run install:linux` | Linux installation through `./install` |
 | `mise run install:windows` | Windows installation through `install.ps1` |
+| `mise run uninstall:linux` | Linux uninstall through `./install --uninstall` |
+| `mise run uninstall:windows` | Windows uninstall through `install.ps1 -Uninstall` |
 | `mise run reload:linux` | Reload Linux settings through `./bin/reload` |
 | `mise run ssh:list` | List SSH picker hosts without opening a connection |
 
