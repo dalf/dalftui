@@ -115,15 +115,19 @@ by rebinding those keys.
 
 Details: [docs/tmux.md](docs/tmux.md).
 
-## claude-tabstatus tab labels
+## tmux tab labels and claude-tabstatus
 
 What: with [claude-tabstatus](https://github.com/dalf/claude-tabstatus)
 installed, each tab shows status circles (idle grey, question orange, working
-blue, workflow purple) and `repository@branch` for a Claude pane. Without it,
-a shell tab shows the pane title and other tabs the window name.
+blue, workflow purple) and `repository@branch` for a Claude pane. Shell tabs show
+their pane title. Other programs show `repository@branch · program`, such as
+`dalftui@main · codex`, or `directory · program` outside Git. The Git context
+follows the active pane's directory and refreshes every five seconds, including
+while the program runs. An explicitly renamed window keeps its name after `·`.
 
-Files: `config/tmux.conf` (`@claude_window_label`, `@claude_tab_active_strip`,
-`@claude_tab_inactive_strip`, the `window-status-*format` lines).
+Files: `config/tmux.conf` (`@claude_window_label`, `@dalftui_program_label`,
+`@claude_tab_active_strip`, `@claude_tab_inactive_strip`, the
+`window-status-*format` lines), `bin/tmux_label.py`, `dalftui/linux/tmux_label.py`.
 
 Needs: the tmux feature above, claude-tabstatus installed separately (also on
 the server if Claude runs there), a font with `⬤`.
@@ -131,7 +135,8 @@ the server if Claude runs there), a font with `⬤`.
 Works on: Linux. Windows: through tmux on a Linux server. macOS: untested.
 
 Take it alone: comes with `config/tmux.conf`. To copy only the labels, take the
-three `@claude_*` options and use `#{E:@claude_window_label}` and
+three `@claude_*` options and `@dalftui_program_label`, point its helper command
+at your checkout's `bin/tmux_label.py`, and use `#{E:@claude_window_label}` and
 `#{E:@claude_tab_active_strip}` / `#{E:@claude_tab_inactive_strip}` in your own
 window formats. Not tested with a real claude-tabstatus.
 

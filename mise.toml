@@ -20,8 +20,8 @@ run = "uvx codespell==2.4.3"
 [tasks.pylint]
 description = "Check Python source, entrypoints, and tests with Pylint"
 alias = "lint"
-run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py"
-run_windows = 'uvx --python python pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py'
+run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py"
+run_windows = 'uvx --python python pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py'
 
 [tasks.test]
 description = "Run all tests for the current platform"
