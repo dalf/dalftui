@@ -60,7 +60,8 @@ class ServerUvTests(UvBindingFixture):
         self.assertTrue(commands['F3'].startswith('python3 '), commands['F3'])
 
     def test_tab_label_helper_runs_through_uv(self):
-        label = self.tmux('show-options', '-gv', '@dalftui_program_label')
+        # Some tmux versions escape $ when showing an option.
+        label = self.tmux('show-options', '-gv', '@dalftui_program_label').replace('\\$', '$')
         self.assertTrue(label.startswith('#(PATH="$PATH:$HOME/.local/bin" ' + UV_RUN), label)
         self.assertIn('/bin/tmux_label.py ', label)
 
