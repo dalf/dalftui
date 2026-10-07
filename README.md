@@ -42,7 +42,7 @@ Options: `-VSCodePath` (portable VS Code), `-ProfilePath` (one profile only),
 disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs Python 3.11+, tmux
-3.2+ and Oh My Posh, from Homebrew: `brew install python@3.13 tmux oh-my-posh`.
+3.2+ and Oh My Posh, from Homebrew: `brew install python tmux oh-my-posh`.
 Then `./install --dry-run`, `./install`, `./bin/reload`. It sets up tmux, the
 zsh prompt, Hack Nerd Font and VS Code's terminal font. Tested on macOS CI only;
 see [macOS](docs/install.md#macos).
@@ -227,7 +227,8 @@ Needs: Oh My Posh (it downloads the font), network access once. Linux:
 `fc-list`.
 
 Works on: Linux (desktop mode only), Windows. macOS: detection in
-`~/Library/Fonts` tested on CI; the download is not run there.
+`~/Library/Fonts` tested on CI; the download is not run there. Select the font
+yourself in Terminal.app or iTerm2 (Settings > Profiles > Text).
 
 Take it alone: `oh-my-posh font install Hack`. To name it in Alacritty, put
 `normal.family = "Hack Nerd Font"` under `[font]` in `local.toml`. In Windows

@@ -7,7 +7,7 @@ import subprocess
 sys.dont_write_bytecode = True
 if sys.version_info < (3, 11):  # The setup module needs Python 3.11 to import.
     raise SystemExit('Install failed: Python 3.11 or newer is required'
-                     + (' (Homebrew: brew install python@3.13).' if sys.platform == 'darwin' else '.'))
+                     + (' (Homebrew: brew install python).' if sys.platform == 'darwin' else '.'))
 from dalftui.linux.setup import dependencies, install, installed_profile, uninstall
 
 

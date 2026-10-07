@@ -111,7 +111,7 @@ rest from Homebrew and make sure `brew shellenv` runs in your shell setup so
 `python3`, `tmux` and `oh-my-posh` resolve to Homebrew's:
 
 ```sh
-brew install python@3.13 tmux oh-my-posh
+brew install python tmux oh-my-posh
 ./install --dry-run
 ./install
 ./bin/reload
@@ -124,9 +124,12 @@ the server mode, it also:
 - appends the marked prompt line pair sourcing `config/prompt.zsh` to `~/.zshrc`
   (or `$ZDOTDIR/.zshrc`), not `~/.bashrc`;
 - installs Hack Nerd Font into `~/Library/Fonts` unless `~/Library/Fonts` or
-  `/Library/Fonts` already holds it;
+  `/Library/Fonts` already holds it, but does not select it: choose *Hack Nerd
+  Font* under Settings > Profiles > Text (Terminal.app: Font > Change; iTerm2: Font);
 - sets VS Code's terminal font in `~/Library/Application Support/Code/User/settings.json`
   when that folder or the `code` command exists;
+- does not force 24-bit color, which Terminal.app lacks before macOS 26; tmux
+  detects it in iTerm2 and, from tmux 3.6, in terminals setting `COLORTERM=truecolor`;
 - makes tmux copy-mode copies use `pbcopy`, because Terminal.app does not support
   OSC 52. A program's own OSC 52 write did not reach the clipboard on CI (no
   terminal attached there); in iTerm2 it needs *Applications in terminal may

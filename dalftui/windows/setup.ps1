@@ -318,7 +318,8 @@ function Test-DalftuiNerdFont {
     foreach ($hive in @('HKCU:', 'HKLM:')) {
         $fonts = Get-ItemProperty -LiteralPath ($hive + '\Software\Microsoft\Windows NT\CurrentVersion\Fonts') `
             -ErrorAction SilentlyContinue
-        if ($fonts -and @($fonts.PSObject.Properties.Name -like 'Hack Nerd Font*').Count) { return $true }
+        # 'Hack Nerd Font Bold (TrueType)', not the Mono or Propo families.
+        if ($fonts -and @($fonts.PSObject.Properties.Name -match '^Hack Nerd Font (?!Mono\b|Propo\b)').Count) { return $true }
     }
     return $false
 }

@@ -209,21 +209,25 @@ class EditorBridge:
                                                stderr.read().decode('utf-8', errors='replace'))
 
     @staticmethod
-    def close_socket(connection):
-        # close() alone need not interrupt recv() in another thread on every OS.
+    def interrupt_socket(connection):
+        # Blocked readers wake on shutdown() on Linux and macOS, but only on close()
+        # on Windows. On macOS, close() right after shutdown() can lose the wakeup
+        # of a reader with a timeout, so there its worker closes the socket.
         try:
             connection.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-        connection.close()
+        if WINDOWS:
+            connection.close()
 
     def __exit__(self, *args):
         if hasattr(self, 'lock'):
             with self.lock:
                 self.stopped.set()
-                self.close_socket(self.listener)
+                self.interrupt_socket(self.listener)
+                self.listener.close()
                 for connection in self.connections:
-                    self.close_socket(connection)
+                    self.interrupt_socket(connection)
                 for process in self.processes:
                     try:
                         process.kill()
@@ -238,6 +242,8 @@ class EditorBridge:
             while not self.pending.empty():
                 self.pending.get_nowait()
                 self.pending.task_done()
+            for connection in self.connections:
+                connection.close()
             self.connections.clear()
         else:
             self.listener.close()

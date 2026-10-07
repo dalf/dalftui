@@ -58,11 +58,11 @@ class Paths:
 
     @property
     def zshrc(self):
-        """zsh reads .zshrc from $ZDOTDIR, which ~/.zshenv may set without exporting it."""
+        """zsh reads .zshrc from $ZDOTDIR, which ~/.zshenv or ~/.zprofile may set without exporting it."""
         zdotdir = os.environ.get('ZDOTDIR')
         if shutil.which('zsh'):
             try:
-                result = subprocess.run(['zsh', '-c', 'print -r -- ${ZDOTDIR:-$HOME}'], stdin=subprocess.DEVNULL,
+                result = subprocess.run(['zsh', '-l', '-c', 'print -r -- ${ZDOTDIR:-$HOME}'], stdin=subprocess.DEVNULL,
                                         env=dict(os.environ, HOME=str(self.home_dir)),
                                         capture_output=True, text=True, timeout=10)
                 zdotdir = (result.stdout.splitlines() or [zdotdir])[-1]
@@ -173,7 +173,7 @@ def dependencies(profile='desktop'):
         programs += ('alacritty', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
-        hint = ' (Homebrew: brew install python@3.13 tmux oh-my-posh)' if sys.platform == 'darwin' else ''
+        hint = ' (Homebrew: brew install python tmux oh-my-posh)' if sys.platform == 'darwin' else ''
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)
     specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
@@ -236,7 +236,7 @@ def install_font(dry_run):
     """Install the Nerd Font used by the prompt and VS Code unless it is present."""
     if sys.platform == 'darwin':  # Stock macOS has no fc-list; oh-my-posh installs into ~/Library/Fonts.
         for fonts in (Path.home() / 'Library/Fonts', Path('/Library/Fonts')):
-            if any(fonts.glob('HackNerdFont*')):
+            if any(fonts.glob('HackNerdFont-*')):  # Not HackNerdFontMono or HackNerdFontPropo.
                 return
     if shutil.which('fc-list'):
         result = subprocess.run(['fc-list', ':', 'family'], capture_output=True, text=True, timeout=30)

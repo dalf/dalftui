@@ -500,6 +500,16 @@ function Invoke-DalftuiWindowsSetup {
         Assert-Throws { Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh } `
             'A font installation that leaves the font missing must fail setup'
     }
+    & {
+        function Get-ItemProperty { return $global:dalftuiRegisteredFonts }
+        $global:dalftuiRegisteredFonts = [pscustomobject]@{
+            'Hack Nerd Font Mono Regular (TrueType)' = 'HackNerdFontMono-Regular.ttf'
+            'Hack Nerd Font Propo Bold (TrueType)' = 'HackNerdFontPropo-Bold.ttf' }
+        Assert-True (-not (Test-DalftuiNerdFont)) 'Only the Mono or Propo family must not count as Hack Nerd Font'
+        $global:dalftuiRegisteredFonts = [pscustomobject]@{
+            'Hack Nerd Font Regular (TrueType)' = 'HackNerdFont-Regular.ttf' }
+        Assert-True (Test-DalftuiNerdFont) 'A registered Hack Nerd Font must be detected'
+    }
 
     $profile = Join-Path (Join-Path $root 'profile directory') 'profile.ps1'
     Write-DalftuiProfile -Path $profile -Checkout $checkout

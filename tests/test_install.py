@@ -352,11 +352,13 @@ class FontTests(unittest.TestCase):
                     patch.object(setup.Path, 'home', return_value=Path(home)), \
                     patch.object(setup.shutil, 'which', return_value=None), \
                     patch.object(setup.subprocess, 'run') as run:
+                fonts.mkdir(parents=True)  # Other families of the same download do not count.
+                (fonts / 'HackNerdFontMono-Regular.ttf').touch()
+                (fonts / 'HackNerdFontPropo-Regular.ttf').touch()
                 output = io.StringIO()
                 with redirect_stdout(output):
                     setup.install_font(True)
                 self.assertIn('Install font', output.getvalue())
-                fonts.mkdir(parents=True)
                 (fonts / 'HackNerdFont-Regular.ttf').touch()
                 setup.install_font(False)
             run.assert_not_called()
@@ -756,6 +758,12 @@ class MacTests(DisposableSetup):
             setup.uninstall(self.paths)
         self.assertEqual((self.paths.home_dir / 'zd/.zshrc').read_text(), '')
 
+    @unittest.skipUnless(shutil.which('zsh'), 'zsh is required')
+    def test_unexported_zdotdir_from_zprofile_is_honored(self):
+        # Terminal.app and iTerm2 start login shells, which also read ~/.zprofile.
+        (self.paths.home_dir / '.zprofile').write_text('ZDOTDIR=$HOME/zp\n')
+        self.assertEqual(self.paths.zshrc, self.paths.home_dir / 'zp/.zshrc')
+
     def test_vscode_settings_use_the_library_path_and_are_removed(self):
         self.vscode_present.return_value = True
         self.assertEqual(self.paths.vscode_settings,
@@ -819,8 +827,10 @@ class MacTmuxTests(TmuxFixture):
 
     def test_mac_copies_with_pbcopy_and_switching_back_removes_mac_keys(self):
         self.start()
+        self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # As a server-mode load leaves it.
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
+        self.assertNotIn('Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
         prefix, root = self.keys('prefix'), self.keys('root')
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
@@ -830,6 +840,7 @@ class MacTmuxTests(TmuxFixture):
         self.install(profile='tmux-only')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
+        self.assertIn('*:Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
         root = self.keys('root')
         self.assertNotIn('C-S-F1', root)
         self.assertNotIn('C-S-F3', root)
