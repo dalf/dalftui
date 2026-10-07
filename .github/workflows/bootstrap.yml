@@ -51,6 +51,28 @@ jobs:
           mkdir -p /home/tester/code
           cp -a "$GITHUB_WORKSPACE" /home/tester/code/dalftui
           chown -R tester: /home/tester/code
+      - name: Pre-place Hack Nerd Font
+        if: matrix.desktop
+        # oh-my-posh resolves fonts through the GitHub API, whose shared CI rate limit fails runs;
+        # the release download is not rate-limited. A present font makes ./install skip its download.
+        run: |
+          sudo -u tester -H python3 - <<'EOF'
+          import io, pathlib, time, urllib.request, zipfile
+          url = 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip'
+          for attempt in range(5):
+              try:
+                  data = urllib.request.urlopen(url, timeout=120).read()
+                  break
+              except OSError as error:
+                  print(f'Download failed ({error}); retrying')
+                  time.sleep(15 * (attempt + 1))
+          else:
+              raise SystemExit('Hack.zip download failed')
+          fonts = pathlib.Path.home() / '.local/share/fonts'
+          fonts.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              (fonts / 'HackNerdFont-Regular.ttf').write_bytes(archive.read('HackNerdFont-Regular.ttf'))
+          EOF
       - name: First run installs everything
         run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap ${{ matrix.flags }}'
       - name: Second run changes nothing
