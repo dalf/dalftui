@@ -7,14 +7,13 @@ from pathlib import Path
 import re
 import shlex
 import sys
-import tempfile
 
 from dalftui.linux.bootstrap import PACKAGES, REPO, Bootstrap, read_packages
 from dalftui.windows.terminal_settings import settings_paths
 
 SCOOP_SCRIPT = Path('apps/scoop/current/bin/scoop.ps1')
 FIRST_STEP = ('Set-ExecutionPolicy -Scope CurrentUser RemoteSigned; irm get.scoop.sh | iex; '
-              'scoop install git python')
+              'scoop install git uv')
 OPENSSH = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/OpenSSH/ssh.exe'
 OPENSSH_ADD = 'Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0'
 
@@ -105,24 +104,10 @@ class Scoop(Bootstrap):
                 self.add('installed', [name])
             elif after[name] != before[name]:
                 self.add('upgraded', [name])
-            elif 'Running process detected' in output.get(name, ''):  # Such as the Python running bootstrap.
+            elif 'Running process detected' in output.get(name, ''):  # Such as the uv running bootstrap.
                 self.add('skipped', [f'{name} (in use; close it, then run scoop update {name.rpartition("/")[2]})'])
             else:
                 self.add('failed' if name in outdated else 'skipped', [name])
-
-    def register_python(self):
-        """py finds Scoop's Python through the registry, which names a version directory that each update replaces."""
-        script = self.app('python') / 'install-pep-514.reg'
-        if self.dry_run or not script.is_file():
-            return
-        # Scoop writes it as ASCII, which turns a non-ASCII user name into ?; reg import also reads UTF-16.
-        root = str(self.scoop).replace('\\', '\\\\')
-        text = script.read_text(encoding='ascii', errors='replace')
-        with tempfile.TemporaryDirectory() as directory:
-            reg = Path(directory) / script.name
-            reg.write_text(text.replace(root.encode('ascii', 'replace').decode(), root), encoding='utf-16')
-            if self.run(['reg', 'import', str(reg)]).returncode:
-                self.add('failed', ['python (py registration)'])
 
     def openssh(self):
         if not OPENSSH.is_file():
@@ -170,7 +155,6 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     names = read_packages(PACKAGES / 'windows.txt')
     run.buckets(names)
     run.packages(names)
-    run.register_python()
     run.openssh()
     run.terminal()
     run.install_cmd()

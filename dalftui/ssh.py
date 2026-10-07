@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --python >=3.11
 """Pick an SSH host, using remote tmux and a VS Code bridge when installed."""
 import argparse
 from dataclasses import dataclass

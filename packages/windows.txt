@@ -3,14 +3,13 @@
 
 # dalftui requirements
 git                # bootstrap's git pull; Scoop's buckets need it
-python             # runs bootstrap and the launcher; registered for py after each run
+uv                 # runs bootstrap and dalftui's Python, which it downloads when needed
 oh-my-posh         # setup finds it on the persistent PATH
 extras/vscode      # VS Code (Microsoft's zip, portable); the editor shortcut
 pwsh               # PowerShell 7; optional, setup configures it when present
 
 # The owner's personal tools
 mise
-uv
 gsudo
 lsd
 less

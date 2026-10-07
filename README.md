@@ -15,8 +15,8 @@ Each feature says what it needs, where it works, and how to turn parts off.
 
 ## Install everything
 
-Linux desktop. Needs Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+,
-Git, `less` and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux):
+Linux desktop. Needs Python 3.11+, [uv](https://docs.astral.sh/uv/), Alacritty 0.14+, tmux 3.2+,
+OpenSSH 9.4+, Git, `less` and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux):
 
 ```sh
 cd ~/code/dalftui
@@ -25,10 +25,10 @@ cd ~/code/dalftui
 ./bin/reload
 ```
 
-Linux server (tmux, prompt and shortcut guide only; Python 3.11+, tmux 3.2+,
+Linux server (tmux, prompt and shortcut guide only; Python 3.11+, uv, tmux 3.2+,
 Git, `less`, Oh My Posh): `./install --tmux-only`.
 
-Windows. Needs Python 3.11+, Windows OpenSSH, Oh My Posh
+Windows. Needs uv (`scoop install uv`), Windows OpenSSH, Oh My Posh
 (`winget install JanDeDobbeleer.OhMyPosh`) and VS Code with Remote - SSH:
 
 ```powershell
@@ -41,8 +41,8 @@ Options: `-VSCodePath` (portable VS Code), `-ProfilePath` (one profile only),
 `-TerminalSettingsPath`, `-SkipTerminal`. If PowerShell then says scripts are
 disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs Python 3.11+, tmux
-3.2+ and Oh My Posh, from Homebrew: `brew install python tmux oh-my-posh`.
+macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs Python 3.11+, uv, tmux
+3.2+ and Oh My Posh, from Homebrew: `brew install python tmux oh-my-posh uv`.
 Then `./install --dry-run`, `./install`, `./bin/reload`. It sets up tmux, the
 zsh prompt, Hack Nerd Font and VS Code's terminal font. Tested on macOS CI only;
 see [macOS](docs/install.md#macos).
@@ -87,10 +87,10 @@ On Windows, in a non-elevated Windows PowerShell, the same bootstrap uses Scoop
 ([packages/windows.txt](packages/windows.txt)) and then runs `install.cmd`:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git python; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; python "$HOME\code\dalftui\bootstrap"
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
 ```
 
-Rerun `python "$HOME\code\dalftui\bootstrap"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
+Rerun `uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
 
 ## tmux bindings and look
 
@@ -104,9 +104,8 @@ shortcut guide. The prefix stays Ctrl+B.
 Files: `config/tmux.conf`, `vendor/catppuccin/` (Catppuccin tmux v2.3.1, MIT),
 `bin/shortcuts.py`, `dalftui/linux/shortcuts.py`.
 
-Needs: tmux 3.2+ (3.3+ for styled popups). Python 3.11+ and `less` for the
-guide. A font with the rounded caps and `⬤`, such as Hack Nerd Font, in the
-terminal you look at (for a server, your local terminal).
+Needs: tmux 3.2+ (3.3+ for styled popups). uv and `less` for the guide. A
+font with the rounded caps and `⬤`, such as Hack Nerd Font, in the terminal you look at (for a server, your local terminal).
 
 Works on: Linux. Windows: only inside tmux on a Linux server. macOS: installed
 and loaded on macOS CI, where tmux copies go to the clipboard through `pbcopy`;
@@ -284,7 +283,7 @@ Files: `bin/ssh_picker.py`, `dalftui/ssh.py`, `dalftui/host_picker.py`,
 `profile.ps1`, `ssh-tab.ps1`).
 
 Needs: Python 3.11+, OpenSSH 9.4+ for `Tag`. Linux default mode: Alacritty on
-PATH. Windows: `py` or `python` on PATH.
+PATH. Windows: uv on PATH.
 
 Works on: Linux, Windows. macOS: untested; `--pick` and `--connect` should
 work.
@@ -305,14 +304,15 @@ python3 ~/code/dalftui/bin/ssh_picker.py --pick            # pick, this terminal
 python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST    # direct
 ```
 
-On Windows use `py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --pick`. A
+On Windows use `uv run --no-project --python ">=3.11" "$HOME\code\dalftui\bin\ssh_picker.py" --pick`. A
 minimal `dssh` for `$PROFILE`:
 
 ```powershell
 function dssh {
     param([string]$HostName)
     $picker = "$HOME\code\dalftui\bin\ssh_picker.py"
-    if ($HostName) { py -3 $picker --connect $HostName } else { py -3 $picker --pick }
+    $run = 'run', '--no-project', '--python', '>=3.11', $picker
+    if ($HostName) { uv @run --connect $HostName } else { uv @run --pick }
 }
 ```
 
@@ -338,8 +338,8 @@ Files: `config/tmux.conf` (the F3 binding), `bin/vscode.py`,
 `dalftui/windows/profile.ps1`.
 
 Needs: VS Code with `code` on PATH (Windows: the installer records
-`Code.exe`). Python 3.11+. For remote: the Remote - SSH extension; on the
-server tmux, python3 and a current dalftui at `~/.config/dalftui`
+`Code.exe`). uv, which runs Python 3.11+. For remote: the Remote - SSH
+extension; on the server tmux, python3 and a current dalftui at `~/.config/dalftui`
 (`./install --tmux-only`); sshd allowing `AllowStreamLocalForwarding` (Linux)
 or remote TCP forwarding with `GatewayPorts` `no` or `clientspecified`
 (Windows). Connect through the picker, `dssh` or `--connect`; a plain `ssh`

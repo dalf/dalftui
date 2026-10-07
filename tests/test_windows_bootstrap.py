@@ -81,8 +81,9 @@ class ScoopTestCase(unittest.TestCase):
 class PackageListTests(unittest.TestCase):
     def test_repository_list_has_the_setup_requirements(self):
         names = shared.read_packages(shared.PACKAGES / 'windows.txt')
-        for name in ('git', 'python', 'oh-my-posh', 'extras/vscode', 'pwsh'):
+        for name in ('git', 'uv', 'oh-my-posh', 'extras/vscode', 'pwsh'):
             self.assertIn(name, names)
+        self.assertNotIn('python', names)  # uv provides Python; no plain python command.
         self.assertEqual(len(names), len(set(names)))
 
 
@@ -151,35 +152,6 @@ class PackageTests(ScoopTestCase):
         run = self.scoop(fail={'extras'})
         quietly(run.buckets, ['extras/mc'])
         self.assertEqual(run.summary['failed'], ['extras bucket'])
-
-    def test_python_is_registered_for_py(self):
-        run = self.scoop()
-        quietly(run.register_python)
-        self.assertEqual(run.commands, [])  # No Scoop Python.
-        run = FakeScoop(run.scoop / 'Clément')
-        script = run.app('python') / 'install-pep-514.reg'
-        script.parent.mkdir(parents=True)
-        root = str(run.scoop).replace('\\', '\\\\')  # Scoop writes the path with doubled \\, in ASCII.
-        script.write_text(f'@="{root.replace("é", "?")}"\n', encoding='ascii')
-        imported = []
-        original = run.run
-
-        def import_reg(command, **kwargs):
-            imported.append(Path(command[2]).read_text(encoding='utf-16'))
-            return original(command, **kwargs)
-        with patch.object(run, 'run', side_effect=import_reg):
-            quietly(run.register_python)
-        self.assertEqual(run.commands[0][:2], ['reg', 'import'])
-        self.assertEqual(imported, [f'@="{root}"\n'])  # The real path, in UTF-16 for reg import.
-        run.fail.add('command')
-        quietly(run.register_python)
-        self.assertEqual(run.summary['failed'], ['python (py registration)'])
-        run = self.scoop(dry_run=True)
-        script = run.app('python') / 'install-pep-514.reg'
-        script.parent.mkdir(parents=True)
-        script.write_text('', encoding='ascii')
-        quietly(run.register_python)
-        self.assertEqual(run.commands, [])
 
 
 class CheckTests(ScoopTestCase):
@@ -254,7 +226,7 @@ class StartTests(unittest.TestCase):
     def test_needs_scoop(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'SCOOP': directory}), \
                 patch.object(bootstrap, 'elevated', return_value=False):
-            self.assertIn('irm get.scoop.sh | iex; scoop install git python', self.start())
+            self.assertIn('irm get.scoop.sh | iex; scoop install git uv', self.start())
 
     def test_log_lives_in_local_app_data(self):
         with patch.dict(os.environ, {'LOCALAPPDATA': '/local'}):

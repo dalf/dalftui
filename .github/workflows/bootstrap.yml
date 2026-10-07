@@ -156,23 +156,23 @@ jobs:
           '@
       - name: First run installs everything
         # The documented command, with a copy of this checkout in place of the clone. msiexec fails with 1601 in a
-        # batch logon, so Scoop extracts the Python and 7-Zip MSIs with lessmsi here.
+        # batch logon, so Scoop extracts the 7-Zip MSI with lessmsi here.
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
-          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop config use_lessmsi true; scoop install git python
+          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop config use_lessmsi true; scoop install git uv
           $null = New-Item -ItemType Directory -Force "$HOME\code"
           Copy-Item -Recurse C:\ci\dalftui "$HOME\code\dalftui"
           # A registered font makes setup skip oh-my-posh's download, which hits shared GitHub API rate limits.
           $fonts = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
           if (-not (Test-Path $fonts)) { $null = New-Item -Path $fonts }
           $null = New-ItemProperty -Path $fonts -Name 'Hack Nerd Font Regular (TrueType)' -Value 'HackNerdFont-Regular.ttf' -Force
-          python "$HOME\code\dalftui\bootstrap"
+          uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
           exit $LASTEXITCODE
           '@
       - name: Second run changes nothing
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
-          $output = & "$HOME\scoop\apps\python\current\python.exe" "$HOME\code\dalftui\bootstrap" | Out-String
+          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" | Out-String
           $output
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($line in 'Installed: 0', 'Upgraded: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }
@@ -180,7 +180,7 @@ jobs:
       - name: Dry run changes nothing
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
-          $output = & "$HOME\scoop\apps\python\current\python.exe" "$HOME\code\dalftui\bootstrap" --dry-run | Out-String
+          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" --dry-run | Out-String
           $output
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($line in 'Would install: 0', 'Would upgrade: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }
@@ -189,7 +189,7 @@ jobs:
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
           $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
-          foreach ($tool in 'git', 'python', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less') {
+          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less') {
               $path = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
               "$tool ..."
               $version = @($null | & $tool --version)[0]
@@ -197,10 +197,6 @@ jobs:
               "$tool $version"
           }
           foreach ($tool in 'btop', '7z', 'zip', 'mc') { (Get-Command $tool -CommandType Application | Select-Object -First 1).Source }
-          if (Get-Command py -ErrorAction SilentlyContinue) {
-              py -0p
-              if (-not (py -0p | Select-String -Quiet -SimpleMatch "$HOME\scoop\apps\python")) { 'py does not list Scoop Python'; exit 1 }
-          }
           $documents = [Environment]::GetFolderPath('MyDocuments')
           foreach ($profilePath in "$documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1", "$documents\PowerShell\Microsoft.PowerShell_profile.ps1") {
               if (-not (Select-String -Quiet -SimpleMatch '# >>> dalftui >>>' $profilePath)) { "No dalftui block: $profilePath"; exit 1 }

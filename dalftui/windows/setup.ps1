@@ -342,16 +342,10 @@ function Test-DalftuiWindowsPlatform {
 }
 
 function Find-DalftuiPython {
-    $python = Find-DalftuiApplication 'py'
-    $pythonArguments = @('-3')
-    if (-not $python) {
-        $python = Find-DalftuiApplication 'python'
-        $pythonArguments = @()
-    }
-    if (-not $python) { throw 'Install Python 3.11+ first, then open a new terminal.' }
-    & $python.Source @pythonArguments -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'
-    if ($LASTEXITCODE -ne 0) { throw 'Python 3.11 or newer is required.' }
-    return [pscustomobject]@{Source = $python.Source; Arguments = $pythonArguments}
+    # uv runs dalftui's Python, downloading a suitable version when none is installed.
+    $uv = Find-DalftuiApplication 'uv'
+    if (-not $uv) { throw 'Install uv first (scoop install uv), then open a new terminal.' }
+    return [pscustomobject]@{Source = $uv.Source; Arguments = @('run', '--no-project', '--python', '>=3.11')}
 }
 
 function Get-DalftuiInstalledVSCodeSettingsPath([string]$RequestedPath) {
