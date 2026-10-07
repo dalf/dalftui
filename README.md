@@ -64,6 +64,21 @@ Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall
 
 Details: [docs/install.md](docs/install.md).
 
+## Set up a new machine (Fedora)
+
+Opt-in, and the package list is my personal tool set: edit
+[packages/fedora.txt](packages/fedora.txt) before using it. On a new Fedora
+machine:
+
+```sh
+sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+```
+
+`./bootstrap` adds Microsoft's VS Code repository, installs and upgrades the
+listed packages with dnf, installs or upgrades Oh My Posh and mise, updates the checkout with `git pull --ff-only`, then runs
+`./install` and `./bin/reload`. Run it again at any time to update. Options:
+`--dry-run`, `--tmux-only`. See [New Fedora machine](docs/install.md#new-fedora-machine).
+
 ## tmux bindings and look
 
 What: tabs at the top as rounded pills on a black bar, Catppuccin Mocha

@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Install the Fedora packages and tools in packages/fedora.txt, update this checkout, then run ./install."""
+import argparse
+import sys
+
+sys.dont_write_bytecode = True
+if sys.version_info < (3, 11):  # The bootstrap module needs Python 3.11 to import.
+    raise SystemExit('Bootstrap failed: Python 3.11 or newer is required.')
+from dalftui.linux.bootstrap import bootstrap
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dry-run', action='store_true', help='Show what would change without changing anything')
+    parser.add_argument('--tmux-only', action='store_true',
+                        help='Skip the [desktop] packages and the VS Code repository, and pass --tmux-only to ./install')
+    args = parser.parse_args()
+    return bootstrap(dry_run=args.dry_run, tmux_only=args.tmux_only, argv=sys.argv[1:])
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

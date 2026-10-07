@@ -8,7 +8,8 @@ Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
 `less`, and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the
 desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
 and Oh My Posh. The installer configures software that is already installed. It
-uses no package manager, root access, or Python packages. The only download is
+uses no package manager, root access, or Python packages; on Fedora, the separate
+[`./bootstrap`](#new-fedora-machine) installs them with dnf. The only download is
 the desktop mode's font: when `fc-list` does not show Hack Nerd Font, the
 installer runs `oh-my-posh font install Hack`.
 
@@ -102,6 +103,51 @@ To receive later configuration updates on the server:
 git pull --ff-only
 ./bin/reload
 ```
+
+## New Fedora machine
+
+`./bootstrap` is opt-in and separate from `./install`, which keeps configuring
+software only. Its package list is the owner's personal tool set. Python 3.11+
+and Git must exist first; on a new machine:
+
+```sh
+sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+```
+
+Each run, in order (a failed step does not stop the next ones):
+
+1. Updates its own checkout with `git pull --ff-only` and restarts if new
+   commits arrived. It skips this on a detached HEAD, without an upstream branch,
+   or with uncommitted changes to tracked files.
+2. Asks for the sudo password once and, unless `--tmux-only`, adds Microsoft's
+   [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
+   and `/etc/yum.repos.d/vscode.repo`) when that file is missing. A `code` rpm
+   installed from a download is then upgraded from the repository.
+3. Installs each missing package from
+   [packages/fedora.txt](../packages/fedora.txt) with its own `dnf install`, so
+   one failure does not stop the others, and upgrades the listed installed
+   packages with `dnf upgrade`. Other system packages are not upgraded.
+4. Installs Oh My Posh and mise with their official installers
+   ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html))
+   into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`
+   and `mise self-update --yes --no-plugins`. A copy that the user cannot write,
+   such as an rpm, is left alone.
+5. Runs `./install` (with `--tmux-only` when given; otherwise the existing
+   profile, or desktop on a new machine), then `./bin/reload`.
+6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
+   with 1 when anything failed.
+
+`packages/fedora.txt` lists one package per line; `#` starts a comment. The
+packages after `[desktop]` (OpenSSH, Alacritty, VS Code and fido2-tools) are skipped with
+`--tmux-only`.
+
+`--dry-run` changes nothing and writes no bootstrap log (`dnf` may refresh its
+own cache): it reads the installed and upgradable packages, does not fetch Git,
+and previews `./install` once nothing is missing. Real runs append their commands and output to
+`~/.local/state/dalftui/bootstrap.log` (or under `XDG_STATE_HOME`).
+
+GitHub CI runs the bootstrap twice in a fresh Fedora 44 container, weekly and
+when the bootstrap changes, and checks that the second run changes nothing.
 
 ## macOS
 
