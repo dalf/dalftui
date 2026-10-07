@@ -1,4 +1,4 @@
-name: Fedora bootstrap
+name: Bootstrap
 
 on:
   push:
@@ -7,20 +7,40 @@ on:
   pull_request:
     paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
-    - cron: '17 5 * * 1'  # Weekly: Fedora package names, the VS Code repository and the oh-my-posh and mise installers can change.
+    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian and Ubuntu package names, the VS Code repository and the oh-my-posh and mise installers can change.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  fedora:
+  bootstrap:
     runs-on: ubuntu-latest
-    container: fedora:44
+    container: ${{ matrix.image }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:44
+            prereq: dnf install -y python3 git sudo
+            tools: fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise code alacritty
+            desktop: true
+          - image: debian:13
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise code alacritty
+            desktop: true
+          - image: debian:12
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise
+            flags: --tmux-only
+          - image: ubuntu:24.04
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise
+            flags: --tmux-only
     steps:
       - name: Install the documented prerequisites
-        run: dnf install -y python3 git sudo
+        run: ${{ matrix.prereq }}
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -32,16 +52,16 @@ jobs:
           cp -a "$GITHUB_WORKSPACE" /home/tester/code/dalftui
           chown -R tester: /home/tester/code
       - name: First run installs everything
-        run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap'
+        run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap ${{ matrix.flags }}'
       - name: Second run changes nothing
         run: |
-          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap' | tee second.txt
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap ${{ matrix.flags }}' | tee second.txt
           grep -x 'Installed: 0' second.txt
           grep -x 'Upgraded: 0' second.txt
           grep -x 'Failed: 0' second.txt
       - name: Dry run changes nothing
         run: |
-          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap --dry-run' | tee dry.txt
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap --dry-run ${{ matrix.flags }}' | tee dry.txt
           grep -x 'Would install: 0' dry.txt
           grep -x 'Would upgrade: 0' dry.txt
           grep -x 'Failed: 0' dry.txt
@@ -50,10 +70,30 @@ jobs:
           sudo -u tester -H bash -lc '
             set -eo pipefail
             tmux -V
-            alacritty --version
             oh-my-posh --version
-            fido2-token -V
-            for tool in fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise code; do "$tool" --version | head -n 1; done
+            for tool in ${{ matrix.tools }}; do "$tool" --version | head -n 1; done
             test -L ~/.config/dalftui
-            cd ~/code/dalftui && ./install | grep "Already installed"
+            cd ~/code/dalftui && ./install ${{ matrix.flags }} | grep "Already installed"
             test -s ~/.local/state/dalftui/bootstrap.log'
+      - name: Desktop tools answer
+        if: matrix.desktop
+        run: sudo -u tester -H fido2-token -V
+
+  refused:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 10
+    steps:
+      - name: Install the documented prerequisites
+        run: apt-get update && apt-get install -y python3 git sudo
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Python 3.10 is refused clearly
+        run: |
+          useradd -m tester
+          cp -a "$GITHUB_WORKSPACE" /home/tester/dalftui
+          chown -R tester: /home/tester/dalftui
+          if sudo -u tester -H /home/tester/dalftui/bootstrap --tmux-only 2> error.txt; then exit 1; fi
+          cat error.txt
+          grep 'Python 3.11 or newer is required' error.txt

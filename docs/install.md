@@ -8,8 +8,8 @@ Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
 `less`, and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the
 desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
 and Oh My Posh. The installer configures software that is already installed. It
-uses no package manager, root access, or Python packages; on Fedora, the separate
-[`./bootstrap`](#new-fedora-machine) installs them with dnf. The only download is
+uses no package manager, root access, or Python packages; on Fedora, Debian and
+Ubuntu, the separate [`./bootstrap`](#new-machine-fedora-debian-ubuntu) installs them with dnf or apt. The only download is
 the desktop mode's font: when `fc-list` does not show Hack Nerd Font, the
 installer runs `oh-my-posh font install Hack`.
 
@@ -104,7 +104,7 @@ git pull --ff-only
 ./bin/reload
 ```
 
-## New Fedora machine
+## New machine (Fedora, Debian, Ubuntu)
 
 `./bootstrap` is opt-in and separate from `./install`, which keeps configuring
 software only. Its package list is the owner's personal tool set. Python 3.11+
@@ -114,6 +114,18 @@ and Git must exist first; on a new machine:
 sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
 ```
 
+On Debian or Ubuntu (a server):
+
+```sh
+sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
+```
+
+A minimal Debian may lack sudo: install it with `su -c 'apt-get install sudo'`
+and add your user to the `sudo` group. The desktop mode needs Alacritty 0.14+,
+so it works on Fedora and Debian 13; on Debian 12 and Ubuntu 24.04 the packages
+install but `./install` then fails, so use `--tmux-only` there. Ubuntu 22.04 is
+refused: its Python is 3.10.
+
 Each run, in order (a failed step does not stop the next ones):
 
 1. Updates its own checkout with `git pull --ff-only` and restarts if new
@@ -121,12 +133,15 @@ Each run, in order (a failed step does not stop the next ones):
    or with uncommitted changes to tracked files.
 2. Asks for the sudo password once and, unless `--tmux-only`, adds Microsoft's
    [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
-   and `/etc/yum.repos.d/vscode.repo`) when that file is missing. A `code` rpm
-   installed from a download is then upgraded from the repository.
+   and `/etc/yum.repos.d/vscode.repo`, or `/etc/apt/sources.list.d/vscode.sources`
+   on apt) when that file is missing. A `code` package installed from a download
+   is then upgraded from the repository.
 3. Installs each missing package from
-   [packages/fedora.txt](../packages/fedora.txt) with its own `dnf install`, so
-   one failure does not stop the others, and upgrades the listed installed
-   packages with `dnf upgrade`. Other system packages are not upgraded.
+   [packages/fedora.txt](../packages/fedora.txt) or
+   [packages/debian.txt](../packages/debian.txt) with its own `dnf install` or
+   `apt-get install` (after one `apt-get update`), so one failure does not stop
+   the others, and upgrades the listed installed packages with `dnf upgrade` or
+   `apt-get install --only-upgrade`. Other system packages are not upgraded.
 4. Installs Oh My Posh and mise with their official installers
    ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html))
    into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`
@@ -137,17 +152,20 @@ Each run, in order (a failed step does not stop the next ones):
 6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
    with 1 when anything failed.
 
-`packages/fedora.txt` lists one package per line; `#` starts a comment. The
+The package lists have one package per line; `#` starts a comment. The
 packages after `[desktop]` (OpenSSH, Alacritty, VS Code and fido2-tools) are skipped with
-`--tmux-only`.
+`--tmux-only`. On apt, bat's command is `batcat`, and yq is not installed:
+Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 
 `--dry-run` changes nothing and writes no bootstrap log (`dnf` may refresh its
-own cache): it reads the installed and upgradable packages, does not fetch Git,
+own cache; apt uses the package lists from the last `apt-get update`): it reads the installed and upgradable packages, does not fetch Git,
 and previews `./install` once nothing is missing. Real runs append their commands and output to
 `~/.local/state/dalftui/bootstrap.log` (or under `XDG_STATE_HOME`).
 
-GitHub CI runs the bootstrap twice in a fresh Fedora 44 container, weekly and
-when the bootstrap changes, and checks that the second run changes nothing.
+GitHub CI runs the bootstrap twice in fresh Fedora 44 and Debian 13 containers
+(desktop) and Debian 12 and Ubuntu 24.04 containers (`--tmux-only`), weekly and
+when the bootstrap changes, and checks that the second run changes nothing. It
+also checks that Ubuntu 22.04 is refused.
 
 ## macOS
 

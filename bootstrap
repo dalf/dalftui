@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Fedora packages and tools in packages/fedora.txt, update this checkout, then run ./install."""
+"""Install the packages and tools in packages/fedora.txt or packages/debian.txt, update this checkout, then run ./install."""
 import argparse
 import sys
 

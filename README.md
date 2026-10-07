@@ -64,20 +64,24 @@ Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall
 
 Details: [docs/install.md](docs/install.md).
 
-## Set up a new machine (Fedora)
+## Set up a new machine (Fedora, Debian, Ubuntu)
 
-Opt-in, and the package list is my personal tool set: edit
-[packages/fedora.txt](packages/fedora.txt) before using it. On a new Fedora
-machine:
+Opt-in, and the package lists are my personal tool set: edit
+[packages/fedora.txt](packages/fedora.txt) or [packages/debian.txt](packages/debian.txt)
+before using it. On a new Fedora machine, or a Debian or Ubuntu server:
 
 ```sh
 sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
 ```
 
+The desktop mode works on Fedora and Debian 13; Debian 12 and Ubuntu 24.04 need
+`--tmux-only`; Ubuntu 22.04 is refused (Python 3.10).
+
 `./bootstrap` adds Microsoft's VS Code repository, installs and upgrades the
-listed packages with dnf, installs or upgrades Oh My Posh and mise, updates the checkout with `git pull --ff-only`, then runs
+listed packages with dnf or apt, installs or upgrades Oh My Posh and mise, updates the checkout with `git pull --ff-only`, then runs
 `./install` and `./bin/reload`. Run it again at any time to update. Options:
-`--dry-run`, `--tmux-only`. See [New Fedora machine](docs/install.md#new-fedora-machine).
+`--dry-run`, `--tmux-only`. See [New machine](docs/install.md#new-machine-fedora-debian-ubuntu).
 
 ## tmux bindings and look
 
