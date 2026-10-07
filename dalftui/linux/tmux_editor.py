@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 from bridge_protocol import SOCKET_ENV, TOKEN_ENV
 
@@ -24,6 +25,9 @@ def decode_path_output(output):
 def client_environment(pid):
     # A persistent tmux server/session can retain another client's old SSH socket.
     # Read the triggering attach client's initial environment instead.
+    if sys.platform == 'darwin':
+        # macOS has no /proc; the tmux server environment launches local VS Code.
+        return dict(os.environ)
     values = Path(f'/proc/{pid}/environ').read_bytes().split(b'\0')
     return dict(os.fsdecode(item).split('=', 1) for item in values if b'=' in item)
 

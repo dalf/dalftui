@@ -5,6 +5,9 @@ import sys
 import subprocess
 
 sys.dont_write_bytecode = True
+if sys.version_info < (3, 11):  # The setup module needs Python 3.11 to import.
+    raise SystemExit('Install failed: Python 3.11 or newer is required'
+                     + (' (Homebrew: brew install python@3.13).' if sys.platform == 'darwin' else '.'))
 from dalftui.linux.setup import dependencies, install, installed_profile, uninstall
 
 
@@ -15,7 +18,9 @@ def main():
     mode.add_argument('--tmux-only', dest='profile', action='store_const', const='tmux-only',
                       help='Configure tmux for a server without requiring Alacritty or an SSH picker')
     mode.add_argument('--desktop', dest='profile', action='store_const', const='desktop',
-                      help='Configure Alacritty and tmux (the default for a new installation)')
+                      help='Configure Alacritty and tmux (the default for a new Linux installation)')
+    mode.add_argument('--macos', dest='profile', action='store_const', const='macos',
+                      help='Configure tmux and the zsh prompt on macOS (the default for a new Mac installation)')
     mode.add_argument('--uninstall', action='store_true',
                       help='Remove the links, loaders and settings that install added')
     args = parser.parse_args()
@@ -34,7 +39,7 @@ def main():
         print(f'Install failed: {error}', file=sys.stderr)
         return 1
     if not args.dry_run:
-        target = 'tmux' if profile == 'tmux-only' else 'Alacritty and tmux'
+        target = 'Alacritty and tmux' if profile == 'desktop' else 'tmux'
         print(f'Run ./bin/reload to apply the configuration to running {target}.')
     return 0
 

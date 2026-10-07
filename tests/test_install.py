@@ -46,16 +46,29 @@ class DependencyTests(unittest.TestCase):
             return None if name == 'oh-my-posh' else '/test/bin'
         for profile in setup.PROFILES:
             with self.subTest(profile=profile):
-                with patch.object(setup.shutil, 'which', side_effect=which):
+                platform = 'darwin' if profile == 'macos' else 'linux'
+                with patch.object(setup.sys, 'platform', platform), \
+                        patch.object(setup.shutil, 'which', side_effect=which):
                     with self.assertRaisesRegex(RuntimeError, 'Install the missing dependencies first: oh-my-posh'):
                         setup.dependencies(profile)
+
+    def test_macos_refuses_alacritty_and_suggests_homebrew(self):
+        with patch.object(setup.sys, 'platform', 'darwin'):
+            with self.assertRaisesRegex(RuntimeError, 'desktop mode is Linux-only'):
+                setup.dependencies('desktop')
+            with patch.object(setup.shutil, 'which', side_effect=lambda name: None if name == 'tmux' else '/x'):
+                with self.assertRaisesRegex(RuntimeError, 'tmux .Homebrew: brew install'):
+                    setup.dependencies('macos')
+        with patch.object(setup.sys, 'platform', 'linux'):
+            with self.assertRaisesRegex(RuntimeError, 'macOS only'):
+                setup.dependencies('macos')
 
 
 class DisposableSetup(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='dalftui-install-')
         self.addCleanup(temporary.cleanup)
-        self.directory = Path(temporary.name)
+        self.directory = Path(temporary.name).resolve()  # macOS: /var is a link to /private/var.
         # Both spaces and shell metacharacters must work in checkout and XDG paths.
         self.repo = self.directory / "checkout 'quoted' $repo"
         shutil.copytree(ROOT, self.repo, ignore=shutil.ignore_patterns('.git', '__pycache__'))
@@ -70,6 +83,14 @@ class DisposableSetup(unittest.TestCase):
         self.vscode_patch = patch.object(setup, 'vscode_present', return_value=False)
         self.vscode_present = self.vscode_patch.start()
         self.addCleanup(self.vscode_patch.stop)
+        # These tests cover the Linux default; MacTests cover the macOS one.
+        default = patch.object(setup, 'DEFAULT_PROFILE', 'desktop')
+        default.start()
+        self.addCleanup(default.stop)
+        zdotdir = patch.dict(os.environ)
+        zdotdir.start()
+        self.addCleanup(zdotdir.stop)
+        os.environ.pop('ZDOTDIR', None)
 
     def install(self, **kwargs):
         with redirect_stdout(io.StringIO()):
@@ -202,7 +223,7 @@ class InstallationTests(DisposableSetup):
         self.install()
         local = self.paths.config_dir / 'alacritty/local.toml'
         local.write_text('[keyboard]\nbindings = [{key="F10", mods="Alt", action="None"}]\n')
-        with patch.object(shortcuts, 'config_path', return_value=self.paths.alacritty):
+        with patch.object(alacritty_config, 'config_path', return_value=self.paths.alacritty):
             with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
                 content = shortcuts.render()
         self.assertIn('Alt+F10', content)
@@ -323,6 +344,22 @@ class FontTests(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
                 setup.install_font(False)
         self.assertEqual(run.call_args.args[0], ['oh-my-posh', 'font', 'install', 'Hack'])
+
+    def test_mac_font_in_library_is_detected_without_fc_list(self):
+        with tempfile.TemporaryDirectory() as home:
+            fonts = Path(home) / 'Library/Fonts'
+            with patch.object(setup.sys, 'platform', 'darwin'), \
+                    patch.object(setup.Path, 'home', return_value=Path(home)), \
+                    patch.object(setup.shutil, 'which', return_value=None), \
+                    patch.object(setup.subprocess, 'run') as run:
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    setup.install_font(True)
+                self.assertIn('Install font', output.getvalue())
+                fonts.mkdir(parents=True)
+                (fonts / 'HackNerdFont-Regular.ttf').touch()
+                setup.install_font(False)
+            run.assert_not_called()
 
 
 class VSCodeTests(DisposableSetup):
@@ -588,9 +625,10 @@ class ServerInstallationTests(DisposableSetup):
 
     def test_server_guide_uses_tmux_keys_without_reading_alacritty(self):
         live = subprocess.CompletedProcess(['tmux'], 0, stdout='bind-key -T prefix F1 display-popup help\n')
-        with patch.object(shortcuts, 'load', side_effect=AssertionError('Alacritty was read')):
-            with patch.object(shortcuts.subprocess, 'run', return_value=live):
-                content = shortcuts.render(tmux_only=True)
+        with patch.object(alacritty_config, 'load', side_effect=AssertionError('Alacritty was read')), \
+                patch.object(shortcuts.sys, 'platform', 'linux'), \
+                patch.object(shortcuts.subprocess, 'run', return_value=live):
+            content = shortcuts.render(tmux_only=True)
         self.assertIn('Ctrl+B → c', content)
         self.assertIn('Live tmux bindings'.upper(), content)
         self.assertIn('SELECT / COPY / PASTE', content)
@@ -674,6 +712,128 @@ class ServerTmuxTests(TmuxFixture):
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-gv', 'history-limit'), '8765')
         self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+
+
+class MacTests(DisposableSetup):
+    """The macOS mode, with the platform patched so it also runs on Linux."""
+    def setUp(self):
+        super().setUp()
+        platform = patch.object(setup.sys, 'platform', 'darwin')
+        platform.start()
+        self.addCleanup(platform.stop)
+
+    def test_new_mac_installation_defaults_to_macos_and_writes_only_zshrc(self):
+        self.assertEqual(setup.installed_profile(self.paths), 'desktop')  # Patched in setUp.
+        with patch.object(setup, 'DEFAULT_PROFILE', 'macos'):
+            self.assertEqual(setup.installed_profile(self.paths), 'macos')
+        self.paths.zshrc.write_text('setopt autocd\n')
+        self.install(profile='macos')
+        self.assertEqual(setup.installed_profile(self.paths), 'macos')
+        content = self.paths.zshrc.read_text()
+        self.assertTrue(content.startswith('setopt autocd\n' + setup.PROMPT_MARKER + '\n'))
+        self.assertIn('config/prompt.zsh', content)
+        self.assertFalse(self.paths.bashrc.exists())
+        self.assertFalse(self.paths.alacritty.parent.exists())
+        self.install_font.assert_called_once_with(False)
+        self.assertIsNone(self.install())
+        self.assertEqual(self.paths.zshrc.read_text(), content)
+
+    def test_zdotdir_is_honored(self):
+        zdotdir = self.directory / 'zdotdir'
+        with patch.dict(os.environ, {'ZDOTDIR': str(zdotdir)}):
+            self.install(profile='macos')
+            self.assertEqual(self.paths.zshrc, zdotdir / '.zshrc')
+            self.assertIn(setup.PROMPT_MARKER, self.paths.zshrc.read_text())
+        self.assertFalse((self.paths.home_dir / '.zshrc').exists())
+
+    @unittest.skipUnless(shutil.which('zsh'), 'zsh is required')
+    def test_unexported_zdotdir_from_zshenv_is_honored_and_uninstalled(self):
+        (self.paths.home_dir / '.zshenv').write_text('ZDOTDIR=$HOME/zd\n')
+        self.assertEqual(self.paths.zshrc, self.paths.home_dir / 'zd/.zshrc')
+        self.install(profile='macos')
+        self.assertIn(setup.PROMPT_MARKER, (self.paths.home_dir / 'zd/.zshrc').read_text())
+        with redirect_stdout(io.StringIO()):
+            setup.uninstall(self.paths)
+        self.assertEqual((self.paths.home_dir / 'zd/.zshrc').read_text(), '')
+
+    def test_vscode_settings_use_the_library_path_and_are_removed(self):
+        self.vscode_present.return_value = True
+        self.assertEqual(self.paths.vscode_settings,
+                         self.paths.home_dir / 'Library/Application Support/Code/User/settings.json')
+        self.install(profile='macos')
+        self.assertEqual(json.loads(self.paths.vscode_settings.read_text()), terminal.VSCODE_SETTINGS)
+        with redirect_stdout(io.StringIO()):
+            setup.uninstall(self.paths)
+        self.assertEqual(json.loads(self.paths.vscode_settings.read_text()), {})
+        self.assertEqual(self.paths.zshrc.read_text(), '')
+        self.assertFalse(self.paths.tmux.exists())
+        self.assertFalse(self.paths.root.is_symlink())
+
+    def test_tmux_editor_uses_the_server_environment(self):
+        with patch.object(tmux_editor.Path, 'read_bytes', side_effect=AssertionError('/proc was read')):
+            self.assertEqual(tmux_editor.client_environment(1), dict(os.environ))
+
+    def test_guide_names_mac_keys_and_never_imports_tomllib(self):
+        with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
+            content = shortcuts.render(tmux_only=True)
+        self.assertIn('Cmd+C / Cmd+V', content)
+        self.assertIn('Option+drag', content)
+        self.assertNotIn('Alacritty', content)
+        # The F1 popup may run an older python3; the server guide must not need tomllib.
+        script = ('import sys; sys.path.insert(0, sys.argv[1]); import dalftui.linux.shortcuts as s\n'
+                  'def run(*args, **kwargs): raise OSError("no test server")\n'
+                  's.subprocess.run = run; s.render(tmux_only=True)\n'
+                  'print("dalftui.linux.alacritty_config" in sys.modules)')
+        result = subprocess.run([sys.executable, '-c', script, str(ROOT)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.stdout.strip(), 'False', result.stderr)
+
+    @unittest.skipUnless(shutil.which('zsh'), 'zsh is required')
+    def test_zsh_loader_runs_init_before_job_counts(self):
+        self.install(profile='macos')
+        command_dir = self.directory / 'commands'
+        command_dir.mkdir()
+        fake = command_dir / 'oh-my-posh'
+        fake.write_text('#!/bin/sh\n'
+                        'printf "%s\\n" "$@" > "$TEST_ARGUMENTS"\n'
+                        'echo "set_poshcontext() { :; }"\n')
+        fake.chmod(0o755)
+        arguments = self.directory / 'arguments'
+        env = dict(os.environ, HOME=str(self.paths.home_dir), ZDOTDIR=str(self.paths.home_dir),
+                   TEST_ARGUMENTS=str(arguments), PATH=str(command_dir) + os.pathsep + os.environ['PATH'])
+        script = 'sleep 30 & set_poshcontext; kill %1; echo "$OMP_JOBS_RUNNING"'
+        result = subprocess.run(['zsh', '-i', '-c', script], env=env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], '1')
+        init, shell, flag, theme = arguments.read_text().splitlines()
+        self.assertEqual([init, shell, flag], ['init', 'zsh', '--config'])
+        self.assertEqual(Path(theme).resolve(), self.repo / 'config/oh-my-posh.omp.json')
+
+
+class MacTmuxTests(TmuxFixture):
+    profile = 'macos'
+
+    def keys(self, table):
+        return {shlex.split(line)[3]: line for line in self.tmux('list-keys', '-T', table).splitlines()}
+
+    def test_mac_copies_with_pbcopy_and_switching_back_removes_mac_keys(self):
+        self.start()
+        self.do_reload()
+        self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
+        prefix, root = self.keys('prefix'), self.keys('root')
+        self.assertNotIn('F2', prefix)
+        self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
+        self.assertIn('bin/shortcuts.py --tmux-only', root['C-S-F1'])
+        self.assertIn('bin/vscode.py', root['C-S-F3'])
+        self.assertIn('Hold Fn', root['MouseDrag1Pane'])
+        self.install(profile='tmux-only')
+        self.do_reload()
+        self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
+        root = self.keys('root')
+        self.assertNotIn('C-S-F1', root)
+        self.assertNotIn('C-S-F3', root)
+        self.assertIn('Hold Shift', root['MouseDrag1Pane'])
 
 
 class UninstallTests(DisposableSetup):

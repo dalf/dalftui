@@ -1,0 +1,94 @@
+name: macOS tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: '3.11'
+          enable-cache: false
+      - uses: jdx/mise-action@v4
+        with:
+          version: '2026.7.5'
+          install: false
+          cache: false
+      - name: Install test dependencies
+        run: brew install tmux oh-my-posh coreutils
+      # The generated Linux-server programs use GNU stat and timeout.
+      - name: Verify macOS and shared functionality
+        run: PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH" mise run test:linux
+      # Plain BSD userland and bash 3.2; HOME is disposable.
+      - name: Install, use and uninstall in a temporary home
+        shell: /bin/bash -euo pipefail {0}
+        run: |
+          repo=$PWD
+          export HOME="$(mktemp -d)"
+          unset XDG_CONFIG_HOME XDG_STATE_HOME ZDOTDIR
+          export SHELL=/bin/zsh
+          # A present font skips the download, which hits shared GitHub API rate limits.
+          mkdir -p "$HOME/Library/Fonts" "$HOME/Library/Application Support/Code/User"
+          touch "$HOME/Library/Fonts/HackNerdFont-Regular.ttf"
+          ./install --dry-run
+          ./install
+          ./install | grep 'Already installed'
+          grep -A1 '^# dalftui: Oh My Posh prompt$' "$HOME/.zshrc" | grep -q 'config/prompt.zsh'
+          test ! -e "$HOME/.bashrc"
+          test ! -e "$HOME/.config/alacritty"
+          grep -q 'Hack Nerd Font' "$HOME/Library/Application Support/Code/User/settings.json"
+          zsh -i -c 'typeset -f set_poshcontext | grep -q jobstates && (( ${precmd_functions[(I)_omp_precmd]} ))'
+          zsh -i -c 'sleep 30 & set_poshcontext; kill %1; [[ $OMP_JOBS_RUNNING == 1 ]]'
+
+          fake="$(mktemp -d)"
+          printf '#!/bin/sh\nprintf "%%s\\n" "$@" > "%s/code.log"\n' "$fake" > "$fake/code"
+          chmod +x "$fake/code"
+          PATH="$fake:$PATH" tmux -L ci new-session -d -s t
+          test "$(tmux -L ci show -sv copy-command)" = pbcopy
+          tmux -L ci list-keys -T prefix | grep ' F1 .*--tmux-only'
+          if tmux -L ci list-keys -T prefix | grep ' F2 '; then exit 1; fi
+          tmux -L ci list-keys -T root | grep ' C-S-F3 '
+          if tmux -L ci show-messages | grep -i error; then exit 1; fi
+          tmux -L ci send-keys -t t 'printf "dalftui-%s\n" clip' Enter
+          sleep 1
+          tmux -L ci copy-mode -t t
+          tmux -L ci send-keys -t t -X search-backward 'dalftui-clip'
+          tmux -L ci send-keys -t t -X select-line
+          tmux -L ci send-keys -t t -X copy-pipe-and-cancel
+          sleep 1
+          pbpaste | grep dalftui-clip
+          # Record only: a pane's OSC 52 write with set-clipboard on.
+          printf 'none' | pbcopy
+          tmux -L ci send-keys -t t "printf '\\033]52;c;%s\\a' \"\$(printf dalftui-osc | base64)\"" Enter
+          sleep 1
+          echo "Clipboard after a pane OSC 52 write: $(pbpaste)"
+          root=$(tmux -L ci show -gv @dalftui_root)
+          tmux -L ci run-shell "python3 '$root/bin/vscode.py' --pane '%0' --client 1 --client-tty x"
+          sleep 2
+          grep -q -- '--folder-uri' "$fake/code.log"
+          python3 "$root/bin/shortcuts.py" --tmux-only --print > "$fake/guide"
+          if grep Alacritty "$fake/guide"; then exit 1; fi
+          grep -q 'Cmd+C' "$fake/guide"
+          tmux -L ci kill-server
+
+          ./install --uninstall
+          test ! -e "$HOME/.config/dalftui" && test ! -e "$HOME/.tmux.conf"
+          test ! -e "$HOME/.config/tmux/shortcuts.py"
+          if grep dalftui "$HOME/.zshrc"; then exit 1; fi
+          if grep 'Hack Nerd Font' "$HOME/Library/Application Support/Code/User/settings.json"; then exit 1; fi
+          test -z "$(git -C "$repo" status --porcelain)"

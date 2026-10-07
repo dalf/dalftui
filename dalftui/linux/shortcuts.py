@@ -9,7 +9,6 @@ import sys
 import textwrap
 
 sys.dont_write_bytecode = True
-from .alacritty_config import config_path, load
 
 RESET = "\033[0m"
 WHITE = "\033[1;97m"
@@ -130,6 +129,15 @@ def render(tmux_only=False):
             ("Ctrl+Alt+arrow", "Move to the pane in that direction"),
             ("Ctrl+Alt+Shift+arrow", "Resize the pane by five cells"),
         ]
+    if tmux_only and sys.platform == "darwin":
+        del groups["From your dalftui Alacritty client"]
+        groups["Select / copy / paste"][:4] = [
+            ("Fn+drag / Option+drag", "Select text in Terminal.app / iTerm2"),
+            ("Cmd+C / Cmd+V", "Copy selection / paste"),
+            ("Split panes", "Ctrl+B → z to zoom, select, then Ctrl+B → z to restore"),
+            ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then select"),
+        ]
+        del groups["Editor"][1]  # Relaying to an SSH client's editor is not supported on a Mac.
     for title, bindings in groups.items():
         heading(title)
         if title == "From your dalftui Alacritty client":
@@ -138,6 +146,8 @@ def render(tmux_only=False):
             row(keys, description)
 
     if not tmux_only:
+        # Only the desktop guide reads Alacritty; tomllib needs Python 3.11.
+        from .alacritty_config import config_path, load
         heading("Alacritty custom bindings (live)")
         paragraph("Read from alacritty.toml and its imports each time this guide opens. Terminal defaults are listed above.", MUTED)
         config = config_path()

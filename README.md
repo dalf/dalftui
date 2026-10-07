@@ -3,8 +3,9 @@
 My terminal setup. On Linux: Alacritty, tmux with rounded tabs, an Oh My Posh
 prompt, an SSH host picker, and a key to open the current folder in VS Code,
 also on a remote server. On Windows: the same prompt, picker and VS Code key
-in PowerShell and Windows Terminal, plus a few Unix-like commands. macOS is not
-supported by the installers.
+in PowerShell and Windows Terminal, plus a few Unix-like commands. On macOS
+(Terminal.app or iTerm2, zsh): tmux, the prompt and the VS Code key, tested
+only on CI so far.
 
 ## Try one thing
 
@@ -40,21 +41,25 @@ Options: `-VSCodePath` (portable VS Code), `-ProfilePath` (one profile only),
 `-TerminalSettingsPath`, `-SkipTerminal`. If PowerShell then says scripts are
 disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-macOS: not supported yet. The installers refuse it. Use the per-feature snippets.
+macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs Python 3.11+, tmux
+3.2+ and Oh My Posh, from Homebrew: `brew install python@3.13 tmux oh-my-posh`.
+Then `./install --dry-run`, `./install`, `./bin/reload`. It sets up tmux, the
+zsh prompt, Hack Nerd Font and VS Code's terminal font. Tested on macOS CI only;
+see [macOS](docs/install.md#macos).
 
 With [mise](docs/development.md#repository-tasks):
 `mise run install:linux -- --dry-run`, `mise run install:windows`.
 
-Linux: existing files are backed up to `~/.local/state/dalftui/backups/`
+Linux and macOS: existing files are backed up to `~/.local/state/dalftui/backups/`
 before they are replaced. Personal overrides go in `~/.config/tmux/local.conf`
 and `~/.config/alacritty/local.toml`; installs keep them. Windows: the profile,
 Terminal `settings.json` and VS Code `settings.json` are copied to
 `<file>.dalftui-<id>.bak` next to the original.
 
-Update: `git pull --ff-only && ./bin/reload` on Linux. On Windows,
+Update: `git pull --ff-only && ./bin/reload` on Linux and macOS. On Windows,
 `git pull --ff-only`, then open a new PowerShell session.
 
-Uninstall: `./install --uninstall` on Linux, `.\install.cmd -Uninstall` on Windows
+Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall` on Windows
 (preview with `--dry-run` or `-DryRun`); see [Uninstall](docs/install.md#uninstall).
 
 Details: [docs/install.md](docs/install.md).
@@ -75,8 +80,9 @@ Needs: tmux 3.2+ (3.3+ for styled popups). Python 3.11+ and `less` for the
 guide. A font with the rounded caps and `⬤`, such as Hack Nerd Font, in the
 terminal you look at (for a server, your local terminal).
 
-Works on: Linux. Windows: only inside tmux on a Linux server. macOS: untested;
-it is plain tmux, so it should work if sourced by hand.
+Works on: Linux. Windows: only inside tmux on a Linux server. macOS: installed
+and loaded on macOS CI, where tmux copies go to the clipboard through `pbcopy`;
+keys not tried in a real Terminal.app or iTerm2.
 
 Take it alone: in your own `~/.tmux.conf`:
 
@@ -149,7 +155,7 @@ sequences), and the `~/.config/dalftui` link to the checkout (the startup
 command uses that path).
 
 Works on: Linux. Windows: not configured (Windows Terminal is used instead).
-macOS: untested.
+macOS: not used.
 
 Take it alone: `ln -s ~/code/dalftui ~/.config/dalftui`, then in
 `~/.config/alacritty/alacritty.toml`:
@@ -185,7 +191,8 @@ Needs: Oh My Posh (tested with 31.5.0) and a Nerd Font in the terminal you look
 at. In PowerShell, PSReadLine.
 
 Works on: Linux (bash), Windows (PowerShell 5.1 and 7; not cmd or Git Bash).
-macOS: untested; there is no zsh loader.
+macOS (zsh, `config/prompt.zsh`): loads and counts jobs on macOS CI; not seen in
+a real terminal.
 
 Take it alone: bash, in `~/.bashrc` after any other prompt setup:
 
@@ -219,7 +226,8 @@ Files: `dalftui/linux/setup.py`, `dalftui/windows/setup.ps1`,
 Needs: Oh My Posh (it downloads the font), network access once. Linux:
 `fc-list`.
 
-Works on: Linux (desktop mode only), Windows. macOS: untested.
+Works on: Linux (desktop mode only), Windows. macOS: detection in
+`~/Library/Fonts` tested on CI; the download is not run there.
 
 Take it alone: `oh-my-posh font install Hack`. To name it in Alacritty, put
 `normal.family = "Hack Nerd Font"` under `[font]` in `local.toml`. In Windows
@@ -309,7 +317,8 @@ or remote TCP forwarding with `GatewayPorts` `no` or `clientspecified`
 has no bridge. Desktop and server need compatible versions, or F3 is skipped.
 
 Works on: Linux (local and remote), Windows (local PowerShell prompt and remote
-tmux). macOS: local F3 does not work (it reads `/proc`); remote is untested.
+tmux). macOS: local VS Code only, which needs VS Code's `code` command on PATH;
+launch tested with a fake `code` on CI. Remote from a Mac is untested.
 Servers: Linux only.
 
 Take it alone: in your `tmux.conf`:
@@ -419,8 +428,8 @@ Files: `dalftui/linux/setup.py`, `dalftui/windows/terminal_settings.py`,
 
 Needs: VS Code, Hack Nerd Font.
 
-Works on: Linux (desktop mode), Windows. macOS: untested; the same two settings
-should work.
+Works on: Linux (desktop mode), Windows. macOS: settings written on CI under
+`~/Library/Application Support/Code/User/`; not checked in VS Code.
 
 Take it alone: in VS Code's user `settings.json`:
 

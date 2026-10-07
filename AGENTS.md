@@ -136,6 +136,9 @@ This runs `test_windows*.py` and `test_bridge*.py` discovery. Those patterns sel
 then `test_bridge_lifecycle.py` and `test_bridge_protocol.py`, respectively.
 Linux-targeted bootstrap/startup tests are in `tests/test_remote_bootstrap.py`
 and `tests/test_ops_mode.py`.
+macOS CI ([.github/workflows/macos.yml](.github/workflows/macos.yml)) runs
+full discovery with Homebrew's GNU coreutils first on PATH, then an install,
+tmux and zsh smoke test in a temporary home.
 Run PowerShell setup/profile verification separately when the shell is available:
 
 ```powershell

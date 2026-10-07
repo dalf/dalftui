@@ -103,6 +103,57 @@ git pull --ff-only
 ./bin/reload
 ```
 
+## macOS
+
+For Terminal.app or iTerm2 with zsh. Requirements: Python 3.11+, tmux 3.2+, Git,
+`less` and Oh My Posh. Git, `less` and an older `python3` come with macOS; get the
+rest from Homebrew and make sure `brew shellenv` runs in your shell setup so
+`python3`, `tmux` and `oh-my-posh` resolve to Homebrew's:
+
+```sh
+brew install python@3.13 tmux oh-my-posh
+./install --dry-run
+./install
+./bin/reload
+```
+
+On a Mac, `./install` uses the `macos` mode; `--desktop` (Alacritty) is refused
+and `--tmux-only` still works (`./install --macos` switches back). Compared with
+the server mode, it also:
+
+- appends the marked prompt line pair sourcing `config/prompt.zsh` to `~/.zshrc`
+  (or `$ZDOTDIR/.zshrc`), not `~/.bashrc`;
+- installs Hack Nerd Font into `~/Library/Fonts` unless `~/Library/Fonts` or
+  `/Library/Fonts` already holds it;
+- sets VS Code's terminal font in `~/Library/Application Support/Code/User/settings.json`
+  when that folder or the `code` command exists;
+- makes tmux copy-mode copies use `pbcopy`, because Terminal.app does not support
+  OSC 52. A program's own OSC 52 write did not reach the clipboard on CI (no
+  terminal attached there); in iTerm2 it needs *Applications in terminal may
+  access clipboard*.
+
+Keys and terminals:
+
+- **Ctrl+B, then F1 / F3** open the guide and VS Code. Apple keyboards need Fn for
+  F-keys unless they are set as standard function keys.
+- **Ctrl+Shift+F1 / F3** should work in iTerm2 without configuration (untested). In Terminal.app
+  add them under Settings > Profiles > Keyboard: Ctrl+Shift+F1 sends `\033[1;6P`,
+  Ctrl+Shift+F3 sends `\033[1;6R`.
+- **Ctrl+B, then F2** (SSH picker) is not bound, as on a server.
+- **F3** opens local VS Code only and needs its `code` command on the PATH of the
+  shell that started tmux (VS Code: *Shell Command: Install 'code' command in PATH*).
+  Relaying to the editor of a client connected over SSH is not supported on a Mac.
+- **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
+  Cmd+C copies.
+- **Ctrl+Alt+arrow** pane keys need Option to act as Meta (Terminal.app: *Use
+  Option as Meta key*; iTerm2: *Left Option key: Esc+*). dalftui does not set it:
+  it stops Option from typing characters such as `@`, `#`, `[` on AZERTY and other
+  non-US layouts. Ctrl+Left/Right also switch Mission Control spaces by default.
+
+Uninstall works as on Linux; the font is kept. GitHub's macOS CI checks
+installation, the prompt, tmux settings, copy-mode copies and uninstall in a
+temporary home. Keys and selection are untested in a real Terminal.app or iTerm2.
+
 ## Update without reinstalling
 
 When updating from the previous root command layout, rerun `./install` on each
@@ -176,9 +227,9 @@ installer's content, and backs up every file it changes or removes. Preview it f
 ./install --uninstall
 ```
 
-On Linux it removes the `~/.config/dalftui` link, the `~/.config/tmux/shortcuts.py`
+On Linux and macOS it removes the `~/.config/dalftui` link, the `~/.config/tmux/shortcuts.py`
 link, the generated `~/.tmux.conf` and Alacritty loaders, the marked prompt line
-pair in `~/.bashrc`, and VS Code's `terminal.integrated.fontFamily` and
+pair in `~/.bashrc` and `~/.zshrc`, and VS Code's `terminal.integrated.fontFamily` and
 `terminal.integrated.fontSize` while they are still `Hack Nerd Font` and `12`.
 When a backup holds the `~/.tmux.conf` or `alacritty.toml` file or link you had
 before dalftui, it is put back. An edited loader (with the `~/.config/dalftui` link

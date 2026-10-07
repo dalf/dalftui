@@ -31,6 +31,9 @@ SSH, whether the pane runs a shell or a mouse-aware program:
 - **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in Alacritty,
   or **Ctrl+B, then Page Up**, then Shift+drag.
 
+On macOS, hold Fn while dragging in Terminal.app or Option in iTerm2, then
+press Cmd+C; tmux copies go to the clipboard through `pbcopy`.
+
 A plain drag in a shell only shows a reminder to hold Shift, and a plain double-
 or triple-click no longer selects a word or line; hold Shift for those too.
 Programs that use the mouse, such as htop or editors, still receive drags and clicks. In Windows

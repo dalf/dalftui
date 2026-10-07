@@ -3,6 +3,7 @@ import errno
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import subprocess
 import sys
@@ -94,9 +95,12 @@ sys.exit(result.get('status', 0))
         try:
             result = subprocess.run(command, env=env, stdout=slave, stderr=subprocess.PIPE,
                                     text=True, timeout=12)
+            chunks = []
+            # macOS discards unread output once the last slave descriptor closes.
+            while select.select([master], [], [], 0.2)[0]:
+                chunks.append(os.read(master, 65536))
             os.close(slave)
             slave = None
-            chunks = []
             while True:
                 try:
                     chunk = os.read(master, 65536)
@@ -268,7 +272,7 @@ sys.exit(result.get('status', 0))
         self.assertTrue(result.stdout.endswith('SHELL_READY:-l\n'))
 
     def test_overview_wrapper_uses_the_same_error_marker_in_a_terminal(self):
-        self.env['SHELL'] = '/bin/true'
+        self.env['SHELL'] = shutil.which('true')
         result = self.run_report(script=ops.check_script('system overview', 'exit 23', 10, overview=True), terminal=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('\x1b[31mERR\x1b[39m  System overview could not finish (exit 23).', result.stdout)

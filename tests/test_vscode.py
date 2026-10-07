@@ -347,7 +347,8 @@ class EditorTests(DisposableSetup):
 class RemoteCredentialsTests(unittest.TestCase):
     """Execute remote sh scripts locally; no SSH host or real tmux session is used."""
     def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix='dalftui-credentials-')
+        # /tmp keeps the bridge socket under the AF_UNIX path limit (104 bytes on macOS).
+        directory = tempfile.TemporaryDirectory(prefix='dalftui-credentials-', dir='/tmp')
         self.addCleanup(directory.cleanup)
         self.directory = Path(directory.name)
         self.bin = self.directory / 'bin'
@@ -586,6 +587,7 @@ class RemoteCredentialsTests(unittest.TestCase):
                         process.wait(timeout=5)
 
 
+@unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
 class EditorTmuxTests(TmuxFixture):
     def setUp(self):
         super().setUp()

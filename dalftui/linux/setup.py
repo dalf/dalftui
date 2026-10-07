@@ -18,7 +18,9 @@ from ..windows.terminal_settings import PROMPT_FONT, removed_vscode_settings, vs
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
-PROFILES = ('desktop', 'tmux-only')
+PROFILES = ('desktop', 'tmux-only', 'macos')
+# Alacritty is not used on macOS; a new Mac installation uses Terminal.app or iTerm2.
+DEFAULT_PROFILE = 'macos' if sys.platform == 'darwin' else 'desktop'
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
 REPO = Path(__file__).resolve().parents[2]
 LOCAL_TMUX = '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'
@@ -55,7 +57,23 @@ class Paths:
         return self.home_dir / '.bashrc'
 
     @property
+    def zshrc(self):
+        """zsh reads .zshrc from $ZDOTDIR, which ~/.zshenv may set without exporting it."""
+        zdotdir = os.environ.get('ZDOTDIR')
+        if shutil.which('zsh'):
+            try:
+                result = subprocess.run(['zsh', '-c', 'print -r -- ${ZDOTDIR:-$HOME}'], stdin=subprocess.DEVNULL,
+                                        env=dict(os.environ, HOME=str(self.home_dir)),
+                                        capture_output=True, text=True, timeout=10)
+                zdotdir = (result.stdout.splitlines() or [zdotdir])[-1]
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return (Path(zdotdir) if zdotdir and Path(zdotdir).is_absolute() else self.home_dir) / '.zshrc'
+
+    @property
     def vscode_settings(self):
+        if sys.platform == 'darwin':
+            return self.home_dir / 'Library/Application Support/Code/User/settings.json'
         return self.config_dir / 'Code/User/settings.json'
 
 
@@ -107,10 +125,10 @@ def installed_profile(paths=None):
     """The private tmux loader records the mode; old installations are desktops."""
     paths = paths or Paths.current()
     if not paths.tmux.exists():
-        return 'desktop'
+        return DEFAULT_PROFILE
     content = paths.tmux.read_text()
     if not content.startswith(MARKER):
-        return 'desktop'
+        return DEFAULT_PROFILE
     for line in content.splitlines():
         if line.startswith(PROFILE_MARKER):
             profile = line[len(PROFILE_MARKER):]
@@ -142,8 +160,12 @@ def known_tmux(paths):
 def dependencies(profile='desktop'):
     if profile not in PROFILES:
         raise ValueError(f'Unknown installation mode: {profile}')
-    if not sys.platform.startswith('linux'):
-        raise RuntimeError('This installer currently targets Linux.')
+    if not sys.platform.startswith('linux') and sys.platform != 'darwin':
+        raise RuntimeError('This installer targets Linux and macOS.')
+    if sys.platform == 'darwin' and profile == 'desktop':
+        raise RuntimeError('The Alacritty desktop mode is Linux-only; run ./install without --desktop.')
+    if sys.platform != 'darwin' and profile == 'macos':
+        raise RuntimeError('The macos mode is for macOS only.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
     programs = ('tmux', 'less', 'git', 'oh-my-posh')
@@ -151,7 +173,8 @@ def dependencies(profile='desktop'):
         programs += ('alacritty', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
-        raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing))
+        hint = ' (Homebrew: brew install python@3.13 tmux oh-my-posh)' if sys.platform == 'darwin' else ''
+        raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)
     specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
         specifications += [('alacritty', '--version', (0, 14)), ('ssh', '-V', (9, 4))]
@@ -163,21 +186,21 @@ def dependencies(profile='desktop'):
             raise RuntimeError(f'{name} {minimum[0]}.{minimum[1]} or newer is required.{detected}')
 
 
-def bashrc_with_prompt(paths, previous):
-    """Append the managed prompt line once, keeping the rest of ~/.bashrc."""
+def rc_with_prompt(paths, previous, loader_name):
+    """Append the managed prompt line once, keeping the rest of ~/.bashrc or ~/.zshrc."""
     content = previous.value if previous and previous.kind == 'file' else b''
     if PROMPT_MARKER.encode() in content:
         return content
     if content and not content.endswith(b'\n'):
         content += b'\n'
-    loader = shlex.quote(str(paths.root / 'config/prompt.bash'))
+    loader = shlex.quote(str(paths.root / 'config' / loader_name))
     return content + f'{PROMPT_MARKER}\n[ -f {loader} ] && . {loader}\n'.encode()
 
 
-def bashrc_without_prompt(content):
+def rc_without_prompt(content):
     """Remove each marker line that is followed by its prompt loader line."""
     lines = content.splitlines(keepends=True)
-    loader = re.compile(rb"\[ -f (.+/dalftui/config/prompt\.bash'?) \] && \. \1\r?\n?")
+    loader = re.compile(rb"\[ -f (.+/dalftui/config/prompt\.(?:bash|zsh)'?) \] && \. \1\r?\n?")
     kept, index = [], 0
     while index < len(lines):
         if (lines[index].rstrip(b'\r\n') == PROMPT_MARKER.encode() and index + 1 < len(lines)
@@ -211,6 +234,10 @@ def vscode_settings_bytes(path):
 
 def install_font(dry_run):
     """Install the Nerd Font used by the prompt and VS Code unless it is present."""
+    if sys.platform == 'darwin':  # Stock macOS has no fc-list; oh-my-posh installs into ~/Library/Fonts.
+        for fonts in (Path.home() / 'Library/Fonts', Path('/Library/Fonts')):
+            if any(fonts.glob('HackNerdFont*')):
+                return
     if shutil.which('fc-list'):
         result = subprocess.run(['fc-list', ':', 'family'], capture_output=True, text=True, timeout=30)
         if any(PROMPT_FONT in line.split(',') for line in result.stdout.splitlines()):
@@ -284,9 +311,10 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
     ]
     if profile == 'desktop':
         desired.append((paths.alacritty, Snapshot('file', alacritty)))
-    # A symlinked ~/.bashrc is replaced like other managed paths, keeping its content.
-    desired.append((paths.bashrc, Snapshot('file', bashrc_with_prompt(paths, snapshot(paths.bashrc.resolve())))))
-    if profile == 'desktop' and vscode_present(paths):
+    # A symlinked ~/.bashrc or ~/.zshrc is replaced like other managed paths, keeping its content.
+    rc, loader_name = (paths.zshrc, 'prompt.zsh') if profile == 'macos' else (paths.bashrc, 'prompt.bash')
+    desired.append((rc, Snapshot('file', rc_with_prompt(paths, snapshot(rc.resolve()), loader_name))))
+    if profile in ('desktop', 'macos') and vscode_present(paths):
         settings = vscode_settings_bytes(paths.vscode_settings)
         if settings is not None:
             desired.append((paths.vscode_settings, Snapshot('file', settings)))
@@ -314,7 +342,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             if path != paths.tmux or previous.value not in known_tmux(paths):
                 raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
         changes.append((path, previous, wanted))
-    if profile == 'desktop':
+    if profile in ('desktop', 'macos'):
         install_font(dry_run)
     if not changes:
         print('Already installed; personal overrides preserved.')
@@ -372,13 +400,14 @@ def uninstall(paths=None, *, dry_run=False):
     if previous and previous.kind == 'link' and previous.value in (
             str(paths.root / 'bin/shortcuts.py'), str(paths.root / 'shortcuts.py')):
         changes.append((guide, previous, None))
-    previous = snapshot(paths.bashrc)  # Install writes a file; a symlink is not its own.
-    if previous and previous.kind == 'file':
-        content = bashrc_without_prompt(previous.value)
-        if content != previous.value:
-            changes.append((paths.bashrc, previous, replace(previous, value=content)))
-        if PROMPT_MARKER.encode() in content:
-            notes.append(f'Kept an edited "{PROMPT_MARKER}" line: {paths.bashrc}')
+    for rc in dict.fromkeys((paths.bashrc, paths.zshrc, paths.home_dir / '.zshrc')):
+        previous = snapshot(rc)  # Install writes a file; a symlink is not its own.
+        if previous and previous.kind == 'file':
+            content = rc_without_prompt(previous.value)
+            if content != previous.value:
+                changes.append((rc, previous, replace(previous, value=content)))
+            if PROMPT_MARKER.encode() in content:
+                notes.append(f'Kept an edited "{PROMPT_MARKER}" line: {rc}')
     previous = snapshot(paths.vscode_settings)
     if previous and previous.kind == 'file':
         bom = b'\xef\xbb\xbf' if previous.value.startswith(b'\xef\xbb\xbf') else b''
