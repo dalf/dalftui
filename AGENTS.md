@@ -152,5 +152,5 @@ mise is absent: `python3 -m unittest discover -s tests -v` on Linux,
 `.\tests\test_windows_setup.ps1` in PowerShell.
 
 Check discovered IDs and selected-suite membership when renaming tests; a
-successful discovery command can still match zero tests. See [README.md](README.md#verification)
+successful discovery command can still match zero tests. See [docs/development.md](docs/development.md#verification)
 for disposable-resource, mocked GUI/SSH, and historical compatibility coverage.

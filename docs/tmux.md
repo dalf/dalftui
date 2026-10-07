@@ -1,0 +1,90 @@
+# tmux and Alacritty reference
+
+## Shortcuts
+
+- **Ctrl+Shift+F1:** open the keyboard shortcut guide.
+- **Ctrl+Shift+F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
+- **Ctrl+Shift+F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
+- **Ctrl+Shift+T:** new tmux window.
+- **Ctrl+Page Up / Page Down:** previous / next window.
+- **Ctrl+Shift+D / Ctrl+Shift+E:** split side by side / top and bottom.
+- **Ctrl+Alt+arrow:** change pane.
+- **Ctrl+Alt+Shift+arrow:** resize pane.
+
+The guide reads Alacritty imports and local overrides, and shows live tmux
+bindings. The terminal font needs glyphs for the rounded Powerline caps (`` and
+``) and the status circle (`⬤`). The system monospace font remains the default.
+
+Alacritty translates Ctrl+Shift+F1/F2/F3 to the existing tmux actions. The
+tmux prefix bindings remain available as fallbacks. Reload locally to use
+the new Alacritty shortcuts; existing remote tmux configurations already
+understand the translated keys.
+
+## Selecting and copying
+
+Selection works the same way in Alacritty and Windows Terminal, locally or over
+SSH, whether the pane runs a shell or a mouse-aware program:
+
+- **Shift+drag** selects text; **Ctrl+Shift+C** copies and **Ctrl+Shift+V** pastes.
+- **Split panes:** a terminal selection crosses pane borders. Press **Ctrl+B, then z**
+  to zoom the pane, select, then **Ctrl+B, then z** again to restore the layout.
+- **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in Alacritty,
+  or **Ctrl+B, then Page Up**, then Shift+drag.
+
+A plain drag in a shell only shows a reminder to hold Shift, and a plain double-
+or triple-click no longer selects a word or line; hold Shift for those too.
+Programs that use the mouse, such as htop or editors, still receive drags and clicks. In Windows
+Terminal, select before pressing Ctrl+Shift+C: without a selection the key may
+reach the pane as Ctrl+C.
+
+dalftui adds no terminal copy bindings and relies on Alacritty and Windows
+Terminal defaults. Alacritty also copies selections automatically; Windows
+Terminal's `copyOnSelect` setting is left unchanged. tmux sets `set-clipboard on`,
+so programs in panes, including on remote servers, may set the desktop
+clipboard with OSC 52. They cannot read the desktop clipboard, but an OSC 52
+query returns tmux's most recent paste buffer: text copied in tmux history or
+set by another pane. Override it in
+`~/.config/tmux/local.conf`, for example with `set -s set-clipboard off`.
+Reloading only re-sources the configuration: if a later version removes these
+root mouse bindings, restart the tmux server to drop them.
+
+## Session policy
+
+SSH windows use tmux when it is installed on the remote host. Otherwise they
+silently open a plain login shell. No remote dalftui installation is required
+for either case. Local Alacritty windows and SSH windows with tmux use the same
+session policy:
+
+- No sessions: create session `0`.
+- One detached session: attach to it, whatever its name.
+- One attached session: create a new independent session with the next numeric name.
+- Multiple sessions: list their IDs, names, and client counts. Enter a session ID to
+  attach, `n` or Enter for a new session, `s` for a plain login shell, or `q` to cancel.
+
+With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window while
+leaving its session running. Connection errors stay visible
+until Enter is pressed. A plain shell has no tmux shortcuts, persistence, or
+remote **Ctrl+Shift+F3** integration. SSH windows override Alacritty's local
+startup and apply the policy directly on the server.
+Installing dalftui locally does not deploy its tmux configuration to remote hosts.
+Install `--tmux-only` on each server where you want the shared configuration.
+Without it, remote tmux uses the server's existing configuration and bindings. Shift+drag
+selection works either way; the plain-drag reminder and OSC 52 clipboard writes
+need the shared configuration.
+
+## Theme and claude-tabstatus
+
+The required Catppuccin tmux v2.3.1 configuration files are bundled under
+`vendor/catppuccin`, including their upstream MIT license. No theme download or
+plugin manager is needed. The custom rounded tab design is in `config/tmux.conf`.
+
+[claude-tabstatus](https://github.com/dalf/claude-tabstatus) is an optional,
+separate project. Existing installations continue to supply repository/branch
+labels and status through pane titles and `@cctab_window_strip`. dalftui preserves
+that integration and does not change Claude hooks. Without it, ordinary tmux
+window names are displayed.
+Install claude-tabstatus separately on the server too if you want its status
+indicators for Claude running there.
+
+The tab design keeps the optional claude-tabstatus integration: the active
+light pill uses dark status circles, and inactive dark pills use light circles.
