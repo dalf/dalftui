@@ -330,7 +330,9 @@ function Install-DalftuiNerdFont([string]$OhMyPosh) {
         return
     }
     # Installs for the current user; no administrator rights are needed.
-    & $OhMyPosh font install Hack | Out-Host
+    # A direct release asset avoids the named-font GitHub API lookup, which can
+    # fail on shared CI runners before the font download even starts.
+    & $OhMyPosh font install 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip' | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-DalftuiNerdFont)) {
         throw 'Hack Nerd Font installation failed; see the message above.'
     }

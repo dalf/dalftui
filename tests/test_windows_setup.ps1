@@ -493,8 +493,9 @@ function Invoke-DalftuiWindowsSetup {
         Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed Hack Nerd Font must not be reinstalled'
         $global:dalftuiFontInstalled = $false
         Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
-        Assert-True ([IO.File]::ReadAllText($fontLog) -eq 'font install Hack') `
-            'A missing Hack Nerd Font must be installed with oh-my-posh'
+        Assert-True ([IO.File]::ReadAllText($fontLog) -eq `
+                     'font install https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip') `
+            'A missing Hack Nerd Font must use the direct official asset URL, avoiding GitHub API discovery'
         [IO.File]::WriteAllText($fakeOhMyPosh, '$global:LASTEXITCODE = 0')
         $global:dalftuiFontInstalled = $false
         Assert-Throws { Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh } `
