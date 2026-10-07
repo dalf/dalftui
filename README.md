@@ -203,6 +203,9 @@ over SSH, the path, venv or conda env, git branch and changes, run time over
 the title keeps the last two folders and starts with 🛡️ when admin. In tmux a
 shell's title becomes the tab label.
 
+Colors: blue path, green clean Git, yellow local changes or commits ahead of
+upstream, and red command failures. Untracked files use a yellow `*`.
+
 Files: `config/oh-my-posh.omp.json`, `config/prompt.bash`,
 `dalftui/windows/profile.ps1`.
 
