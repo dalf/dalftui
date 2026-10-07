@@ -1,0 +1,59 @@
+name: Fedora bootstrap
+
+on:
+  push:
+    branches: [main]
+    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, .github/workflows/bootstrap.yml]
+  pull_request:
+    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, .github/workflows/bootstrap.yml]
+  schedule:
+    - cron: '17 5 * * 1'  # Weekly: Fedora package names, the VS Code repository and the oh-my-posh and mise installers can change.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install the documented prerequisites
+        run: dnf install -y python3 git sudo
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Create a user with passwordless sudo
+        run: |
+          useradd -m tester
+          echo 'tester ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/tester
+          mkdir -p /home/tester/code
+          cp -a "$GITHUB_WORKSPACE" /home/tester/code/dalftui
+          chown -R tester: /home/tester/code
+      - name: First run installs everything
+        run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap'
+      - name: Second run changes nothing
+        run: |
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap' | tee second.txt
+          grep -x 'Installed: 0' second.txt
+          grep -x 'Upgraded: 0' second.txt
+          grep -x 'Failed: 0' second.txt
+      - name: Dry run changes nothing
+        run: |
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap --dry-run' | tee dry.txt
+          grep -x 'Would install: 0' dry.txt
+          grep -x 'Would upgrade: 0' dry.txt
+          grep -x 'Failed: 0' dry.txt
+      - name: Tools answer and dalftui is installed
+        run: |
+          sudo -u tester -H bash -lc '
+            set -eo pipefail
+            tmux -V
+            alacritty --version
+            oh-my-posh --version
+            fido2-token -V
+            for tool in fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise code; do "$tool" --version | head -n 1; done
+            test -L ~/.config/dalftui
+            cd ~/code/dalftui && ./install | grep "Already installed"
+            test -s ~/.local/state/dalftui/bootstrap.log'

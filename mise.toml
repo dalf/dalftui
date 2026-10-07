@@ -5,7 +5,7 @@ min_version = "2026.7.5"
 powershell = "{{ env.DALFTUI_POWERSHELL | default(value='powershell') }}"
 # Windows cannot infer these Unix-only APIs in platform-guarded code and tests.
 # Match exact qualified names; Linux lint checks them without exemptions.
-windows_lint_members = 'socket[.]AF_UNIX\Z,os[.]fchmod\Z,os[.]getuid\Z,os[.]killpg\Z,os[.]openpty\Z,signal[.]SIGHUP\Z,signal[.]SIGKILL\Z,curses[.]use_default_colors\Z,curses[.]init_pair\Z,curses[.]set_escdelay\Z,curses[.]error\Z,curses[.]color_pair\Z,ssh_picker[.]curses[.]error\Z'
+windows_lint_members = 'socket[.]AF_UNIX\Z,os[.]fchmod\Z,os[.]geteuid\Z,os[.]getuid\Z,os[.]killpg\Z,os[.]openpty\Z,signal[.]SIGHUP\Z,signal[.]SIGKILL\Z,curses[.]use_default_colors\Z,curses[.]init_pair\Z,curses[.]set_escdelay\Z,curses[.]error\Z,curses[.]color_pair\Z,ssh_picker[.]curses[.]error\Z'
 
 [tasks.check]
 description = "Run spelling, Pylint, then all tests for the current platform"
@@ -20,8 +20,8 @@ run = "uvx codespell==2.4.3"
 [tasks.pylint]
 description = "Check Python source, entrypoints, and tests with Pylint"
 alias = "lint"
-run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py"
-run_windows = 'uvx --python python pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py'
+run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py"
+run_windows = 'uvx --python python pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py'
 
 [tasks.test]
 description = "Run all tests for the current platform"
