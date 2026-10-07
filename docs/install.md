@@ -4,12 +4,16 @@ Full detail behind the install steps in the [README](../README.md#install-everyt
 
 ## Linux desktop
 
-Requirements: Python 3.11+, Alacritty 0.14+, tmux 3.2+, OpenSSH 9.4+, Git,
-`less`, and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the
-desktop mode. The server mode below needs Python 3.11+, tmux 3.2+, Git, `less`,
-and Oh My Posh. The installer configures software that is already installed. It
-uses no package manager, root access, or Python packages; on Fedora, the separate
-[`./bootstrap`](#new-fedora-machine) installs them with dnf. The only download is
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Alacritty 0.14+,
+tmux 3.2+, OpenSSH 9.4+, Git, `less`, and
+[Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the desktop mode.
+The server mode below needs Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My
+Posh. `./install`, `./bootstrap` and `bin/reload` run with `python3`; the tmux
+keys run dalftui's Python with `uv run` and also look for uv in `~/.local/bin`,
+which a tmux server started over SSH may lack on its PATH. The installer
+configures software that is already installed. It uses no package manager, root access, or Python packages; on Fedora, Debian and
+Ubuntu, the separate [`./bootstrap`](#new-machine-fedora-debian-ubuntu) installs them with dnf or apt
+(on Windows, with [Scoop](#new-machine-windows)). The only download is
 the desktop mode's font: when `fc-list` does not show Hack Nerd Font, the
 installer runs `oh-my-posh font install Hack`.
 
@@ -65,7 +69,7 @@ cd ~/code/dalftui
 ./bin/reload
 ```
 
-Server requirements are **Python 3.11+, tmux 3.2+, Git, `less`, and Oh My Posh**. Alacritty
+Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh**. Alacritty
 and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
 server installer manages the shared configuration link, tmux loader, shortcut
 guide link, `~/.config/tmux/local.conf`, and the `~/.bashrc` prompt line. It
@@ -104,7 +108,7 @@ git pull --ff-only
 ./bin/reload
 ```
 
-## New Fedora machine
+## New machine (Fedora, Debian, Ubuntu)
 
 `./bootstrap` is opt-in and separate from `./install`, which keeps configuring
 software only. Its package list is the owner's personal tool set. Python 3.11+
@@ -114,6 +118,18 @@ and Git must exist first; on a new machine:
 sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
 ```
 
+On Debian or Ubuntu (a server):
+
+```sh
+sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
+```
+
+A minimal Debian may lack sudo: install it with `su -c 'apt-get install sudo'`
+and add your user to the `sudo` group. The desktop mode needs Alacritty 0.14+,
+so it works on Fedora and Debian 13; on Debian 12 and Ubuntu 24.04 the packages
+install but `./install` then fails, so use `--tmux-only` there. Ubuntu 22.04 is
+refused: its Python is 3.10.
+
 Each run, in order (a failed step does not stop the next ones):
 
 1. Updates its own checkout with `git pull --ff-only` and restarts if new
@@ -121,43 +137,119 @@ Each run, in order (a failed step does not stop the next ones):
    or with uncommitted changes to tracked files.
 2. Asks for the sudo password once and, unless `--tmux-only`, adds Microsoft's
    [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
-   and `/etc/yum.repos.d/vscode.repo`) when that file is missing. A `code` rpm
-   installed from a download is then upgraded from the repository.
+   and `/etc/yum.repos.d/vscode.repo`, or `/etc/apt/sources.list.d/vscode.sources`
+   on apt) when that file is missing. A `code` package installed from a download
+   is then upgraded from the repository.
 3. Installs each missing package from
-   [packages/fedora.txt](../packages/fedora.txt) with its own `dnf install`, so
-   one failure does not stop the others, and upgrades the listed installed
-   packages with `dnf upgrade`. Other system packages are not upgraded.
-4. Installs Oh My Posh and mise with their official installers
-   ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html))
-   into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`
-   and `mise self-update --yes --no-plugins`. A copy that the user cannot write,
+   [packages/fedora.txt](../packages/fedora.txt) or
+   [packages/debian.txt](../packages/debian.txt) with its own `dnf install` or
+   `apt-get install` (after one `apt-get update`), so one failure does not stop
+   the others, and upgrades the listed installed packages with `dnf upgrade` or
+   `apt-get install --only-upgrade`. Other system packages are not upgraded.
+4. Installs Oh My Posh, mise and uv with their official installers
+   ([Oh My Posh](https://ohmyposh.dev/docs/installation/linux), [mise.run](https://mise.jdx.dev/installing-mise.html),
+   [uv](https://docs.astral.sh/uv/getting-started/installation/))
+   into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`,
+   `mise self-update --yes --no-plugins` and `uv self update`. A copy that the user cannot write,
    such as an rpm, is left alone.
 5. Runs `./install` (with `--tmux-only` when given; otherwise the existing
    profile, or desktop on a new machine), then `./bin/reload`.
 6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
    with 1 when anything failed.
 
-`packages/fedora.txt` lists one package per line; `#` starts a comment. The
+The package lists have one package per line; `#` starts a comment. The
 packages after `[desktop]` (OpenSSH, Alacritty, VS Code and fido2-tools) are skipped with
-`--tmux-only`.
+`--tmux-only`. On apt, bat's command is `batcat`, and yq is not installed:
+Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 
 `--dry-run` changes nothing and writes no bootstrap log (`dnf` may refresh its
-own cache): it reads the installed and upgradable packages, does not fetch Git,
+own cache; apt uses the package lists from the last `apt-get update`): it reads the installed and upgradable packages, does not fetch Git,
 and previews `./install` once nothing is missing. Real runs append their commands and output to
 `~/.local/state/dalftui/bootstrap.log` (or under `XDG_STATE_HOME`).
 
-GitHub CI runs the bootstrap twice in a fresh Fedora 44 container, weekly and
-when the bootstrap changes, and checks that the second run changes nothing.
+GitHub CI runs the bootstrap twice in fresh Fedora 44 and Debian 13 containers
+(desktop) and Debian 12 and Ubuntu 24.04 containers (`--tmux-only`), weekly and
+when the bootstrap changes, and checks that the second run changes nothing. It
+also checks that Ubuntu 22.04 is refused.
+
+## New machine (Windows)
+
+The same `bootstrap` installs and updates the apps in
+[packages/windows.txt](../packages/windows.txt) with [Scoop](https://scoop.sh/),
+per user and without administrator rights, then runs `install.cmd`. In a
+non-elevated Windows PowerShell on a new Windows 10 or 11 machine:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
+```
+
+Run `uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"`
+again at any time to update (`--dry-run` previews). uv downloads a suitable Python when none is installed;
+no `python` command is added. An elevated run is refused, as Scoop installs per user.
+
+Each run updates the checkout as on Linux, adds the `extras` bucket when it is
+missing, runs `scoop update`, installs each missing app with its own
+`scoop install`, and runs `scoop update APP` for each listed app that its bucket
+has newer; other apps are not updated. Installed versions, not Scoop's exit
+status, decide the result. It then checks the Windows OpenSSH client and
+Windows Terminal, runs `install.cmd`, and prints the same summary. The log is
+`%LOCALAPPDATA%\dalftui\bootstrap.log`. A dry run changes nothing, compares
+with the buckets as of the last `scoop update`, and does not run `install.cmd`.
+
+Not installed, only reported: the Windows OpenSSH client (adding it needs an
+administrator: `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`;
+`Tag dalftui` needs 9.4+), and Windows Terminal (from the Microsoft Store on
+Windows 10; open it once so setup finds its settings). Scoop cannot update an
+app that is running: the uv running bootstrap, or PowerShell 7 when you run
+bootstrap from it, is reported as in use; close it and run `scoop update uv`
+or `scoop update pwsh` from Windows PowerShell.
+
+GitHub CI runs the command on windows-latest as a standard user, twice, and
+checks that the second run and a dry run change nothing. It runs as a scheduled
+task, where msiexec is unavailable, so Scoop extracts MSIs with lessmsi there.
+
+## New machine (macOS)
+
+The same `bootstrap` installs and upgrades the formulae and casks in
+[packages/Brewfile](../packages/Brewfile) with [Homebrew](https://brew.sh/), then
+runs `./install` and `./bin/reload`. On a new Apple Silicon Mac, in Terminal.app:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv)" && brew install uv && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+```
+
+Homebrew's installer asks for an administrator password once and installs the
+Command Line Tools, which provide Git for the clone. The `eval` applies only to
+that shell; as Homebrew's installer suggests, add it to `~/.zprofile` so that new
+shells use Homebrew's `git` and `nano` rather than Apple's. An
+existing Intel Homebrew in `/usr/local` should work but is untested. Apple's
+`python3` is 3.9, so `bootstrap`, `install` and `bin/reload` run themselves
+through `uv run --no-project --python ">=3.11" --script`; Homebrew's Python is not needed.
+
+Run `~/code/dalftui/bootstrap` again at any time to update (`--dry-run` previews).
+Each run updates the checkout as on Linux, runs `brew update`, then one
+`brew bundle --file packages/Brewfile`, which installs the missing entries and
+upgrades the outdated listed ones; other formulae are not upgraded. VS Code
+updates itself, so Homebrew leaves it alone. Installed versions decide the
+summary, which is the same as on Linux, and so is the log. A dry run changes
+nothing and compares with `brew outdated` as of the last `brew update`. A root
+run and `--tmux-only` are refused.
+
+The Brewfile also installs the VS Code cask, which provides the `code` command,
+and Hack Nerd Font into `~/Library/Fonts`.
+
+GitHub CI runs the bootstrap on macos-latest (Homebrew preinstalled) twice, starting
+with Apple's `python3`, checks that the second run and a dry run change nothing,
+and that a tmux server started from a zsh login shell finds uv.
 
 ## macOS
 
-For Terminal.app or iTerm2 with zsh. Requirements: Python 3.11+, tmux 3.2+, Git,
-`less` and Oh My Posh. Git, `less` and an older `python3` come with macOS; get the
-rest from Homebrew and make sure `brew shellenv` runs in your shell setup so
-`python3`, `tmux` and `oh-my-posh` resolve to Homebrew's:
+For Terminal.app or iTerm2 with zsh. Requirements: uv, tmux 3.2+, Git, `less` and
+Oh My Posh. Git and `less` come with macOS; get the rest from Homebrew, or run
+the bootstrap above, and make sure `brew shellenv` runs in your shell setup:
 
 ```sh
-brew install python tmux oh-my-posh
+brew install tmux oh-my-posh uv
 ./install --dry-run
 ./install
 ./bin/reload
@@ -200,7 +292,8 @@ Keys and terminals:
   Ctrl+Shift+F3 sends `\033[1;6R`.
 - **Ctrl+B, then F2** (SSH picker) is not bound, as on a server.
 - **F3** opens local VS Code only and needs its `code` command on the PATH of the
-  shell that started tmux (VS Code: *Shell Command: Install 'code' command in PATH*).
+  shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
+  *Shell Command: Install 'code' command in PATH*).
   Relaying to the editor of a client connected over SSH is not supported on a Mac.
 - **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
   Cmd+C copies.
@@ -324,8 +417,8 @@ again afterwards works as a fresh installation.
 
 ## Windows
 
-The Windows launcher runs in PowerShell or Command Prompt. It needs Python
-3.11+, Windows OpenSSH, [Oh My Posh](https://ohmyposh.dev/) (`winget install
+The Windows launcher runs in PowerShell or Command Prompt. It needs uv (which
+provides Python 3.11+), Windows OpenSSH, [Oh My Posh](https://ohmyposh.dev/) (`winget install
 JanDeDobbeleer.OhMyPosh`), and Windows VS Code with **Remote - SSH**. The `code`
 command should be on an absolute PATH entry during setup. The host picker also
 needs OpenSSH 9.4+ for `Tag dalftui`. The full-screen grid uses Python's native

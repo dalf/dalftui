@@ -9,23 +9,18 @@ $dalftuiCommand = {
     [CmdletBinding()]
     param([Parameter(Position = 0)][ValidateNotNullOrEmpty()][string]$HostName)
 
-    $python = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
-    $pythonArguments = @('-3', $dalftuiPickerPath)
-    if (-not $python) {
-        $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        $pythonArguments = @($dalftuiPickerPath)
+    if (-not $uv) {
+        throw 'uv is required. Install it (scoop install uv), then open a new PowerShell window.'
     }
-    if (-not $python) {
-        throw 'Python 3.11+ is required. Install Python, then open a new PowerShell window.'
-    }
+    $pythonArguments = @('run', '--no-project', '--python', '>=3.11', $dalftuiPickerPath)
     if ($PSBoundParameters.ContainsKey('HostName')) {
         $pythonArguments += @('--connect', $HostName)
     } else {
         $pythonArguments += '--pick'
     }
-    & $python.Source @pythonArguments
+    & $uv.Source @pythonArguments
 }.GetNewClosure()
 Set-Item -Path Function:\global:dssh -Value $dalftuiCommand
 
@@ -225,16 +220,10 @@ $dalftuiOpenFolder = {
     if ($location.Provider.Name -ne 'FileSystem') {
         throw 'VS Code needs a filesystem directory. Change to a folder first.'
     }
-    $python = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
-    $arguments = @('-3', $dalftuiEditorPath, '--folder', $location.ProviderPath)
-    if (-not $python) {
-        $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        $arguments = @($dalftuiEditorPath, '--folder', $location.ProviderPath)
-    }
-    if (-not $python) { throw 'Python 3.11+ is required to open VS Code.' }
-    & $python.Source @arguments
+    if (-not $uv) { throw 'uv is required to open VS Code.' }
+    & $uv.Source run --no-project --python '>=3.11' $dalftuiEditorPath --folder $location.ProviderPath
     if ($global:LASTEXITCODE -ne 0) { throw 'Could not open VS Code; see the error above.' }
 }.GetNewClosure()
 Set-Item -Path Function:\global:Open-DalftuiCurrentFolder -Value $dalftuiOpenFolder

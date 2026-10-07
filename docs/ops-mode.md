@@ -113,12 +113,12 @@ refresh; inspect its result.
 The same actions are available directly:
 
 ```sh
-python bin/ssh_picker.py --connect sibils-api --plain
-python bin/ssh_picker.py --connect sibils-api --check packages
-python bin/ssh_picker.py --connect sibils-api --ops
+python3 bin/ssh_picker.py --connect sibils-api --plain
+python3 bin/ssh_picker.py --connect sibils-api --check packages
+python3 bin/ssh_picker.py --connect sibils-api --ops
 ```
 
-Use `python3` on Linux if `python` is unavailable. On Linux the desktop picker
+On Windows, replace `python3` with `uv run --no-project --python ">=3.11"`. On Linux the desktop picker
 opens the selected connection action in a new Alacritty window; `--pick` and
 Windows use the current terminal. Plain mode skips dalftui's tmux policy; your
 own shell startup files still run. Editor integration follows the same installed

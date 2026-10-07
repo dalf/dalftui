@@ -1,22 +1,36 @@
-"""Install the packages and tools of a new Fedora machine, then install dalftui. Safe to rerun."""
+"""Install the packages and tools of a new Fedora, Debian, Ubuntu or macOS machine, then install dalftui. Safe to rerun."""
 from datetime import datetime
+import json
 import os
+import platform
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import sys
 import threading
+import urllib.request
 
 REPO = Path(__file__).resolve().parents[2]
-PACKAGES = REPO / 'packages/fedora.txt'
+PACKAGES = REPO / 'packages'
 OH_MY_POSH_INSTALLER = 'https://ohmyposh.dev/install.sh'
 MISE_INSTALLER = 'https://mise.run'
-# Microsoft's documented Fedora setup: https://code.visualstudio.com/docs/setup/linux
+UV_INSTALLER = 'https://astral.sh/uv/install.sh'
+# sudo drops DEBIAN_FRONTEND; stdin is closed, so conffile prompts must not be asked.
+APT = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', '-y', '-o', 'DPkg::Lock::Timeout=300',
+       '-o', 'Dpkg::Options::=--force-confdef', '-o', 'Dpkg::Options::=--force-confold']
+# Microsoft's documented Fedora and Debian setup: https://code.visualstudio.com/docs/setup/linux
 VSCODE_KEY = 'https://packages.microsoft.com/keys/microsoft.asc'
 VSCODE_REPO = Path('/etc/yum.repos.d/vscode.repo')
 VSCODE_REPO_TEXT = ('[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\n'
                     f'enabled=1\nautorefresh=1\ntype=rpm-md\ngpgcheck=1\ngpgkey={VSCODE_KEY}\n')
+VSCODE_KEYRING = Path('/usr/share/keyrings/microsoft.asc')
+VSCODE_SOURCES = Path('/etc/apt/sources.list.d/vscode.sources')
+VSCODE_SOURCES_TEXT = ('Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\n'
+                       f'Architectures: amd64,arm64,armhf\nSigned-By: {VSCODE_KEYRING}\n')
+BREWFILE = PACKAGES / 'Brewfile'
+BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
+BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 PULLED = 'DALFTUI_BOOTSTRAP_PULLED'  # Set before restarting with updated code; stops a loop.
 
 
@@ -35,14 +49,29 @@ def read_packages(path, *, tmux_only=False):
     return packages
 
 
+def family():
+    """'fedora' or 'debian' (Debian and Ubuntu) from /etc/os-release; None otherwise."""
+    try:
+        release = platform.freedesktop_os_release()
+    except OSError:
+        return None
+    ids = f"{release.get('ID', '')} {release.get('ID_LIKE', '')}".split()
+    if 'fedora' in ids:
+        return 'fedora'
+    if 'debian' in ids or 'ubuntu' in ids:
+        return 'debian'
+    return None
+
+
 def state_directory():
     state = os.environ.get('XDG_STATE_HOME')
     return (Path(state) if state and Path(state).is_absolute() else Path.home() / '.local/state') / 'dalftui'
 
 
 class Bootstrap:
-    def __init__(self, root=REPO, *, dry_run=False, log_path=None):
+    def __init__(self, root=REPO, *, dry_run=False, log_path=None, apt=False):
         self.root = Path(root)
+        self.apt = apt
         self.dry_run = dry_run
         self.log = None
         if log_path and not dry_run:  # A dry run writes nothing, not even the log.
@@ -117,11 +146,18 @@ class Bootstrap:
                 if self.log:
                     self.log.close()
                 os.environ[PULLED] = f'{before[:7]}..{after[:7]}'
-                os.execv(sys.executable, [sys.executable, str(self.root / 'bootstrap'), *argv])
+                command = [sys.executable, str(self.root / 'bootstrap'), *argv]
+                if os.name == 'nt':  # execv returns to the console before the new process ends.
+                    raise SystemExit(subprocess.run(command, check=False).returncode)
+                os.execv(sys.executable, command)
                 return  # Reached only when execv is mocked.
         self.add('skipped', [f'dalftui ({reason})'])
 
     def installed_versions(self, packages):
+        if self.apt:  # Rows other than 'ii', such as removed packages with configuration left, count as missing.
+            result = self.query(['dpkg-query', '-W', '-f=${Package} ${db:Status-Abbrev} ${Version}\n', *packages])
+            rows = (line.split() for line in result.stdout.splitlines())
+            return {row[0]: row[2] for row in rows if len(row) == 3 and row[1] == 'ii' and row[0] in packages}
         result = self.query(['rpm', '-q', '--qf', '%{NAME} %{EVR}\n', *packages])
         versions = {}
         for line in result.stdout.splitlines():
@@ -136,10 +172,16 @@ class Bootstrap:
         missing = [name for name in names if name not in before]
         present = [name for name in names if name in before]
         if self.dry_run:
-            result = self.query(['dnf', 'repoquery', '-q', '--upgrades', '--qf', '%{name}\n', *present])
+            if self.apt:  # Simulated without root, from the lists of the last apt-get update.
+                check = 'apt-get -s'
+                result = self.query(['apt-get', '-s', 'install', '--only-upgrade', *present])
+                upgrades = {line.split()[1] for line in result.stdout.splitlines() if line.startswith('Inst ')}
+            else:
+                check = 'dnf repoquery'
+                result = self.query(['dnf', 'repoquery', '-q', '--upgrades', '--qf', '%{name}\n', *present])
+                upgrades = set(result.stdout.split())
             if present and result.returncode:
-                self.add('failed', ['upgrade check (dnf repoquery)'])
-            upgrades = set(result.stdout.split())
+                self.add('failed', [f'upgrade check ({check})'])
             self.add('installed', missing)
             self.add('upgraded', [name for name in present if name in upgrades])
             self.add('skipped', [name for name in present if name not in upgrades])
@@ -147,12 +189,25 @@ class Bootstrap:
         if not self.sudo():
             self.add('failed', [f'{name} (sudo)' for name in names])
             return
+        install, upgrade = ['sudo', 'dnf', 'install', '-y'], ['sudo', 'dnf', 'upgrade', '-y']
+        if self.apt:
+            install, upgrade = APT + ['install'], APT + ['install', '--only-upgrade']
+            if self.run(APT + ['update']).returncode:
+                self.add('failed', ['apt-get update'])
+        locked = False
+
+        def run(command):  # Once apt has waited out the dpkg lock, the next commands would each wait again.
+            nonlocal locked
+            if locked:
+                return 1
+            result = self.run(command)
+            locked = self.apt and 'Unable to acquire the dpkg frontend lock' in result.stdout
+            return result.returncode
         for name in missing:
-            self.run(['sudo', 'dnf', 'install', '-y', name])
+            run(install + [name])
         failed = set()
-        if present and self.run(['sudo', 'dnf', 'upgrade', '-y', *present]).returncode:
-            failed = {name for name in present
-                      if self.run(['sudo', 'dnf', 'upgrade', '-y', name]).returncode}
+        if present and run(upgrade + present):
+            failed = {name for name in present if run(upgrade + [name])}
         after = self.installed_versions(names)
         for name in names:
             if name in failed or name not in after:
@@ -163,8 +218,10 @@ class Bootstrap:
                 self.add('upgraded' if after[name] != before[name] else 'skipped', [name])
 
     def vscode_repo(self):
-        """Add Microsoft's VS Code repository once, so dnf installs and upgrades the code package."""
-        if VSCODE_REPO.exists():
+        """Add Microsoft's VS Code repository once, so dnf or apt installs and upgrades the code package."""
+        # vscode.list: an older apt setup; a second source with another Signed-By makes apt fail.
+        existing = (VSCODE_SOURCES, VSCODE_SOURCES.with_suffix('.list')) if self.apt else (VSCODE_REPO,)
+        if any(path.exists() for path in existing):
             self.add('skipped', ['VS Code repository'])
             return
         if self.dry_run:
@@ -173,8 +230,19 @@ class Bootstrap:
         if not self.sudo():
             self.add('failed', ['VS Code repository (sudo)'])
             return
-        failed = self.run(['sudo', 'rpm', '--import', VSCODE_KEY]).returncode or self.run(
-            ['sudo', 'sh', '-c', f'printf %s {shlex.quote(VSCODE_REPO_TEXT)} > {VSCODE_REPO}']).returncode
+
+        def write(path, text):
+            return self.run(['sudo', 'sh', '-c', f'printf %s {shlex.quote(text)} > {path}']).returncode
+        if self.apt:  # Fetched in Python: a minimal Debian has no curl yet.
+            try:
+                with urllib.request.urlopen(VSCODE_KEY, timeout=60) as response:
+                    key = response.read().decode('ascii')
+            except (OSError, ValueError) as error:
+                self.say(f'VS Code key: {error}\n')
+                key = None
+            failed = not key or write(VSCODE_KEYRING, key) or write(VSCODE_SOURCES, VSCODE_SOURCES_TEXT)
+        else:
+            failed = self.run(['sudo', 'rpm', '--import', VSCODE_KEY]).returncode or write(VSCODE_REPO, VSCODE_REPO_TEXT)
         self.add('failed' if failed else 'installed', ['VS Code repository'])
 
     def oh_my_posh(self):
@@ -183,6 +251,9 @@ class Bootstrap:
 
     def mise(self):
         self.user_tool('mise', f'curl -fsSL {MISE_INSTALLER} | sh', ['self-update', '--yes', '--no-plugins'])
+
+    def uv(self):
+        self.user_tool('uv', f'curl -fsSL {UV_INSTALLER} | sh', ['self', 'update'])
 
     def user_tool(self, name, installer, upgrade):
         """Official installer into ~/.local/bin; the tool's own upgrade command afterwards."""
@@ -242,6 +313,60 @@ class Bootstrap:
         return 1 if self.summary['failed'] else 0
 
 
+class Brew(Bootstrap):
+    def __init__(self, root=REPO, *, brew='brew', **kwargs):
+        super().__init__(root, **kwargs)
+        self.brew = brew
+
+    def entries(self):
+        """The Brewfile's formulae, then its casks."""
+        return [name for kind in ('--formula', '--cask')
+                for name in self.query([self.brew, 'bundle', 'list', kind, '--file', str(BREWFILE)]).stdout.split()]
+
+    def installed_versions(self, packages):
+        versions = {}
+        for kind in ([], ['--cask']):
+            for line in self.query([self.brew, 'list', *kind, '--versions']).stdout.splitlines():
+                name, _, installed = line.partition(' ')
+                if name in packages and installed:
+                    versions[name] = installed
+        return versions
+
+    def outdated(self, names):
+        """Listed entries that brew bundle would upgrade, as of the last brew update; it exits 1 when there are any."""
+        try:
+            data = json.loads(self.query([self.brew, 'outdated', '--json=v2']).stdout)
+        except ValueError:
+            self.add('failed', ['upgrade check (brew outdated)'])
+            return set()
+        return {item['name'] for kind in ('formulae', 'casks') for item in data.get(kind, [])
+                if item['name'] in names and not item.get('pinned')}
+
+    def packages(self, names):
+        """Install the missing entries and upgrade the outdated ones with one brew bundle; versions decide the outcome."""
+        if not self.dry_run and self.run([self.brew, 'update']).returncode:
+            self.add('failed', ['brew update'])
+        before = self.installed_versions(names)
+        outdated = self.outdated(names)
+        missing = [name for name in names if name not in before]
+        if self.dry_run:
+            self.add('installed', missing)
+            self.add('upgraded', [name for name in names if name in outdated])
+            self.add('skipped', [name for name in names if name in before and name not in outdated])
+            return
+        self.run([self.brew, 'bundle', '--file', str(BREWFILE)])  # Other formulae are not upgraded.
+        after = self.installed_versions(names)
+        for name in names:
+            if name not in after:
+                self.add('failed', [name])
+            elif name in missing:
+                self.add('installed', [name])
+            elif after[name] != before[name]:
+                self.add('upgraded', [name])
+            else:
+                self.add('failed' if name in outdated else 'skipped', [name])
+
+
 def keep_sudo():
     while not threading.Event().wait(60):
         subprocess.run(['sudo', '-n', '-v'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -250,23 +375,50 @@ def keep_sudo():
 
 def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     if os.geteuid() == 0:  # Packages need root, but the configuration belongs to the user.
-        print('Bootstrap failed: run ./bootstrap as your user; it asks for sudo itself.', file=sys.stderr)
+        print('Bootstrap failed: run ./bootstrap as your user'
+              + ('.' if sys.platform == 'darwin' else '; it asks for sudo itself.'), file=sys.stderr)
         return 1
-    if not all(shutil.which(command) for command in ('rpm', 'dnf', 'sudo')):
-        print('Bootstrap failed: this needs Fedora with rpm, dnf and sudo.', file=sys.stderr)
+    if sys.platform == 'darwin':
+        return macos(dry_run=dry_run, tmux_only=tmux_only, argv=argv)
+    system = family()
+    if system is None or not shutil.which('sudo'):
+        print('Bootstrap failed: this needs Fedora, Debian or Ubuntu with sudo.', file=sys.stderr)
         return 1
-    # The official oh-my-posh and mise installers write to ~/.local/bin; install must find it there.
+    # The official oh-my-posh, mise and uv installers write to ~/.local/bin; install must find it there.
     local_bin = str(Path.home() / '.local/bin')
     if local_bin not in os.environ.get('PATH', '').split(os.pathsep):
         os.environ['PATH'] = local_bin + os.pathsep + os.environ.get('PATH', '')
-    run = Bootstrap(dry_run=dry_run, log_path=state_directory() / 'bootstrap.log')
+    run = Bootstrap(dry_run=dry_run, log_path=state_directory() / 'bootstrap.log', apt=system == 'debian')
     run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
             f" {shlex.join(['bootstrap', *argv])} ==\n")
     run.update_repo(list(argv))
     if not tmux_only:
         run.vscode_repo()
-    run.packages(read_packages(PACKAGES, tmux_only=tmux_only))
+    run.packages(read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only))
     run.oh_my_posh()
     run.mise()
+    run.uv()
     run.install(tmux_only=tmux_only)
+    return run.report()
+
+
+def macos(*, dry_run, tmux_only, argv):
+    if tmux_only:
+        print('Bootstrap failed: --tmux-only is Linux-only.', file=sys.stderr)
+        return 1
+    brew = shutil.which('brew') or next((path for path in BREW_PATHS if os.access(path, os.X_OK)), None)
+    if not brew:
+        print(f'Bootstrap failed: install Homebrew first: {BREW_INSTALLER}', file=sys.stderr)
+        return 1
+    # ./install must find Homebrew's tmux, oh-my-posh and uv.
+    directory = os.path.dirname(brew)
+    if directory not in os.environ.get('PATH', '').split(os.pathsep):
+        os.environ['PATH'] = directory + os.pathsep + os.environ.get('PATH', '')
+    os.environ['HOMEBREW_NO_AUTO_UPDATE'] = '1'  # A real run updates once itself; a dry run must not.
+    run = Brew(brew=brew, dry_run=dry_run, log_path=state_directory() / 'bootstrap.log')
+    run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
+            f" {shlex.join(['bootstrap', *argv])} ==\n")
+    run.update_repo(list(argv))
+    run.packages(run.entries())
+    run.install(tmux_only=False)
     return run.report()

@@ -188,12 +188,16 @@ def dependencies(profile='desktop'):
         raise RuntimeError('The macos mode is for macOS only.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
-    programs = ('tmux', 'less', 'git', 'oh-my-posh')
+    programs = ('tmux', 'less', 'git', 'oh-my-posh', 'uv')  # uv runs the Python of the tmux keys.
     if profile == 'desktop':
         programs += ('alacritty', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
-        hint = ' (Homebrew: brew install python tmux oh-my-posh)' if sys.platform == 'darwin' else ''
+        hint = ''
+        if sys.platform == 'darwin':
+            hint = ' (Homebrew: brew install tmux oh-my-posh uv, or ./bootstrap)'
+        elif 'uv' in missing:
+            hint = ' (uv: ./bootstrap installs it; or see https://docs.astral.sh/uv/getting-started/installation/)'
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)
     specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
@@ -471,6 +475,8 @@ def reload_config(paths=None, *, socket=None):
         raise RuntimeError('The dalftui link is missing or broken. Run ./install from your checkout.')
     if not paths.tmux.read_bytes().startswith(MARKER.encode()):
         raise RuntimeError('Configuration loaders are missing. Run ./install first.')
+    if not shutil.which('uv') and not (paths.home_dir / '.local/bin/uv').exists():
+        raise RuntimeError('uv is missing; the tmux keys need it. Install uv, or rerun ./bootstrap, then reload.')
     profile = installed_profile(paths)
     if profile == 'desktop':
         content = paths.alacritty.read_bytes()

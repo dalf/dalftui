@@ -140,8 +140,8 @@ Without PowerShell setup, including from Command Prompt, you can run the
 launcher directly:
 
 ```powershell
-py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --pick
-py -3 "$HOME\code\dalftui\bin\ssh_picker.py" --connect my-vm
+uv run --no-project --python ">=3.11" "$HOME\code\dalftui\bin\ssh_picker.py" --pick
+uv run --no-project --python ">=3.11" "$HOME\code\dalftui\bin\ssh_picker.py" --connect my-vm
 ```
 
 In Command Prompt, replace `$HOME` with `%USERPROFILE%`.

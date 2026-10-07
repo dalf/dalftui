@@ -376,13 +376,7 @@ function Invoke-DalftuiWindowsSetup {
 
     # The moved implementation must derive its default checkout from its own
     # package location when callers invoke the setup function directly.
-    $pythonCommand = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $pythonCommand) {
-        $pythonCommand = Get-Command python -CommandType Application -ErrorAction Stop |
-            Select-Object -First 1
-    }
-    $pythonCommandName = [IO.Path]::GetFileNameWithoutExtension($pythonCommand.Name)
+    $uvCommand = Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $script:directSetupCheckout = $null
     $previousSystemRoot = $env:SystemRoot
     try {
@@ -392,7 +386,8 @@ function Invoke-DalftuiWindowsSetup {
             function Find-DalftuiApplication([string]$Name) {
                 Assert-True ($Name -notin @('fzf', 'winget', 'choco')) `
                     'Setup must not look for an external picker or package manager'
-                if ($Name -eq $pythonCommandName) { return $pythonCommand }
+                Assert-True ($Name -notin @('py', 'python')) 'Setup must run Python through uv'
+                if ($Name -eq 'uv') { return $uvCommand }
                 if ($Name -eq 'ssh') {
                     return [pscustomobject]@{Name = 'ssh'; Source = 'ssh'}
                 }
@@ -576,6 +571,9 @@ function Invoke-DalftuiWindowsSetup {
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
+    $previousPath = $env:PATH
+    $env:PATH = ''
+    try { Assert-Throws { dssh } 'dssh must report that uv is missing' } finally { $env:PATH = $previousPath }
     [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(0)')
     . $connectionProfile
     $null = dssh
@@ -681,12 +679,8 @@ function Invoke-DalftuiWindowsSetup {
 
     $settingsPath = Join-Path $root 'terminal-settings.json'
     [IO.File]::WriteAllText($settingsPath, '{"actions":[],"keybindings":[]}')
-    $python = Find-DalftuiApplication 'py'
-    $pythonArguments = @('-3')
-    if (-not $python) {
-        $python = Find-DalftuiApplication 'python'
-        $pythonArguments = @()
-    }
+    $python = Find-DalftuiPython
+    $pythonArguments = $python.Arguments
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath)
     $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))

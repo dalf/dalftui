@@ -1,26 +1,46 @@
-name: Fedora bootstrap
+name: Bootstrap
 
 on:
   push:
     branches: [main]
-    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, .github/workflows/bootstrap.yml]
+    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   pull_request:
-    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, .github/workflows/bootstrap.yml]
+    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
-    - cron: '17 5 * * 1'  # Weekly: Fedora package names, the VS Code repository and the oh-my-posh and mise installers can change.
+    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu, Scoop and Homebrew package names, the VS Code repository and the oh-my-posh, mise and uv installers can change.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  fedora:
+  bootstrap:
     runs-on: ubuntu-latest
-    container: fedora:44
+    container: ${{ matrix.image }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: fedora:44
+            prereq: dnf install -y python3 git sudo
+            tools: fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            desktop: true
+          - image: debian:13
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            desktop: true
+          - image: debian:12
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
+            flags: --tmux-only
+          - image: ubuntu:24.04
+            prereq: apt-get update && apt-get install -y python3 git sudo
+            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
+            flags: --tmux-only
     steps:
       - name: Install the documented prerequisites
-        run: dnf install -y python3 git sudo
+        run: ${{ matrix.prereq }}
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -31,17 +51,39 @@ jobs:
           mkdir -p /home/tester/code
           cp -a "$GITHUB_WORKSPACE" /home/tester/code/dalftui
           chown -R tester: /home/tester/code
+      - name: Pre-place Hack Nerd Font
+        if: matrix.desktop
+        # oh-my-posh resolves fonts through the GitHub API, whose shared CI rate limit fails runs;
+        # the release download is not rate-limited. A present font makes ./install skip its download.
+        run: |
+          sudo -u tester -H python3 - <<'EOF'
+          import io, pathlib, time, urllib.request, zipfile
+          url = 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip'
+          for attempt in range(5):
+              try:
+                  data = urllib.request.urlopen(url, timeout=120).read()
+                  break
+              except OSError as error:
+                  print(f'Download failed ({error}); retrying')
+                  time.sleep(15 * (attempt + 1))
+          else:
+              raise SystemExit('Hack.zip download failed')
+          fonts = pathlib.Path.home() / '.local/share/fonts'
+          fonts.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              (fonts / 'HackNerdFont-Regular.ttf').write_bytes(archive.read('HackNerdFont-Regular.ttf'))
+          EOF
       - name: First run installs everything
-        run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap'
+        run: sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap ${{ matrix.flags }}'
       - name: Second run changes nothing
         run: |
-          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap' | tee second.txt
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap ${{ matrix.flags }}' | tee second.txt
           grep -x 'Installed: 0' second.txt
           grep -x 'Upgraded: 0' second.txt
           grep -x 'Failed: 0' second.txt
       - name: Dry run changes nothing
         run: |
-          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap --dry-run' | tee dry.txt
+          sudo -u tester -H bash -lc 'cd ~/code/dalftui && ./bootstrap --dry-run ${{ matrix.flags }}' | tee dry.txt
           grep -x 'Would install: 0' dry.txt
           grep -x 'Would upgrade: 0' dry.txt
           grep -x 'Failed: 0' dry.txt
@@ -50,10 +92,191 @@ jobs:
           sudo -u tester -H bash -lc '
             set -eo pipefail
             tmux -V
-            alacritty --version
             oh-my-posh --version
-            fido2-token -V
-            for tool in fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise code; do "$tool" --version | head -n 1; done
+            for tool in ${{ matrix.tools }}; do "$tool" --version | head -n 1; done
             test -L ~/.config/dalftui
-            cd ~/code/dalftui && ./install | grep "Already installed"
+            cd ~/code/dalftui && ./install ${{ matrix.flags }} | grep "Already installed"
             test -s ~/.local/state/dalftui/bootstrap.log'
+      - name: Desktop tools answer
+        if: matrix.desktop
+        run: sudo -u tester -H fido2-token -V
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: An elevated run is refused
+        run: |
+          cmd /c 'python bootstrap 2> error.txt'
+          $status = $LASTEXITCODE
+          Get-Content error.txt
+          if ($status -ne 1 -or -not (Select-String -Quiet -SimpleMatch 'non-elevated PowerShell' error.txt)) { "Exit status $status"; exit 1 }
+          exit 0  # Actions would otherwise exit with the refused run's status.
+      - name: Create a standard user and a task that runs steps as that user
+        # The runner is elevated, and Scoop and bootstrap refuse that; a scheduled task runs with the user's own
+        # profile, registry and PATH, without elevation.
+        run: |
+          $password = 'Dalftui-' + [guid]::NewGuid().ToString('N') + '!'
+          $user = New-LocalUser tester -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires
+          # A task that stores the password logs on as a batch job, which Windows Server grants administrators only.
+          secedit /export /cfg C:\rights.inf /areas USER_RIGHTS | Out-Null
+          $rights = (Get-Content C:\rights.inf) -replace '^SeBatchLogonRight = ', "SeBatchLogonRight = *$($user.SID),"
+          if (-not ($rights -match '^SeBatchLogonRight')) { $rights = $rights -replace '^\[Privilege Rights\]$', "[Privilege Rights]`r`nSeBatchLogonRight = *$($user.SID)" }
+          Set-Content C:\rights.inf $rights -Encoding Unicode
+          secedit /configure /db C:\rights.sdb /cfg C:\rights.inf /areas USER_RIGHTS | Out-Null
+          if ($LASTEXITCODE) { throw "secedit exited with $LASTEXITCODE" }
+          $null = New-Item -ItemType Directory C:\ci
+          icacls C:\ci /grant 'tester:(OI)(CI)F' | Out-Null
+          Copy-Item -Recurse $env:GITHUB_WORKSPACE C:\ci\dalftui
+          Set-Content C:\ci\wrapper.ps1 '& powershell.exe -NoProfile -File C:\ci\step.ps1 *> C:\ci\out.txt; Set-Content C:\ci\exit.txt $LASTEXITCODE'
+          $action = New-ScheduledTaskAction -Execute powershell.exe -Argument '-NoProfile -File C:\ci\wrapper.ps1'
+          $null = Register-ScheduledTask dalftui-tester -Action $action -User tester -Password $password -RunLevel Limited
+          Set-Content "$env:RUNNER_TEMP\as-tester.ps1" @'
+          param([string]$Script)
+          Set-Content C:\ci\step.ps1 $Script
+          Remove-Item C:\ci\out.txt, C:\ci\exit.txt -ErrorAction SilentlyContinue
+          $start = Get-Date
+          Start-ScheduledTask dalftui-tester
+          $shown = 0
+          function Show-Output { if (Test-Path C:\ci\out.txt) { $lines = @(Get-Content C:\ci\out.txt); $lines | Select-Object -Skip $script:shown; $script:shown = $lines.Count } }
+          do {
+              Start-Sleep -Seconds 5
+              Show-Output
+              $state = (Get-ScheduledTask dalftui-tester).State
+          } while (-not (Test-Path C:\ci\exit.txt) -and ($state -eq 'Running' -or (Get-Date) -lt $start.AddSeconds(60)))
+          Show-Output
+          if (-not (Test-Path C:\ci\exit.txt)) { throw "No result; task result $((Get-ScheduledTaskInfo dalftui-tester).LastTaskResult)" }
+          exit [int](Get-Content C:\ci\exit.txt)
+          '@
+      - name: First run installs everything
+        # The documented command, with a copy of this checkout in place of the clone. msiexec fails with 1601 in a
+        # batch logon, so Scoop extracts the 7-Zip MSI with lessmsi here.
+        run: |
+          & "$env:RUNNER_TEMP\as-tester.ps1" @'
+          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop config use_lessmsi true; scoop install git uv
+          $null = New-Item -ItemType Directory -Force "$HOME\code"
+          Copy-Item -Recurse C:\ci\dalftui "$HOME\code\dalftui"
+          # A registered font makes setup skip oh-my-posh's download, which hits shared GitHub API rate limits.
+          $fonts = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+          if (-not (Test-Path $fonts)) { $null = New-Item -Path $fonts }
+          $null = New-ItemProperty -Path $fonts -Name 'Hack Nerd Font Regular (TrueType)' -Value 'HackNerdFont-Regular.ttf' -Force
+          uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
+          exit $LASTEXITCODE
+          '@
+      - name: Second run changes nothing
+        run: |
+          & "$env:RUNNER_TEMP\as-tester.ps1" @'
+          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" | Out-String
+          $output
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($line in 'Installed: 0', 'Upgraded: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }
+          '@
+      - name: Dry run changes nothing
+        run: |
+          & "$env:RUNNER_TEMP\as-tester.ps1" @'
+          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" --dry-run | Out-String
+          $output
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($line in 'Would install: 0', 'Would upgrade: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }
+          '@
+      - name: Tools answer and dalftui is installed
+        run: |
+          & "$env:RUNNER_TEMP\as-tester.ps1" @'
+          $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
+          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less') {
+              $path = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
+              "$tool ..."
+              $version = @($null | & $tool --version)[0]
+              if ($LASTEXITCODE -or $path -notlike "$HOME\scoop\*") { "$tool failed: $path $version"; exit 1 }
+              "$tool $version"
+          }
+          foreach ($tool in 'btop', '7z', 'zip', 'mc') { (Get-Command $tool -CommandType Application | Select-Object -First 1).Source }
+          $documents = [Environment]::GetFolderPath('MyDocuments')
+          foreach ($profilePath in "$documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1", "$documents\PowerShell\Microsoft.PowerShell_profile.ps1") {
+              if (-not (Select-String -Quiet -SimpleMatch '# >>> dalftui >>>' $profilePath)) { "No dalftui block: $profilePath"; exit 1 }
+          }
+          Get-Content "$env:LOCALAPPDATA\dalftui\config.json"
+          if (-not (Select-String -Quiet -SimpleMatch 'scoop' "$env:LOCALAPPDATA\dalftui\config.json")) { 'VS Code not configured'; exit 1 }
+          if (-not (Get-Item "$env:LOCALAPPDATA\dalftui\bootstrap.log").Length) { 'No log'; exit 1 }
+          '@
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the documented prerequisite
+        # Homebrew is preinstalled on the runner.
+        run: brew install uv
+      - name: A root run is refused
+        run: |
+          if sudo -H env PATH="$PATH" /usr/bin/python3 ./bootstrap 2> error.txt; then exit 1; fi
+          cat error.txt
+          grep 'as your user' error.txt
+      - name: First run installs everything
+        # Apple's python3 is 3.9, so bootstrap restarts itself through uv.
+        run: /usr/bin/python3 ./bootstrap
+      - name: Second run changes nothing
+        run: |
+          ./bootstrap | tee second.txt
+          grep -x 'Installed: 0' second.txt
+          grep -x 'Upgraded: 0' second.txt
+          grep -x 'Failed: 0' second.txt
+      - name: Dry run changes nothing
+        run: |
+          ./bootstrap --dry-run | tee dry.txt
+          grep -x 'Would install: 0' dry.txt
+          grep -x 'Would upgrade: 0' dry.txt
+          grep -x 'Failed: 0' dry.txt
+      - name: Tools answer and dalftui is installed
+        run: |
+          set -eo pipefail
+          tmux -V
+          fido2-token -V
+          for tool in git oh-my-posh uv mise lsd bat rg fzf jq yq btop wget gh htop nano code; do
+            "$tool" --version | head -n 1
+          done
+          # mc --version needs a terminal; 7zz has no --version.
+          for tool in tmux git uv mc 7zz socat fido2-token code; do command -v "$tool" | grep "^$(brew --prefix)/bin/"; done
+          test -f ~/Library/Fonts/HackNerdFont-Regular.ttf
+          test -L ~/.config/dalftui
+          /usr/bin/python3 ./install | grep 'Already installed'
+          test -s ~/.local/state/dalftui/bootstrap.log
+          test -z "$(git status --porcelain --untracked-files=no)" && test ! -e packages/Brewfile.lock.json
+      - name: A tmux server started from a login shell finds uv
+        # Like Terminal.app or iTerm2: a zsh login shell, whose PATH comes from /etc/paths and /etc/paths.d.
+        run: |
+          env -i HOME="$HOME" TERM=xterm-256color /bin/zsh -l -c '
+            set -e
+            tmux -L ci new-session -d
+            tmux -L ci run-shell "command -v uv" | tee uv.txt
+            tmux -L ci run-shell "uv run --no-project --python \">=3.11\" bin/shortcuts.py --tmux-only --print" | head -n 3
+            tmux -L ci kill-server'
+          grep "^$(brew --prefix)/bin/uv$" uv.txt
+
+  refused:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    timeout-minutes: 10
+    steps:
+      - name: Install the documented prerequisites
+        run: apt-get update && apt-get install -y python3 git sudo
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Python 3.10 is refused clearly
+        run: |
+          useradd -m tester
+          cp -a "$GITHUB_WORKSPACE" /home/tester/dalftui
+          chown -R tester: /home/tester/dalftui
+          if sudo -u tester -H /home/tester/dalftui/bootstrap --tmux-only 2> error.txt; then exit 1; fi
+          cat error.txt
+          grep 'Python 3.11 or newer is required' error.txt

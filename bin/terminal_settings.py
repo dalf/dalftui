@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --python >=3.11
 """Command launcher for Windows Terminal configuration."""
 from pathlib import Path
 import sys

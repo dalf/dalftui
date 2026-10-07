@@ -64,7 +64,7 @@ jobs:
           test "$(tmux -L ci show -sv copy-command)" = pbcopy
           tmux -L ci list-keys -T prefix | grep ' F1 .*--tmux-only'
           if tmux -L ci list-keys -T prefix | grep ' F2 '; then exit 1; fi
-          tmux -L ci list-keys -T root | grep ' C-S-F3 '
+          tmux -L ci list-keys -T root | grep ' C-S-F3 .*uv run --no-project'
           if tmux -L ci show-messages | grep -i error; then exit 1; fi
           tmux -L ci send-keys -t t 'printf "dalftui-%s\n" clip' Enter
           pane_wait_attempt=0
@@ -97,9 +97,9 @@ jobs:
           sleep 1
           echo "Clipboard after a pane OSC 52 write: $(pbpaste)"
           root=$(tmux -L ci show -gv @dalftui_root)
-          tmux -L ci run-shell "python3 '$root/bin/vscode.py' --pane '%0' --client 1 --client-tty x"
+          tmux -L ci run-shell "uv run --no-project --python '>=3.11' '$root/bin/vscode.py' --pane '%0' --client 1 --client-tty x"
           grep -q -- '--folder-uri' "$fake/code.log"
-          python3 "$root/bin/shortcuts.py" --tmux-only --print > "$fake/guide"
+          uv run --no-project --python '>=3.11' "$root/bin/shortcuts.py" --tmux-only --print > "$fake/guide"
           if grep Alacritty "$fake/guide"; then exit 1; fi
           grep -q 'Cmd+C' "$fake/guide"
           tmux -L ci kill-server

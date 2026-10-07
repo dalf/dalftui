@@ -20,8 +20,8 @@ run = "uvx codespell==2.4.3"
 [tasks.pylint]
 description = "Check Python source, entrypoints, and tests with Pylint"
 alias = "lint"
-run = "uvx --python python3 pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py"
-run_windows = 'uvx --python python pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py'
+run = "uvx --python '>=3.11' pylint==4.1.2 --rcfile=.pylintrc dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py"
+run_windows = 'uvx --python ">=3.11" pylint==4.1.2 --rcfile=.pylintrc --generated-members={{ vars.windows_lint_members }} dalftui tests bridge_protocol.py install bootstrap bin/reload bin/shortcuts.py bin/ssh_picker.py bin/vscode.py bin/terminal_settings.py bin/tmux_label.py'
 
 [tasks.test]
 description = "Run all tests for the current platform"
@@ -31,20 +31,20 @@ run_windows = [{ task = "test:windows" }, { task = "test:powershell" }]
 [tasks."test:linux"]
 description = "Run full Python discovery, including Linux integration tests"
 raw_args = true
-run = "python3 -m unittest discover -s tests -v"
+run = "uv run --no-project --python '>=3.11' -m unittest discover -s tests -v"
 
 [tasks."test:windows"]
 description = "Run Windows launcher/Terminal and shared bridge Python suites"
 run = [
-    'python -m unittest discover -s tests -p "test_windows*.py" -v',
+    'uv run --no-project --python ">=3.11" -m unittest discover -s tests -p "test_windows*.py" -v',
     { task = "test:bridge" },
 ]
 
 [tasks."test:bridge"]
 description = "Run shared bridge lifecycle and historical compatibility tests"
 raw_args = true
-run = 'python3 -m unittest discover -s tests -p "test_bridge*.py" -v'
-run_windows = 'python -m unittest discover -s tests -p "test_bridge*.py" -v'
+run = 'uv run --no-project --python ">=3.11" -m unittest discover -s tests -p "test_bridge*.py" -v'
+run_windows = 'uv run --no-project --python ">=3.11" -m unittest discover -s tests -p "test_bridge*.py" -v'
 
 [tasks."test:powershell"]
 description = "Verify Windows setup and profile integration in PowerShell"
@@ -82,5 +82,5 @@ run = "./bin/reload"
 [tasks."ssh:list"]
 description = "List SSH picker hosts without opening a connection"
 raw_args = true
-run = "python3 bin/ssh_picker.py --list"
-run_windows = "python bin/ssh_picker.py --list"
+run = "uv run --no-project --python '>=3.11' bin/ssh_picker.py --list"
+run_windows = "uv run --no-project --python '>=3.11' bin/ssh_picker.py --list"
