@@ -172,8 +172,9 @@ the server if Claude runs there), a font with `⬤`.
 Works on: Linux. Windows: through tmux on a Linux server. macOS: untested.
 
 Take it alone: comes with `config/tmux.conf`. To copy only the labels, take the
-three `@claude_*` options and `@dalftui_program_label`, point its helper command
-at your checkout's `bin/tmux_label.py`, and use `#{E:@claude_window_label}` and
+three `@claude_*` options, `@dalftui_program_label` and the `DALFTUI_PYTHON`
+line before it, point its helper command at your checkout's `bin/tmux_label.py`,
+and use `#{E:@claude_window_label}` and
 `#{E:@claude_tab_active_strip}` / `#{E:@claude_tab_inactive_strip}` in your own
 window formats. Not tested with a real claude-tabstatus.
 
