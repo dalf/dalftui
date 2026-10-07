@@ -128,12 +128,22 @@ the server mode, it also:
   Font* under Settings > Profiles > Text (Terminal.app: Font > Change; iTerm2: Font);
 - sets VS Code's terminal font in `~/Library/Application Support/Code/User/settings.json`
   when that folder or the `code` command exists;
-- does not force 24-bit color, which Terminal.app lacks before macOS 26; tmux
-  detects it in iTerm2 and, from tmux 3.6, in terminals setting `COLORTERM=truecolor`;
 - makes tmux copy-mode copies use `pbcopy`, because Terminal.app does not support
   OSC 52. A program's own OSC 52 write did not reach the clipboard on CI (no
   terminal attached there); in iTerm2 it needs *Applications in terminal may
   access clipboard*.
+
+Every profile, including `--tmux-only` on a Mac or a Linux SSH server, keeps
+older Terminal.app clients in 256 colors. tmux detects iTerm2's 24-bit color
+support automatically and, from tmux 3.6, also uses a client's
+`COLORTERM=truecolor` setting. The dalftui SSH launcher supplies a per-attachment
+RGB hint for Windows Terminal and other terminals declaring truecolor support;
+the hint does not affect an older Terminal.app attached to the same server.
+
+After upgrading from the earlier `*:Tc` override, run `./bin/reload` on each
+affected server. Detach and reattach existing clients to their original sessions
+to clear cached color capabilities; new clients already use the corrected
+settings. Sessions and running programs are kept, without restarting tmux.
 
 Keys and terminals:
 

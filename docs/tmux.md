@@ -81,6 +81,23 @@ The required Catppuccin tmux v2.3.1 configuration files are bundled under
 `vendor/catppuccin`, including their upstream MIT license. No theme download or
 plugin manager is needed. The custom rounded tab design is in `config/tmux.conf`.
 
+Color support is chosen for each attached terminal in every profile, including
+over SSH. `xterm-256color` alone does not imply 24-bit color: older Terminal.app
+uses that name and needs tmux's 256-color fallback. Alacritty's own terminal
+name gets a scoped truecolor override, and tmux detects iTerm2 automatically.
+From tmux 3.6, a client's `COLORTERM=truecolor` setting also enables truecolor.
+The dalftui SSH launcher supplies a per-attachment RGB hint for Windows Terminal
+and terminals declaring `COLORTERM=truecolor` or `24bit`, including Alacritty.
+This keeps their colors accurate when other clients on the same server need
+256 colors; remote tmux versions without the hint option use normal detection.
+
+When upgrading from the earlier `*:Tc` override, run `./bin/reload` on each
+affected host, then detach and reattach existing clients to their original
+sessions (Ctrl+B, then d detaches). tmux can retain an attached client's old
+color capabilities after reload; fresh clients use the updated capabilities
+immediately. Detaching keeps sessions, running programs and other clients
+running, so no tmux server restart is needed.
+
 [claude-tabstatus](https://github.com/dalf/claude-tabstatus) is an optional,
 separate project. Existing installations continue to supply repository/branch
 labels and status through pane titles and `@cctab_window_strip`. dalftui preserves

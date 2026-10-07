@@ -393,7 +393,14 @@ def cleanup_editor_bridge(host, login, bridge, env):
         pass
 
 
-def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None):
+def terminal_supports_rgb(env):
+    """Recognize local terminal hints without guessing from xterm-256color."""
+    if env.get('TERM_PROGRAM') == 'Apple_Terminal':
+        return False  # Older Terminal.app versions use the same TERM name.
+    return bool(env.get('WT_SESSION')) or env.get('COLORTERM', '').lower() in ('truecolor', '24bit')
+
+
+def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None, rgb=False):
     args = [*ssh_base(host, login), '-t']
     if bridge:
         # Keep the forwarding and its local bridge owned by this SSH window.
@@ -402,17 +409,20 @@ def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None):
         # Both transports must refuse an occupied or disallowed forward.
         args += ['-R', bridge.forward_spec, '-o', 'ExitOnForwardFailure=yes']
     return [*args, '--', host,
-            'sh -c ' + shlex.quote(remote_bootstrap.session_script(bridge, mode=mode, check=check))]
+            'sh -c ' + shlex.quote(remote_bootstrap.session_script(
+                bridge, mode=mode, check=check, rgb=rgb))]
 
 
 def connect(host, transport=None, *, mode='normal', check=None):
-    env = dict(os.environ, TERM='xterm-256color')
+    env = dict(os.environ)
+    rgb = sys.stdout.isatty() and terminal_supports_rgb(env)
+    env['TERM'] = 'xterm-256color'
     env.pop('TMUX', None)
     env.pop('TMUX_PANE', None)
     env.pop(SOCKET_ENV, None)
     env.pop(TOKEN_ENV, None)
     try:
-        options = {}
+        options = {'rgb': True} if rgb else {}
         if mode != 'normal':
             options['mode'] = mode
         if mode == 'check':

@@ -143,11 +143,15 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         check = SimpleNamespace(name='health', command='true', timeout=2)
         self.assert_session_credentials((mode, mode, check) for mode in ('plain', 'check', 'ops'))
 
+    def test_rgb_session_hint_preserves_historical_remote_editor_access(self):
+        self.assert_session_credentials((('normal-rgb', 'normal', None),
+                                         ('ops-rgb', 'ops', None)), rgb=True)
+
     def test_system_overviews_preserve_editor_access_for_a_historical_remote_client(self):
         check = SimpleNamespace(name='system', command=ops.system_status_script(), timeout=20)
         self.assert_session_credentials((('system-check', 'check', check), ('ops-system', 'ops', None)))
 
-    def assert_session_credentials(self, cases):
+    def assert_session_credentials(self, cases, *, rgb=False):
         self.install_historical(version=2)
         (self.bin / 'timeout').symlink_to(shutil.which('timeout'))
         (self.bin / 'awk').symlink_to(shutil.which('awk'))
@@ -162,8 +166,19 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         shell.write_text('#!/bin/sh\nexec python3 "$TEST_HISTORICAL_CLIENT"\n')
         shell.chmod(0o755)
         tmux = self.bin / 'tmux'
-        tmux.write_text('#!/bin/sh\ncase "$1" in\n'
-                        "new-session) printf '$42 %%70\\n' ;;\n"
+        tmux.write_text('#!/bin/sh\n'
+                        'rgb=no\n'
+                        'if [ "$1" = -T ]; then\n'
+                        '  [ "$2" = RGB ] || exit 99\n'
+                        '  rgb=yes\n  shift 2\n'
+                        'fi\n'
+                        'printf "%s %s\\n" "$rgb" "$1" >> "$TEST_TMUX_COMMANDS"\n'
+                        'case "$1" in\n'
+                        '-V|list-sessions) exit 0 ;;\n'
+                        'new-session)\n'
+                        '  if [ "$2" = -d ]; then\n'
+                        "    printf '$42 %%70\\n'\n"
+                        '  else\n    exec "$SHELL" -l\n  fi ;;\n'
                         'split-window)\n'
                         '  if [ "$2" = -v ]; then\n'
                         '    for argument do :; done\n'
@@ -183,13 +198,21 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                     bridge, check_installation=True), token=bridge.token + '\n')
                 self.assertEqual(prepared.returncode, 0, prepared.stderr)
                 report = self.directory / (name + '-report')
+                command_log = self.directory / (name + '-tmux-commands')
                 self.env['TEST_SYSTEM_REPORT'] = str(report)
-                script = remote_bootstrap.session_script(bridge, mode=mode, check=check)
+                self.env['TEST_TMUX_COMMANDS'] = str(command_log)
+                script = remote_bootstrap.session_script(bridge, mode=mode, check=check, rgb=rgb)
                 self.assertNotIn(bridge.token, script)
                 result = self.run_script(script)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 launch.assert_called_once()
                 self.assertEqual(launch.call_args.args[:2], (legacy.FOLDER, 'alice@historical-host'))
+                if mode in ('normal', 'ops'):
+                    commands = command_log.read_text().splitlines()
+                    hint = 'yes' if rgb else 'no'
+                    self.assertIn(f'{hint} new-session', commands)
+                    if mode == 'ops':
+                        self.assertIn(f'{hint} attach-session', commands)
                 if mode == 'ops' or name == 'system-check':
                     output = report.read_text() if mode == 'ops' else result.stdout
                     self.assertIn('System overview', output)

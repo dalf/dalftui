@@ -75,8 +75,8 @@ class SshAutoTests(unittest.TestCase):
             (checkout / 'bridge_protocol.py').write_text(
                 f'print({protocol_version!r})\n')
 
-    def remote_command(self, **env):
-        return self.real_run(shlex.split(picker.ssh_command('server')[-1]),
+    def remote_command(self, *, rgb=False, **env):
+        return self.real_run(shlex.split(picker.ssh_command('server', rgb=rgb)[-1]),
                              env=dict(self.env, **env), capture_output=True, text=True, timeout=5)
 
     def prepare(self):
@@ -117,6 +117,40 @@ class SshAutoTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_rgb_hint_reaches_new_and_attached_clients_without_changing_credentials(self):
+        self.tmux.write_text('''#!/bin/sh
+hint=none
+if [ "$1" = -T ]; then
+    [ "$2" = RGB ] || exit 2
+    hint=$2
+    shift 2
+fi
+if [ "$1" = -V ]; then exit 0; fi
+if [ "$1" = list-sessions ]; then
+    printf '%s' "$TEST_SESSION_ROWS"
+    exit 0
+fi
+printf '%s\\n' "$hint" "$@" > "$TEST_COMMAND_LOG"
+printf '%s\\n' "${DALFTUI_EDITOR_SOCKET-unset}" "${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"
+''')
+        for rows, expected in (('', ['new-session', '-A', '-s', '0']),
+                               ('$5 0\n', ['attach-session', '-t', '$5'])):
+            with self.subTest(rows=rows):
+                result = self.remote_command(rgb=True, TEST_SESSION_ROWS=rows)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout + result.stderr, '')
+                self.assertEqual(self.log.read_text().splitlines(), ['RGB', *expected])
+                self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_remote_tmux_without_feature_flag_keeps_the_normal_session_policy(self):
+        self.tmux.write_text(self.tmux.read_text().replace(
+            '#!/bin/sh\n', '#!/bin/sh\nif [ "$1" = -T ]; then exit 2; fi\n', 1))
+        result = self.remote_command(rgb=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout + result.stderr, '')
         self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
@@ -248,6 +282,42 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         (self.bin / 'mkdir').unlink()
         with self.assertRaisesRegex(RuntimeError, 'Could not prepare'):
             self.prepare()
+
+
+class TerminalColorTests(unittest.TestCase):
+    def test_ssh_color_hints_require_a_known_capability(self):
+        for env, expected in (({}, False),
+                              ({'TERM': 'xterm-256color'}, False),
+                              ({'COLORTERM': 'truecolor'}, True),
+                              ({'COLORTERM': '24bit'}, True),
+                              ({'WT_SESSION': 'terminal-session'}, True),
+                              ({'TERM_PROGRAM': 'Apple_Terminal', 'COLORTERM': 'truecolor'}, False),
+                              ({'TERM_PROGRAM': 'Apple_Terminal', 'WT_SESSION': 'stale'}, False)):
+            with self.subTest(env=env):
+                self.assertEqual(picker.terminal_supports_rgb(env), expected)
+
+    def test_connect_carries_a_tty_capability_hint_to_only_the_attachment(self):
+        if sys.platform == 'win32':
+            from dalftui.windows import ssh as terminal
+        else:
+            from dalftui.linux import ssh_picker as terminal
+
+        class TerminalOutput(io.StringIO):
+            def isatty(self):
+                return True
+
+        output = TerminalOutput()
+        with (patch.dict(os.environ, {'WT_SESSION': 'terminal-session', 'TERM_PROGRAM': ''}),
+              patch.object(picker, 'configured_login', return_value='alice'),
+              patch.object(picker, 'EditorBridge'),
+              patch.object(picker, 'prepare_editor_credentials', return_value=False),
+              patch.object(terminal, 'set_terminal_title'),
+              patch.object(picker, 'ssh_command', return_value=['ssh']) as command,
+              patch.object(picker.subprocess, 'run',
+                           return_value=subprocess.CompletedProcess(['ssh'], 0)),
+              redirect_stdout(output)):
+            self.assertEqual(picker.connect('server'), 0)
+        command.assert_called_once_with('server', None, rgb=True)
 
 
 if __name__ == '__main__':

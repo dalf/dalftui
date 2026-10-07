@@ -827,10 +827,10 @@ class MacTmuxTests(TmuxFixture):
 
     def test_mac_copies_with_pbcopy_and_switching_back_removes_mac_keys(self):
         self.start()
-        self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # As a server-mode load leaves it.
+        self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # From the older configuration.
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
-        self.assertNotIn('Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
         prefix, root = self.keys('prefix'), self.keys('root')
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
@@ -840,7 +840,7 @@ class MacTmuxTests(TmuxFixture):
         self.install(profile='tmux-only')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
-        self.assertIn('*:Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
         root = self.keys('root')
         self.assertNotIn('C-S-F1', root)
         self.assertNotIn('C-S-F3', root)
