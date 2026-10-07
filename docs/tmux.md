@@ -90,10 +90,11 @@ Explicit window names remain after `·`, and tmux's actual window names are not
 changed by the label helper.
 
 `bin/tmux_label.py` reads only repository/ref metadata, with bounded Git calls.
-Tmux runs it through uv, like the dalftui keys, asynchronously; it caches its last output and refreshes the status
-every five seconds, so branch changes and program directory changes are
-reflected while the program is running. It does not scan working-tree changes
-or run the prompt engine. Git failures fall back to the directory name.
+Tmux runs it through uv, like the dalftui keys, asynchronously; it caches its
+last output and refreshes the status every five seconds, so branch changes and
+program directory changes are reflected while the program is running. It does
+not scan working-tree changes or run the prompt engine. Git failures fall back
+to the directory name.
 Override `@dalftui_program_label` or `status-interval` in
 `~/.config/tmux/local.conf` to customize this behavior. To restore program-only
 labels, use `set -g @dalftui_program_label '#{window_name}'`.
