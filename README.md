@@ -41,9 +41,9 @@ Options: `-VSCodePath` (portable VS Code), `-ProfilePath` (one profile only),
 `-TerminalSettingsPath`, `-SkipTerminal`. If PowerShell then says scripts are
 disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs Python 3.11+, uv, tmux
-3.2+ and Oh My Posh, from Homebrew: `brew install python tmux oh-my-posh uv`.
-Then `./install --dry-run`, `./install`, `./bin/reload`. It sets up tmux, the
+macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs uv, tmux 3.2+ and Oh
+My Posh, from Homebrew: `brew install tmux oh-my-posh uv`. Then `./install --dry-run`,
+`./install`, `./bin/reload`; with Apple's Python 3.9 they run themselves through uv. It sets up tmux, the
 zsh prompt, Hack Nerd Font and VS Code's terminal font. Tested on macOS CI only;
 see [macOS](docs/install.md#macos).
 
@@ -64,7 +64,7 @@ Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall
 
 Details: [docs/install.md](docs/install.md).
 
-## Set up a new machine (Fedora, Debian, Ubuntu, Windows)
+## Set up a new machine (Fedora, Debian, Ubuntu, Windows, macOS)
 
 Opt-in, and the package lists are my personal tool set: edit
 [packages/fedora.txt](packages/fedora.txt) or [packages/debian.txt](packages/debian.txt)
@@ -91,6 +91,16 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | i
 ```
 
 Rerun `uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
+
+On macOS, Homebrew's installer asks for your password once; `./bootstrap` then
+installs and upgrades [packages/Brewfile](packages/Brewfile) with `brew bundle`
+and runs `./install` and `./bin/reload`:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv)" && brew install uv && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+```
+
+Rerun `~/code/dalftui/bootstrap` to update. See [New machine (macOS)](docs/install.md#new-machine-macos).
 
 ## tmux bindings and look
 

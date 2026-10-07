@@ -29,7 +29,6 @@ mc
 strace
 lsof
 socat
-podman-compose
 sqlite             # provides the sqlite3 command
 zip
 zsh

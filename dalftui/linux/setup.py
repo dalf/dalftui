@@ -195,7 +195,7 @@ def dependencies(profile='desktop'):
     if missing:
         hint = ''
         if sys.platform == 'darwin':
-            hint = ' (Homebrew: brew install python tmux oh-my-posh uv)'
+            hint = ' (Homebrew: brew install tmux oh-my-posh uv, or ./bootstrap)'
         elif 'uv' in missing:
             hint = ' (uv: ./bootstrap installs it; or see https://docs.astral.sh/uv/getting-started/installation/)'
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)

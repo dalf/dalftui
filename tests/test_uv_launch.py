@@ -20,7 +20,7 @@ class UvDependencyTests(unittest.TestCase):
         def which(name):
             return None if name == 'uv' else '/test/bin'
         for profile, hint in [('tmux-only', './bootstrap'), ('desktop', './bootstrap'),
-                              ('macos', 'brew install python tmux oh-my-posh uv')]:
+                              ('macos', 'brew install tmux oh-my-posh uv')]:
             with self.subTest(profile=profile):
                 platform = 'darwin' if profile == 'macos' else 'linux'
                 with patch.object(setup.sys, 'platform', platform), \

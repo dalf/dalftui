@@ -208,15 +208,48 @@ GitHub CI runs the command on windows-latest as a standard user, twice, and
 checks that the second run and a dry run change nothing. It runs as a scheduled
 task, where msiexec is unavailable, so Scoop extracts MSIs with lessmsi there.
 
-## macOS
+## New machine (macOS)
 
-For Terminal.app or iTerm2 with zsh. Requirements: Python 3.11+, uv, tmux 3.2+, Git,
-`less` and Oh My Posh. Git, `less` and an older `python3` come with macOS; get the
-rest from Homebrew and make sure `brew shellenv` runs in your shell setup so
-`python3`, `uv`, `tmux` and `oh-my-posh` resolve to Homebrew's:
+The same `bootstrap` installs and upgrades the formulae and casks in
+[packages/Brewfile](../packages/Brewfile) with [Homebrew](https://brew.sh/), then
+runs `./install` and `./bin/reload`. On a new Apple Silicon Mac, in Terminal.app:
 
 ```sh
-brew install python tmux oh-my-posh uv
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv)" && brew install uv && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+```
+
+Homebrew's installer asks for an administrator password once and installs the
+Command Line Tools, which provide Git for the clone. The `eval` applies only to
+that shell; as Homebrew's installer suggests, add it to `~/.zprofile` so that new
+shells use Homebrew's `git` and `nano` rather than Apple's. An
+existing Intel Homebrew in `/usr/local` should work but is untested. Apple's
+`python3` is 3.9, so `bootstrap`, `install` and `bin/reload` run themselves
+through `uv run --no-project --python ">=3.11" --script`; Homebrew's Python is not needed.
+
+Run `~/code/dalftui/bootstrap` again at any time to update (`--dry-run` previews).
+Each run updates the checkout as on Linux, runs `brew update`, then one
+`brew bundle --file packages/Brewfile`, which installs the missing entries and
+upgrades the outdated listed ones; other formulae are not upgraded. VS Code
+updates itself, so Homebrew leaves it alone. Installed versions decide the
+summary, which is the same as on Linux, and so is the log. A dry run changes
+nothing and compares with `brew outdated` as of the last `brew update`. A root
+run and `--tmux-only` are refused.
+
+The Brewfile also installs the VS Code cask, which provides the `code` command,
+and Hack Nerd Font into `~/Library/Fonts`.
+
+GitHub CI runs the bootstrap on macos-latest (Homebrew preinstalled) twice, starting
+with Apple's `python3`, checks that the second run and a dry run change nothing,
+and that a tmux server started from a zsh login shell finds uv.
+
+## macOS
+
+For Terminal.app or iTerm2 with zsh. Requirements: uv, tmux 3.2+, Git, `less` and
+Oh My Posh. Git and `less` come with macOS; get the rest from Homebrew, or run
+the bootstrap above, and make sure `brew shellenv` runs in your shell setup:
+
+```sh
+brew install tmux oh-my-posh uv
 ./install --dry-run
 ./install
 ./bin/reload
@@ -259,7 +292,8 @@ Keys and terminals:
   Ctrl+Shift+F3 sends `\033[1;6R`.
 - **Ctrl+B, then F2** (SSH picker) is not bound, as on a server.
 - **F3** opens local VS Code only and needs its `code` command on the PATH of the
-  shell that started tmux (VS Code: *Shell Command: Install 'code' command in PATH*).
+  shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
+  *Shell Command: Install 'code' command in PATH*).
   Relaying to the editor of a client connected over SSH is not supported on a Mac.
 - **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
   Cmd+C copies.

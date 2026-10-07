@@ -1,8 +1,10 @@
 """Test the bootstrap with recorded commands instead of dnf, apt, sudo or the network."""
 from contextlib import redirect_stdout
 import io
+import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -74,6 +76,47 @@ class FakeBootstrap(bootstrap.Bootstrap):
         return True
 
 
+class FakeBrew(bootstrap.Brew):
+    """Answers brew list, outdated and bundle list from `versions`; brew bundle applies `upgrades` and installs the rest."""
+
+    def __init__(self, versions, *, upgrades=(), fail=(), dry_run=False, entries=((), ())):
+        super().__init__(ROOT, brew='brew', dry_run=dry_run)
+        self.versions = dict(versions)
+        self.upgrades = dict(upgrades)
+        self.fail = set(fail)
+        self.formulae, self.casks = entries
+        self.outdated_output = None
+        self.commands = []
+        self.queries = []
+
+    def query(self, command):
+        self.queries.append(command)
+        if command[1:3] == ['bundle', 'list']:
+            return done(command, stdout=''.join(f'{name}\n' for name in
+                                                (self.formulae if command[3] == '--formula' else self.casks)))
+        if command[1:] == ['list', '--versions']:
+            return done(command, stdout=''.join(f'{name} {version}\n' for name, version in self.versions.items()
+                                                if name not in self.casks))
+        if command[1:] == ['list', '--cask', '--versions']:
+            return done(command, stdout=''.join(f'{name} {version}\n' for name, version in self.versions.items()
+                                                if name in self.casks))
+        if command[1:] == ['outdated', '--json=v2']:
+            outdated = [{'name': name} for name in self.upgrades]
+            output = self.outdated_output or json.dumps({'formulae': outdated, 'casks': []})
+            return done(command, 1 if outdated else 0, output)
+        raise AssertionError(f'Unexpected query: {command}')
+
+    def run(self, command, *, log_output=True):
+        self.commands.append(command)
+        if command[1] == 'update':
+            return done(command, 1 if 'update' in self.fail else 0)
+        if command[1] == 'bundle':
+            for name in self.formulae + self.casks:
+                if name not in self.fail:
+                    self.versions[name] = self.upgrades.get(name, self.versions.get(name, '1.0'))
+        return done(command)
+
+
 def quietly(function, *args, **kwargs):
     with redirect_stdout(io.StringIO()) as output:
         result = function(*args, **kwargs)
@@ -106,6 +149,11 @@ class PackageListTests(unittest.TestCase):
                 self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'fido2-tools'})
         # Debian's yq is a different program from the mikefarah/yq that Fedora installs.
         self.assertNotIn('yq', bootstrap.read_packages(bootstrap.PACKAGES / 'debian.txt'))
+
+    def test_brewfile_has_install_requirements(self):
+        formulae = re.findall(r'^brew "([^"]+)"', bootstrap.BREWFILE.read_text(encoding='utf-8'), re.MULTILINE)
+        for name in ('git', 'tmux', 'oh-my-posh', 'uv'):
+            self.assertIn(name, formulae)
 
 
 class PackageTests(unittest.TestCase):
@@ -191,6 +239,40 @@ class AptPackageTests(unittest.TestCase):
         self.assertEqual(run.installed_versions(['git', 'zsh', 'fzf']), {'git': '1:2.47'})
 
 
+class BrewTests(unittest.TestCase):
+    ENTRIES = (['git', 'tmux', 'fzf', 'lsd'], ['visual-studio-code'])
+
+    def test_update_then_one_bundle_and_versions_decide(self):
+        run = FakeBrew({'git': '2.50.0', 'tmux': '3.5a', 'lsd': '1.1.5', 'visual-studio-code': '1.104.0'},
+                       upgrades={'tmux': '3.6', 'lsd': '1.1.5'}, fail={'lsd'}, entries=self.ENTRIES)
+        quietly(run.packages, run.entries())
+        self.assertEqual(run.commands, [['brew', 'update'], ['brew', 'bundle', '--file', str(bootstrap.BREWFILE)]])
+        # lsd stayed outdated after the bundle.
+        self.assertEqual(run.summary, {'installed': ['fzf'], 'upgraded': ['tmux'],
+                                       'skipped': ['git', 'visual-studio-code'], 'failed': ['lsd']})
+
+    def test_failed_update_and_missing_entry_are_reported(self):
+        run = FakeBrew({}, fail={'update', 'fzf'}, entries=self.ENTRIES)
+        quietly(run.packages, run.entries())
+        self.assertEqual(run.commands[-1][:2], ['brew', 'bundle'])
+        self.assertEqual(run.summary['failed'], ['brew update', 'fzf'])
+        self.assertEqual(run.summary['installed'], ['git', 'tmux', 'lsd', 'visual-studio-code'])
+
+    def test_unreadable_outdated_output_is_a_failed_check(self):
+        run = FakeBrew({'git': '2.50.0'}, dry_run=True, entries=self.ENTRIES)
+        run.outdated_output = 'Error: something\n'
+        quietly(run.packages, ['git'])
+        self.assertEqual(run.summary['failed'], ['upgrade check (brew outdated)'])
+
+    def test_dry_run_only_queries(self):
+        run = FakeBrew({'git': '2.50.0', 'tmux': '3.5a'}, dry_run=True, upgrades={'tmux': '3.6'},
+                       entries=self.ENTRIES)
+        quietly(run.packages, run.entries())
+        self.assertEqual(run.commands, [])
+        self.assertEqual(run.summary, {'installed': ['fzf', 'lsd', 'visual-studio-code'], 'upgraded': ['tmux'],
+                                       'skipped': ['git'], 'failed': []})
+
+
 class StartTests(unittest.TestCase):
     def test_refuses_root(self):
         with patch.object(bootstrap.os, 'geteuid', return_value=0), \
@@ -200,12 +282,29 @@ class StartTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_refuses_an_unknown_system(self):
-        with patch.object(bootstrap.os, 'geteuid', return_value=1000), \
+        with patch.object(bootstrap.os, 'geteuid', return_value=1000), patch.object(bootstrap.sys, 'platform', 'linux'), \
                 patch.object(bootstrap, 'family', return_value=None), \
                 patch.object(bootstrap, 'Bootstrap') as run, patch('sys.stderr', io.StringIO()) as error:
             self.assertEqual(bootstrap.bootstrap(), 1)
         self.assertIn('needs Fedora, Debian or Ubuntu', error.getvalue())
         run.assert_not_called()
+
+    def test_macos_needs_homebrew_and_refuses_tmux_only(self):
+        for tmux_only, message in ((False, 'install Homebrew first: /bin/bash -c'), (True, '--tmux-only is Linux-only')):
+            with self.subTest(tmux_only=tmux_only), patch.object(bootstrap.os, 'geteuid', return_value=501), \
+                    patch.object(bootstrap.sys, 'platform', 'darwin'), \
+                    patch.object(bootstrap.shutil, 'which', return_value=None), \
+                    patch.object(bootstrap, 'BREW_PATHS', ()), \
+                    patch.object(bootstrap, 'Brew') as run, patch('sys.stderr', io.StringIO()) as error:
+                self.assertEqual(bootstrap.bootstrap(tmux_only=tmux_only), 1)
+            self.assertIn(message, error.getvalue())
+            run.assert_not_called()
+
+    def test_macos_refuses_root_without_mentioning_sudo(self):
+        with patch.object(bootstrap.os, 'geteuid', return_value=0), patch.object(bootstrap.sys, 'platform', 'darwin'), \
+                patch('sys.stderr', io.StringIO()) as error:
+            self.assertEqual(bootstrap.bootstrap(), 1)
+        self.assertEqual(error.getvalue(), 'Bootstrap failed: run ./bootstrap as your user.\n')
 
     def test_family_from_os_release(self):
         for release, expected in (({'ID': 'fedora'}, 'fedora'), ({'ID': 'debian'}, 'debian'),

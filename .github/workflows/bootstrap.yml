@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
-    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu and Scoop package names, the VS Code repository and the oh-my-posh, mise and uv installers can change.
+    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu, Scoop and Homebrew package names, the VS Code repository and the oh-my-posh, mise and uv installers can change.
   workflow_dispatch:
 
 permissions:
@@ -205,6 +205,62 @@ jobs:
           if (-not (Select-String -Quiet -SimpleMatch 'scoop' "$env:LOCALAPPDATA\dalftui\config.json")) { 'VS Code not configured'; exit 1 }
           if (-not (Get-Item "$env:LOCALAPPDATA\dalftui\bootstrap.log").Length) { 'No log'; exit 1 }
           '@
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the documented prerequisite
+        # Homebrew is preinstalled on the runner.
+        run: brew install uv
+      - name: A root run is refused
+        run: |
+          if sudo -H env PATH="$PATH" /usr/bin/python3 ./bootstrap 2> error.txt; then exit 1; fi
+          cat error.txt
+          grep 'as your user' error.txt
+      - name: First run installs everything
+        # Apple's python3 is 3.9, so bootstrap restarts itself through uv.
+        run: /usr/bin/python3 ./bootstrap
+      - name: Second run changes nothing
+        run: |
+          ./bootstrap | tee second.txt
+          grep -x 'Installed: 0' second.txt
+          grep -x 'Upgraded: 0' second.txt
+          grep -x 'Failed: 0' second.txt
+      - name: Dry run changes nothing
+        run: |
+          ./bootstrap --dry-run | tee dry.txt
+          grep -x 'Would install: 0' dry.txt
+          grep -x 'Would upgrade: 0' dry.txt
+          grep -x 'Failed: 0' dry.txt
+      - name: Tools answer and dalftui is installed
+        run: |
+          set -eo pipefail
+          tmux -V
+          fido2-token -V
+          for tool in git oh-my-posh uv mise lsd bat rg fzf jq yq btop wget gh htop nano code; do
+            "$tool" --version | head -n 1
+          done
+          # mc --version needs a terminal; 7zz has no --version.
+          for tool in tmux git uv mc 7zz socat fido2-token code; do command -v "$tool" | grep "^$(brew --prefix)/bin/"; done
+          test -f ~/Library/Fonts/HackNerdFont-Regular.ttf
+          test -L ~/.config/dalftui
+          /usr/bin/python3 ./install | grep 'Already installed'
+          test -s ~/.local/state/dalftui/bootstrap.log
+          test -z "$(git status --porcelain --untracked-files=no)" && test ! -e packages/Brewfile.lock.json
+      - name: A tmux server started from a login shell finds uv
+        # Like Terminal.app or iTerm2: a zsh login shell, whose PATH comes from /etc/paths and /etc/paths.d.
+        run: |
+          env -i HOME="$HOME" TERM=xterm-256color /bin/zsh -l -c '
+            set -e
+            tmux -L ci new-session -d
+            tmux -L ci run-shell "command -v uv" | tee uv.txt
+            tmux -L ci run-shell "uv run --no-project --python \">=3.11\" bin/shortcuts.py --tmux-only --print" | head -n 3
+            tmux -L ci kill-server'
+          grep "^$(brew --prefix)/bin/uv$" uv.txt
 
   refused:
     runs-on: ubuntu-latest

@@ -29,7 +29,6 @@ mc
 strace
 lsof
 socat
-podman-compose
 sqlite3
 zip
 zsh

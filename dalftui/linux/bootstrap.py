@@ -1,5 +1,6 @@
-"""Install the packages and tools of a new Fedora, Debian or Ubuntu machine, then install dalftui. Safe to rerun."""
+"""Install the packages and tools of a new Fedora, Debian, Ubuntu or macOS machine, then install dalftui. Safe to rerun."""
 from datetime import datetime
+import json
 import os
 import platform
 from pathlib import Path
@@ -27,6 +28,9 @@ VSCODE_KEYRING = Path('/usr/share/keyrings/microsoft.asc')
 VSCODE_SOURCES = Path('/etc/apt/sources.list.d/vscode.sources')
 VSCODE_SOURCES_TEXT = ('Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\n'
                        f'Architectures: amd64,arm64,armhf\nSigned-By: {VSCODE_KEYRING}\n')
+BREWFILE = PACKAGES / 'Brewfile'
+BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
+BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 PULLED = 'DALFTUI_BOOTSTRAP_PULLED'  # Set before restarting with updated code; stops a loop.
 
 
@@ -309,6 +313,60 @@ class Bootstrap:
         return 1 if self.summary['failed'] else 0
 
 
+class Brew(Bootstrap):
+    def __init__(self, root=REPO, *, brew='brew', **kwargs):
+        super().__init__(root, **kwargs)
+        self.brew = brew
+
+    def entries(self):
+        """The Brewfile's formulae, then its casks."""
+        return [name for kind in ('--formula', '--cask')
+                for name in self.query([self.brew, 'bundle', 'list', kind, '--file', str(BREWFILE)]).stdout.split()]
+
+    def installed_versions(self, packages):
+        versions = {}
+        for kind in ([], ['--cask']):
+            for line in self.query([self.brew, 'list', *kind, '--versions']).stdout.splitlines():
+                name, _, installed = line.partition(' ')
+                if name in packages and installed:
+                    versions[name] = installed
+        return versions
+
+    def outdated(self, names):
+        """Listed entries that brew bundle would upgrade, as of the last brew update; it exits 1 when there are any."""
+        try:
+            data = json.loads(self.query([self.brew, 'outdated', '--json=v2']).stdout)
+        except ValueError:
+            self.add('failed', ['upgrade check (brew outdated)'])
+            return set()
+        return {item['name'] for kind in ('formulae', 'casks') for item in data.get(kind, [])
+                if item['name'] in names and not item.get('pinned')}
+
+    def packages(self, names):
+        """Install the missing entries and upgrade the outdated ones with one brew bundle; versions decide the outcome."""
+        if not self.dry_run and self.run([self.brew, 'update']).returncode:
+            self.add('failed', ['brew update'])
+        before = self.installed_versions(names)
+        outdated = self.outdated(names)
+        missing = [name for name in names if name not in before]
+        if self.dry_run:
+            self.add('installed', missing)
+            self.add('upgraded', [name for name in names if name in outdated])
+            self.add('skipped', [name for name in names if name in before and name not in outdated])
+            return
+        self.run([self.brew, 'bundle', '--file', str(BREWFILE)])  # Other formulae are not upgraded.
+        after = self.installed_versions(names)
+        for name in names:
+            if name not in after:
+                self.add('failed', [name])
+            elif name in missing:
+                self.add('installed', [name])
+            elif after[name] != before[name]:
+                self.add('upgraded', [name])
+            else:
+                self.add('failed' if name in outdated else 'skipped', [name])
+
+
 def keep_sudo():
     while not threading.Event().wait(60):
         subprocess.run(['sudo', '-n', '-v'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -317,8 +375,11 @@ def keep_sudo():
 
 def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     if os.geteuid() == 0:  # Packages need root, but the configuration belongs to the user.
-        print('Bootstrap failed: run ./bootstrap as your user; it asks for sudo itself.', file=sys.stderr)
+        print('Bootstrap failed: run ./bootstrap as your user'
+              + ('.' if sys.platform == 'darwin' else '; it asks for sudo itself.'), file=sys.stderr)
         return 1
+    if sys.platform == 'darwin':
+        return macos(dry_run=dry_run, tmux_only=tmux_only, argv=argv)
     system = family()
     if system is None or not shutil.which('sudo'):
         print('Bootstrap failed: this needs Fedora, Debian or Ubuntu with sudo.', file=sys.stderr)
@@ -338,4 +399,26 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     run.mise()
     run.uv()
     run.install(tmux_only=tmux_only)
+    return run.report()
+
+
+def macos(*, dry_run, tmux_only, argv):
+    if tmux_only:
+        print('Bootstrap failed: --tmux-only is Linux-only.', file=sys.stderr)
+        return 1
+    brew = shutil.which('brew') or next((path for path in BREW_PATHS if os.access(path, os.X_OK)), None)
+    if not brew:
+        print(f'Bootstrap failed: install Homebrew first: {BREW_INSTALLER}', file=sys.stderr)
+        return 1
+    # ./install must find Homebrew's tmux, oh-my-posh and uv.
+    directory = os.path.dirname(brew)
+    if directory not in os.environ.get('PATH', '').split(os.pathsep):
+        os.environ['PATH'] = directory + os.pathsep + os.environ.get('PATH', '')
+    os.environ['HOMEBREW_NO_AUTO_UPDATE'] = '1'  # A real run updates once itself; a dry run must not.
+    run = Brew(brew=brew, dry_run=dry_run, log_path=state_directory() / 'bootstrap.log')
+    run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
+            f" {shlex.join(['bootstrap', *argv])} ==\n")
+    run.update_repo(list(argv))
+    run.packages(run.entries())
+    run.install(tmux_only=False)
     return run.report()
