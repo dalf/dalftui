@@ -184,7 +184,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | i
 ```
 
 Run `& "$HOME\code\dalftui\bootstrap.cmd"` again at any time to update (`--dry-run` previews). It
-checks for Scoop, Git and uv, then runs `bootstrap` through uv. uv downloads a suitable Python when none is installed;
+checks for Scoop, Git and uv first. uv downloads a suitable Python when none is installed;
 no `python` command is added. An elevated run is refused, as Scoop installs per user.
 
 Each run updates the checkout as on Linux, adds the `extras` bucket when it is
@@ -213,9 +213,10 @@ for loading keys and forwarding them.
 
 Not installed, only reported: Windows Terminal (from the Microsoft Store on
 Windows 10; open it once so setup finds its settings). Scoop cannot update an
-app that is running: the uv running bootstrap, or PowerShell 7 when you run
-bootstrap from it, is reported as in use; close it and run `scoop update uv`
-or `scoop update pwsh` from Windows PowerShell.
+app that is running: PowerShell 7, when you run bootstrap from it, is reported
+as in use; close it and run `scoop update pwsh` from Windows PowerShell.
+`bootstrap.cmd` asks uv for a Python 3.11+ path (uv downloads one if needed)
+and runs `bootstrap` with it, so uv is not running and can be updated.
 
 GitHub CI runs the command on windows-latest as a standard user, twice, and
 checks that the second run and a dry run change nothing. It runs as a scheduled

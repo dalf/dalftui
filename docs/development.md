@@ -99,7 +99,7 @@ live in `bin/`:
 | Path | Role |
 | --- | --- |
 | [install](../install) | Linux installation CLI |
-| [bootstrap.cmd](../bootstrap.cmd) | Windows bootstrap launcher: checks for Scoop, Git and uv, then runs `bootstrap` through uv |
+| [bootstrap.cmd](../bootstrap.cmd) | Windows bootstrap launcher: checks for Scoop, Git and uv, then runs `bootstrap` with the Python uv finds |
 | [install.cmd](../install.cmd) | Windows installation launcher with a process-scoped execution-policy bypass |
 | [install.ps1](../install.ps1) | Windows PowerShell installation CLI |
 | [bin/reload](../bin/reload) | Linux configuration reload CLI |

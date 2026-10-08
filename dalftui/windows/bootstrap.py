@@ -129,7 +129,7 @@ class Scoop(Bootstrap):
                 self.add('installed', [name])
             elif after[name] != before[name]:
                 self.add('upgraded', [name])
-            elif 'Running process detected' in output.get(name, ''):  # Such as the uv running bootstrap.
+            elif 'Running process detected' in output.get(name, ''):  # Such as the pwsh running bootstrap.
                 self.add('skipped', [f'{name} (in use; close it, then run scoop update {name.rpartition("/")[2]})'])
             else:
                 self.add('failed' if name in outdated else 'skipped', [name])

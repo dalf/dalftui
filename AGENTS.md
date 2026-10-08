@@ -73,7 +73,7 @@ not establish compatibility when their meaning or bootstrap behavior changes.
 
 Keep installation entrypoints at the root: `install` is the Linux installer;
 `install.cmd` invokes the Windows installer `install.ps1` with a process-scoped
-execution-policy bypass; `bootstrap.cmd` runs `bootstrap` through uv as one
+execution-policy bypass; `bootstrap.cmd` runs `bootstrap` with the Python uv finds, as one
 parenthesized block, because bootstrap's `git pull` can rewrite it while cmd runs it. Runtime and maintenance launchers belong in `bin/`:
 `reload`, `shortcuts.py`, `ssh_picker.py`, `vscode.py`, `terminal_settings.py`,
 `profile.ps1`, `ssh-tab.ps1`, and `tmux-start.sh`. They forward to implementations

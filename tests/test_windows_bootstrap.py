@@ -91,10 +91,12 @@ class LauncherTests(unittest.TestCase):
     def test_bootstrap_cmd_runs_as_one_block(self):
         """git pull can rewrite bootstrap.cmd while cmd runs it; cmd reads a parenthesized block at once."""
         lines = (ROOT / 'bootstrap.cmd').read_text(encoding='ascii').splitlines()
-        block = lines[lines.index('@('):lines.index(')') + 1]
-        self.assertIn('where /q scoop && where /q git && where /q uv || goto missing', block[1])
-        self.assertIn('--script "%~dp0bootstrap" %*', block[2])
-        self.assertEqual(block[3].strip(), 'call exit /b %%ERRORLEVEL%%')  # $LASTEXITCODE gets bootstrap's status.
+        block = [line.strip() for line in lines[lines.index('@('):lines.index(')') + 1]]
+        self.assertEqual(block[1], 'where /q scoop && where /q git && where /q uv || goto missing')
+        # uv only reports a Python path and exits, so Scoop can update it while bootstrap runs.
+        self.assertIn("'uv run --no-project --python \">=3.11\" python -c", block[3])
+        self.assertEqual(block[5], 'call "%%DALFTUI_BOOTSTRAP_PYTHON%%" "%~dp0bootstrap" %*')
+        self.assertEqual(block[6], 'call exit /b %%ERRORLEVEL%%')  # $LASTEXITCODE gets bootstrap's status.
 
 
 class PackageTests(ScoopTestCase):
