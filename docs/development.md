@@ -47,6 +47,7 @@ needed. Representative layout:
 ├── bridge_protocol.py
 ├── mise.toml
 ├── install
+├── bootstrap.cmd
 ├── install.cmd
 ├── install.ps1
 ├── bin/
@@ -98,6 +99,7 @@ live in `bin/`:
 | Path | Role |
 | --- | --- |
 | [install](../install) | Linux installation CLI |
+| [bootstrap.cmd](../bootstrap.cmd) | Windows bootstrap launcher: checks for Scoop, Git and uv, then runs `bootstrap` through uv |
 | [install.cmd](../install.cmd) | Windows installation launcher with a process-scoped execution-policy bypass |
 | [install.ps1](../install.ps1) | Windows PowerShell installation CLI |
 | [bin/reload](../bin/reload) | Linux configuration reload CLI |

@@ -3,9 +3,9 @@ name: Bootstrap
 on:
   push:
     branches: [main]
-    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
+    paths: [bootstrap, bootstrap.cmd, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   pull_request:
-    paths: [bootstrap, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
+    paths: [bootstrap, bootstrap.cmd, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
     - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu, Scoop and Homebrew package names, the VS Code repository and the oh-my-posh, mise and uv installers can change.
   workflow_dispatch:
@@ -166,13 +166,14 @@ jobs:
           $fonts = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
           if (-not (Test-Path $fonts)) { $null = New-Item -Path $fonts }
           $null = New-ItemProperty -Path $fonts -Name 'Hack Nerd Font Regular (TrueType)' -Value 'HackNerdFont-Regular.ttf' -Force
-          uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
+          & "$HOME\code\dalftui\bootstrap.cmd"
           exit $LASTEXITCODE
           '@
       - name: Second run changes nothing
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
-          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" | Out-String
+          $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
+          $output = & "$HOME\code\dalftui\bootstrap.cmd" | Out-String
           $output
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($line in 'Installed: 0', 'Upgraded: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }
@@ -180,7 +181,8 @@ jobs:
       - name: Dry run changes nothing
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
-          $output = & "$HOME\scoop\shims\uv.exe" run --no-project --python '>=3.11' --script "$HOME\code\dalftui\bootstrap" --dry-run | Out-String
+          $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
+          $output = & "$HOME\code\dalftui\bootstrap.cmd" --dry-run | Out-String
           $output
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($line in 'Would install: 0', 'Would upgrade: 0', 'Failed: 0') { if ($output -notmatch "(?m)^$line\r?$") { "Missing: $line"; exit 1 } }

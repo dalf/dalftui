@@ -90,10 +90,10 @@ needed), points Git at Windows OpenSSH, and
 then runs `install.cmd`:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; & "$HOME\code\dalftui\bootstrap.cmd"
 ```
 
-Rerun `uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
+Rerun `& "$HOME\code\dalftui\bootstrap.cmd"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
 
 On macOS, Homebrew's installer asks for your password once; `./bootstrap` then
 installs and upgrades [packages/Brewfile](packages/Brewfile) with `brew bundle`

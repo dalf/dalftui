@@ -180,11 +180,11 @@ per user and without administrator rights, then runs `install.cmd`. In a
 non-elevated Windows PowerShell on a new Windows 10 or 11 machine:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; & "$HOME\code\dalftui\bootstrap.cmd"
 ```
 
-Run `uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"`
-again at any time to update (`--dry-run` previews). uv downloads a suitable Python when none is installed;
+Run `& "$HOME\code\dalftui\bootstrap.cmd"` again at any time to update (`--dry-run` previews). It
+checks for Scoop, Git and uv, then runs `bootstrap` through uv. uv downloads a suitable Python when none is installed;
 no `python` command is added. An elevated run is refused, as Scoop installs per user.
 
 Each run updates the checkout as on Linux, adds the `extras` bucket when it is

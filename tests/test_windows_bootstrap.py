@@ -87,6 +87,16 @@ class PackageListTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
 
 
+class LauncherTests(unittest.TestCase):
+    def test_bootstrap_cmd_runs_as_one_block(self):
+        """git pull can rewrite bootstrap.cmd while cmd runs it; cmd reads a parenthesized block at once."""
+        lines = (ROOT / 'bootstrap.cmd').read_text(encoding='ascii').splitlines()
+        block = lines[lines.index('@('):lines.index(')') + 1]
+        self.assertIn('where /q scoop && where /q git && where /q uv || goto missing', block[1])
+        self.assertIn('--script "%~dp0bootstrap" %*', block[2])
+        self.assertEqual(block[3].strip(), 'call exit /b %%ERRORLEVEL%%')  # $LASTEXITCODE gets bootstrap's status.
+
+
 class PackageTests(ScoopTestCase):
     def test_versions_come_from_the_current_manifests(self):
         run = self.scoop()
