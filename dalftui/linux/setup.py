@@ -26,6 +26,23 @@ REPO = Path(__file__).resolve().parents[2]
 LOCAL_TMUX = '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'
 LOCAL_ALACRITTY = ('# Personal Alacritty settings. This file stays outside the repository.\n'
                    '# Example:\n# [font]\n# size = 11.0\n')
+# Discover the directory before .zshrc/.zlogin can change it or initialize a prompt.
+# -f skips user startup; /etc/zshenv still runs automatically. Enable the normal
+# startup options while sourcing the files that select an interactive login rc.
+ZSH_RC_PROBE = r'''
+setopt rcs
+if [[ -r ${ZDOTDIR:-$HOME}/.zshenv ]]; then
+    builtin source "${ZDOTDIR:-$HOME}/.zshenv"
+fi
+if [[ -o rcs && -o globalrcs && -r /etc/zprofile ]]; then
+    builtin source /etc/zprofile
+fi
+if [[ -o rcs && -r ${ZDOTDIR:-$HOME}/.zprofile ]]; then
+    builtin source "${ZDOTDIR:-$HOME}/.zprofile"
+fi
+builtin printf '\0DALFTUI_ZDOTDIR\0%s\0' "${ZDOTDIR:-$HOME}"
+unsetopt rcs
+'''
 
 
 @dataclass(frozen=True)
@@ -58,14 +75,17 @@ class Paths:
 
     @property
     def zshrc(self):
-        """zsh reads .zshrc from $ZDOTDIR, which ~/.zshenv or ~/.zprofile may set without exporting it."""
+        """Honor ZDOTDIR from interactive login startup without loading the prompt."""
         zdotdir = os.environ.get('ZDOTDIR')
         if shutil.which('zsh'):
             try:
-                result = subprocess.run(['zsh', '-l', '-c', 'print -r -- ${ZDOTDIR:-$HOME}'], stdin=subprocess.DEVNULL,
+                result = subprocess.run(['zsh', '-f', '-i', '-l', '-c', ZSH_RC_PROBE], stdin=subprocess.DEVNULL,
                                         env=dict(os.environ, HOME=str(self.home_dir)),
                                         capture_output=True, text=True, timeout=10)
-                zdotdir = (result.stdout.splitlines() or [zdotdir])[-1]
+                _, marker, value = result.stdout.rpartition('\0DALFTUI_ZDOTDIR\0')
+                value, end, _ = value.partition('\0')
+                if result.returncode == 0 and marker and end:
+                    zdotdir = value
             except (OSError, subprocess.SubprocessError):
                 pass
         return (Path(zdotdir) if zdotdir and Path(zdotdir).is_absolute() else self.home_dir) / '.zshrc'
@@ -168,12 +188,16 @@ def dependencies(profile='desktop'):
         raise RuntimeError('The macos mode is for macOS only.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
-    programs = ('tmux', 'less', 'git', 'oh-my-posh')
+    programs = ('tmux', 'less', 'git', 'oh-my-posh', 'uv')  # uv runs the Python of the tmux keys.
     if profile == 'desktop':
         programs += ('alacritty', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
-        hint = ' (Homebrew: brew install python tmux oh-my-posh)' if sys.platform == 'darwin' else ''
+        hint = ''
+        if sys.platform == 'darwin':
+            hint = ' (Homebrew: brew install tmux oh-my-posh uv, or ./bootstrap)'
+        elif 'uv' in missing:
+            hint = ' (uv: ./bootstrap installs it; or see https://docs.astral.sh/uv/getting-started/installation/)'
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)
     specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
@@ -451,6 +475,8 @@ def reload_config(paths=None, *, socket=None):
         raise RuntimeError('The dalftui link is missing or broken. Run ./install from your checkout.')
     if not paths.tmux.read_bytes().startswith(MARKER.encode()):
         raise RuntimeError('Configuration loaders are missing. Run ./install first.')
+    if not shutil.which('uv') and not (paths.home_dir / '.local/bin/uv').exists():
+        raise RuntimeError('uv is missing; the tmux keys need it. Install uv, or rerun ./bootstrap, then reload.')
     profile = installed_profile(paths)
     if profile == 'desktop':
         content = paths.alacritty.read_bytes()

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --python >=3.11
 """A readable shortcut guide, followed by the current Alacritty/tmux bindings."""
 import argparse
 import os

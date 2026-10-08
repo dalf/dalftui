@@ -1,0 +1,40 @@
+# Packages that ./bootstrap installs and upgrades with dnf on Fedora.
+# One package per line; lines after [desktop] are skipped with --tmux-only.
+
+# dalftui requirements
+python3            # runs install, bootstrap and bin/reload
+git                # bootstrap's git pull; install requires it
+tmux               # requires 3.2+
+less               # install requires it
+fontconfig         # fc-list; without it install reinstalls the Hack font on every run
+curl               # downloads the oh-my-posh installer
+unzip              # the oh-my-posh installer requires it
+
+# The owner's personal tools
+bat
+btop
+ripgrep
+jq
+yq
+fzf
+lsd
+7zip
+wget2-wget         # provides the wget command
+nano
+tar
+diffutils
+gh
+htop
+mc
+strace
+lsof
+socat
+sqlite             # provides the sqlite3 command
+zip
+zsh
+
+[desktop]
+openssh-clients    # the SSH picker; requires 9.4+
+alacritty          # desktop install requires 0.14+
+code               # VS Code, from Microsoft's repository that bootstrap adds
+fido2-tools

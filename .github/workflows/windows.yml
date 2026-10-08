@@ -47,6 +47,12 @@ jobs:
         run: mise run test:powershell
       - name: Install Oh My Posh
         run: choco install oh-my-posh --yes --no-progress
+      - name: Pre-register Hack Nerd Font
+        # A registered font makes setup skip oh-my-posh's download, which hits shared GitHub API rate limits.
+        run: |
+          $fonts = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+          if (-not (Test-Path $fonts)) { $null = New-Item -Path $fonts }
+          $null = New-ItemProperty -Path $fonts -Name 'Hack Nerd Font Regular (TrueType)' -Value 'HackNerdFont-Regular.ttf' -Force
       - name: Verify installation in an isolated profile
         run: mise run install:windows -- -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal
       - name: Verify Windows launcher, Terminal settings, and shared bridge suites

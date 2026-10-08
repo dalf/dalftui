@@ -1,0 +1,40 @@
+# Packages that ./bootstrap installs and upgrades with apt on Debian and Ubuntu.
+# One package per line; lines after [desktop] are skipped with --tmux-only.
+
+# dalftui requirements
+python3            # runs install, bootstrap and bin/reload
+git                # bootstrap's git pull; install requires it
+tmux               # requires 3.2+
+less               # install requires it
+fontconfig         # fc-list; without it install reinstalls the Hack font on every run
+curl               # downloads the oh-my-posh installer
+unzip              # the oh-my-posh installer requires it
+
+# The owner's personal tools
+# yq: Debian's package is a different program (a Python jq wrapper), not mikefarah/yq
+bat                # command: batcat
+btop
+ripgrep
+jq
+fzf
+lsd
+7zip               # Debian 12 installs only the 7zz command
+wget
+nano
+tar
+diffutils
+gh
+htop
+mc
+strace
+lsof
+socat
+sqlite3
+zip
+zsh
+
+[desktop]
+openssh-client     # the SSH picker; requires 9.4+ (Debian 12 has 9.2)
+alacritty          # desktop install requires 0.14+ (Debian 13 only)
+code               # VS Code, from Microsoft's repository that bootstrap adds
+fido2-tools

@@ -430,7 +430,7 @@ class RelocationTests(DisposableSetup):
             '  "list-keys") echo "bind-key -T prefix F1 display-popup help" ;;\n'
             '  *"has-session"*) echo "no server running" >&2; exit 1 ;;\n'
             'esac\n')
-        for name in ('less', 'git', 'oh-my-posh'):
+        for name in ('less', 'git', 'oh-my-posh', 'uv'):
             (command_dir / name).write_text('#!/bin/sh\nexit 0\n')
         (command_dir / 'python3').symlink_to(sys.executable)
         for command in command_dir.iterdir():
@@ -601,8 +601,9 @@ class ServerInstallationTests(DisposableSetup):
             if not executable:
                 self.skipTest(f'{command} is required for this CLI test')
             (server_bin / command).symlink_to(executable)
-        (server_bin / 'oh-my-posh').write_text('#!/bin/sh\n')
-        (server_bin / 'oh-my-posh').chmod(0o755)
+        for command in ('oh-my-posh', 'uv'):
+            (server_bin / command).write_text('#!/bin/sh\n')
+            (server_bin / command).chmod(0o755)
         loader = SourceFileLoader('installer_entry', str(ROOT / 'install'))
         spec = importlib.util.spec_from_loader(loader.name, loader)
         installer = importlib.util.module_from_spec(spec)
@@ -827,10 +828,10 @@ class MacTmuxTests(TmuxFixture):
 
     def test_mac_copies_with_pbcopy_and_switching_back_removes_mac_keys(self):
         self.start()
-        self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # As a server-mode load leaves it.
+        self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # From the older configuration.
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
-        self.assertNotIn('Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
         prefix, root = self.keys('prefix'), self.keys('root')
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
@@ -840,7 +841,7 @@ class MacTmuxTests(TmuxFixture):
         self.install(profile='tmux-only')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
-        self.assertIn('*:Tc', self.tmux('show-options', '-s', 'terminal-overrides'))
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
         root = self.keys('root')
         self.assertNotIn('C-S-F1', root)
         self.assertNotIn('C-S-F3', root)

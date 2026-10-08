@@ -881,6 +881,22 @@ else:
                     self.assertEqual(bridge.listener.fileno(), -1)
                     self.assertTrue(all(not worker.is_alive() for worker in bridge.workers))
 
+    def test_windows_terminal_connection_passes_its_rgb_hint(self):
+        output = io.StringIO()
+        with (patch.object(sys, 'platform', 'win32'),
+              patch.dict(os.environ, {'WT_SESSION': 'terminal-session', 'TERM_PROGRAM': '', 'COLORTERM': ''}),
+              patch.object(output, 'isatty', return_value=True) as isatty,
+              patch.object(picker, 'configured_login', return_value='alice'),
+              patch.object(picker, 'EditorBridge'),
+              patch.object(picker, 'prepare_editor_credentials', return_value=False),
+              patch.object(windows_ssh, 'set_terminal_title'),
+              patch.object(picker, 'ssh_command', return_value=['ssh']) as command,
+              patch.object(picker.subprocess, 'run', return_value=subprocess.CompletedProcess(['ssh'], 0)),
+              redirect_stdout(output)):
+            self.assertEqual(picker.connect('vm-alias', 'tcp'), 0)
+        isatty.assert_called_once_with()
+        command.assert_called_once_with('vm-alias', None, rgb=True)
+
     def test_connect_without_remote_dalftui_never_starts_or_forwards_the_bridge(self):
         output = io.StringIO()
         with (patch.object(picker, 'configured_login', return_value='alice'),
