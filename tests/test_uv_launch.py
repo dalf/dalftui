@@ -1,4 +1,4 @@
-"""Verify that dalftui's keys start Python through uv, except the bridge's remote side."""
+"""Verify that dalftui's keys and tab labels start Python through uv, except the bridge's remote side."""
 from contextlib import redirect_stdout
 import io
 import os
@@ -58,6 +58,12 @@ class ServerUvTests(UvBindingFixture):
         self.assertIn(UV_RUN + 'bin/shortcuts.py --tmux-only', commands['F1'])
         # The remote side of the VS Code bridge keeps the python3 that remote_bootstrap checks.
         self.assertTrue(commands['F3'].startswith('python3 '), commands['F3'])
+
+    def test_tab_label_helper_runs_through_uv(self):
+        # Some tmux versions escape $ when showing an option.
+        label = self.tmux('show-options', '-gv', '@dalftui_program_label').replace('\\$', '$')
+        self.assertTrue(label.startswith('#(PATH="$PATH:$HOME/.local/bin" ' + UV_RUN), label)
+        self.assertIn('/bin/tmux_label.py ', label)
 
     def test_reload_fails_when_uv_is_missing(self):
         def reload():

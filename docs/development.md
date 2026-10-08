@@ -30,6 +30,7 @@ needed. Representative layout:
 │   │   ├── shortcuts.py
 │   │   ├── ssh_picker.py
 │   │   ├── tmux_editor.py
+│   │   ├── tmux_label.py
 │   │   ├── remote_bootstrap.py
 │   │   ├── ops.py
 │   │   ├── package-status.sh
@@ -54,6 +55,7 @@ needed. Representative layout:
 │   ├── ssh_picker.py
 │   ├── vscode.py
 │   ├── terminal_settings.py
+│   ├── tmux_label.py
 │   ├── profile.ps1
 │   ├── ssh-tab.ps1
 │   └── tmux-start.sh
@@ -105,6 +107,7 @@ live in `bin/`:
 | [bin/profile.ps1](../bin/profile.ps1) | PowerShell profile loader |
 | [bin/ssh-tab.ps1](../bin/ssh-tab.ps1) | Terminal SSH-tab launcher |
 | [bin/terminal_settings.py](../bin/terminal_settings.py) | Terminal settings CLI |
+| [bin/tmux_label.py](../bin/tmux_label.py) | Git/directory context for tmux program tabs |
 | [bin/tmux-start.sh](../bin/tmux-start.sh) | Local terminal startup target |
 | [bridge_protocol.py](../bridge_protocol.py) | Canonical standalone contract and version declaration |
 

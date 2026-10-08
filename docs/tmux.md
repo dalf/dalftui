@@ -81,6 +81,26 @@ The required Catppuccin tmux v2.3.1 configuration files are bundled under
 `vendor/catppuccin`, including their upstream MIT license. No theme download or
 plugin manager is needed. The custom rounded tab design is in `config/tmux.conf`.
 
+Shell tabs keep their prompt-provided title. Other programs show the active
+pane's `repository@branch · window-name`, for example `dalftui@main · codex`.
+Subdirectories use the repository's root folder name. Outside Git, the label
+uses the current directory's name instead. Linked worktrees use their own root
+folder and branch; a detached HEAD uses an exact tag or a short commit hash.
+Explicit window names remain after `·`, and tmux's actual window names are not
+changed by the label helper.
+
+`bin/tmux_label.py` reads only repository/ref metadata, with bounded Git calls.
+Tmux runs it through uv, like the dalftui keys, asynchronously; it caches its
+last output and refreshes the status every five seconds, so branch changes and
+program directory changes are reflected while the program is running. It does
+not scan working-tree changes or run the prompt engine. Git failures fall back
+to the directory name.
+Override `@dalftui_program_label` or `status-interval` in
+`~/.config/tmux/local.conf` to customize this behavior. To restore program-only
+labels, use `set -g @dalftui_program_label '#{window_name}'`.
+These labels affect tmux's status bar; outer terminal titles retain their
+existing configuration, including claude-tabstatus's separate title policy.
+
 Color support is chosen for each attached terminal in every profile, including
 over SSH. `xterm-256color` alone does not imply 24-bit color: older Terminal.app
 uses that name and needs tmux's 256-color fallback. Alacritty's own terminal
@@ -101,8 +121,8 @@ running, so no tmux server restart is needed.
 [claude-tabstatus](https://github.com/dalf/claude-tabstatus) is an optional,
 separate project. Existing installations continue to supply repository/branch
 labels and status through pane titles and `@cctab_window_strip`. dalftui preserves
-that integration and does not change Claude hooks. Without it, ordinary tmux
-window names are displayed.
+that integration and does not change Claude hooks. Without it, shell titles and
+the Git/directory-aware program labels above are displayed.
 Install claude-tabstatus separately on the server too if you want its status
 indicators for Claude running there.
 
