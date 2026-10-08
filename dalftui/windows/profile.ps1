@@ -216,7 +216,9 @@ if ((Get-Command mise -CommandType Application -ErrorAction SilentlyContinue) -a
     -not (Test-Path -Path Function:\_mise_hook)) {
     # Windows PowerShell 5.1 lacks the directory-change hook; mise warns every session.
     if ($PSVersionTable.PSVersion.Major -lt 7 -and -not $env:MISE_PWSH_CHPWD_WARNING) { $env:MISE_PWSH_CHPWD_WARNING = '0' }
-    (& mise activate pwsh) | Out-String | Invoke-Expression
+    # mise prints nothing when it cannot start, such as without the VC++ runtime.
+    $dalftuiMise = & mise activate pwsh | Out-String
+    if ($dalftuiMise.Trim()) { Invoke-Expression $dalftuiMise }
 }
 
 # Draw the prompt with the Oh My Posh theme shared with Linux. Its init needs

@@ -665,6 +665,28 @@ function Invoke-DalftuiWindowsSetup {
     # A Windows .cmd fake echoes the quotes PowerShell adds around "some file.txt".
     Assert-True (($unixOutput[2] -replace '"') -eq 'bat --style=plain some file.txt') "cat must run bat: $($unixOutput[2])"
 
+    # mise prints nothing when it cannot start (no VC++ runtime); the profile must skip it quietly.
+    foreach ($case in @(@('broken', ''), @('working', 'function global:_mise_hook {}'))) {
+        $miseTools = Join-Path $root "mise $($case[0])"
+        [IO.Directory]::CreateDirectory($miseTools) | Out-Null
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            [IO.File]::WriteAllText((Join-Path $miseTools 'mise.cmd'), $(if ($case[1]) { "@echo $($case[1])" } else { '@exit /b 1' }))
+        } else {
+            [IO.File]::WriteAllText((Join-Path $miseTools 'mise'), "#!/bin/sh`n" + $(if ($case[1]) { "echo '$($case[1])'`n" } else { "exit 1`n" }))
+            chmod +x (Join-Path $miseTools 'mise')
+        }
+        $miseScript = Join-Path $root "mise-$($case[0]).ps1"
+        [IO.File]::WriteAllLines($miseScript, @(
+            '$ErrorActionPreference = ''Stop''',
+            ('$env:PATH = ' + (ConvertTo-DalftuiSingleQuotedLiteral $miseTools)),
+            ('. ' + (ConvertTo-DalftuiSingleQuotedLiteral $connectionProfile)),
+            '"hook=$(Test-Path Function:\_mise_hook)"'), [Text.UTF8Encoding]::new($true))
+        $miseOutput = @(& $terminalShell -NoLogo -NoProfile -Command ('. ' + (ConvertTo-DalftuiSingleQuotedLiteral $miseScript)) 2>&1)
+        $expected = "hook=$([bool]$case[1])"
+        Assert-True ($LASTEXITCODE -eq 0 -and ($miseOutput -join "`n") -eq $expected) `
+            "The profile must load with a $($case[0]) mise: $miseOutput"
+    }
+
     Push-Location -LiteralPath $root
     try {
         touch 'touch a.txt' 'touch b.txt'
