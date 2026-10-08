@@ -17,8 +17,9 @@ less
 diffutils
 nano
 wget2
+curl               # profile prefers it to Windows' curl and 5.1's alias
 ripgrep
-bat
+bat                # needs extras/vcredist2022 (the VC++ runtime), which bare Windows lacks
 btop               # btop4win
 jq
 yq
@@ -27,3 +28,5 @@ gh
 sqlite             # provides the sqlite3 command
 zip
 extras/mc
+extras/notepadplusplus
+extras/vcredist2022

@@ -231,7 +231,8 @@ Colors: blue path, green clean Git, yellow local changes or commits ahead of
 upstream, and red command failures. Untracked files use a yellow `*`.
 
 Files: `config/oh-my-posh.omp.json`, `config/prompt.bash`,
-`dalftui/windows/profile.ps1`.
+`dalftui/windows/profile.ps1`. They also activate mise when it is installed and
+your shell startup has not already done so.
 
 Needs: Oh My Posh (tested with 31.5.0) and a Nerd Font in the terminal you look
 at. In PowerShell, PSReadLine.
@@ -425,8 +426,8 @@ Posh's.
 
 What: `touch`, `du` (MB only, flags ignored), `df` and `wc`. `du`, `df` and
 `wc` are skipped when a real program has that name on PATH. If installed,
-`lsd`, `wget2`, `btop`, `gsudo` and `bat` replace `ls`, `wget`, `htop`, `sudo`
-and `cat`; setup does not install them.
+`lsd`, `wget2`, `btop`, `gsudo`, `notepad++` and `bat` replace `ls`, `wget`, `htop`,
+`sudo`, `notepad` and `cat`, and a `curl` outside Windows' folder replaces `curl`; setup does not install them.
 
 Files: `dalftui/windows/profile.ps1` (from `# Unix-like commands` to
 `# Bash-like line editing`).

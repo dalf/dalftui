@@ -618,7 +618,7 @@ function Invoke-DalftuiWindowsSetup {
     $noTools = Join-Path $root 'no unix tools'
     [IO.Directory]::CreateDirectory($fakeTools) | Out-Null
     [IO.Directory]::CreateDirectory($noTools) | Out-Null
-    foreach ($tool in @('lsd', 'wget2', 'btop', 'gsudo', 'bat', 'du')) {
+    foreach ($tool in @('lsd', 'wget2', 'btop', 'gsudo', 'notepad++', 'curl', 'bat', 'du')) {
         if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
             [IO.File]::WriteAllText((Join-Path $fakeTools "$tool.cmd"), "@echo $tool %*")
         } else {
@@ -635,7 +635,7 @@ function Invoke-DalftuiWindowsSetup {
         '    Set-Alias cat Get-Content -Option AllScope -Scope Global',
         '}',
         'function Get-UnixNames {',
-        '    (@(''ls'', ''cat'', ''wget'', ''htop'', ''sudo'', ''du'') | ForEach-Object {',
+        '    (@(''ls'', ''cat'', ''wget'', ''htop'', ''sudo'', ''notepad'', ''curl'', ''du'') | ForEach-Object {',
         '        $command = Get-Command $_ -ErrorAction SilentlyContinue | Select-Object -First 1',
         '        "$_=$($command.CommandType):$(if ($command.CommandType -eq ''Alias'') { $command.Definition })"',
         '    }) -join '' ''',
@@ -657,9 +657,10 @@ function Invoke-DalftuiWindowsSetup {
     }
     Assert-True ($LASTEXITCODE -eq 0 -and $unixOutput.Count -eq 3) "The profile must load with and without Unix tools: $unixOutput"
     Assert-True ($unixOutput[0] -match '^ls=Alias:Get-ChildItem cat=Alias:Get-Content ' -and
-                 $unixOutput[0] -notmatch 'wget2|btop|gsudo' -and $unixOutput[0] -match ' du=Function:$') `
+                 $unixOutput[0] -notmatch 'wget2|btop|gsudo|notepad\+\+|fake unix tools' -and $unixOutput[0] -match ' du=Function:$') `
         "Missing Unix tools must keep the built-in commands: $($unixOutput[0])"
-    Assert-True ($unixOutput[1] -eq 'ls=Alias:lsd cat=Function: wget=Alias:wget2 htop=Alias:btop sudo=Alias:gsudo du=Application:') `
+    $fakeCurl = (Get-Command (Join-Path $fakeTools 'curl') -CommandType Application).Source
+    Assert-True ($unixOutput[1] -eq "ls=Alias:lsd cat=Function: wget=Alias:wget2 htop=Alias:btop sudo=Alias:gsudo notepad=Alias:notepad++ curl=Alias:$fakeCurl du=Application:") `
         "Installed Unix tools must replace the built-in commands: $($unixOutput[1])"
     # A Windows .cmd fake echoes the quotes PowerShell adds around "some file.txt".
     Assert-True (($unixOutput[2] -replace '"') -eq 'bat --style=plain some file.txt') "cat must run bat: $($unixOutput[2])"

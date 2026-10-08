@@ -16,6 +16,7 @@ FIRST_STEP = ('Set-ExecutionPolicy -Scope CurrentUser RemoteSigned; irm get.scoo
               'scoop install git uv')
 OPENSSH = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/OpenSSH/ssh.exe'
 OPENSSH_ADD = 'Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0'
+VCRUNTIME = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/vcruntime140.dll'
 
 
 def scoop_root():
@@ -118,6 +119,12 @@ class Scoop(Bootstrap):
         if match and (int(match[1]), int(match[2])) < (9, 4):
             self.add('skipped', [f'OpenSSH client {match[1]}.{match[2]} (Tag dalftui needs 9.4+)'])
 
+    def vc_runtime(self, names):
+        """Scoop records vcredist2022 as installed even when its elevated installers could not start."""
+        if 'extras/vcredist2022' in names and not self.dry_run and not VCRUNTIME.is_file():
+            self.add('failed', ['VC++ runtime (missing; in a desktop PowerShell: '
+                                'scoop uninstall vcredist2022; scoop install extras/vcredist2022)'])
+
     def terminal(self):
         if not settings_paths(os.environ.get('LOCALAPPDATA', '')):
             self.add('skipped', ['Windows Terminal (not found; install it from the Microsoft Store and open it once)'])
@@ -155,6 +162,7 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     names = read_packages(PACKAGES / 'windows.txt')
     run.buckets(names)
     run.packages(names)
+    run.vc_runtime(names)
     run.openssh()
     run.terminal()
     run.install_cmd()

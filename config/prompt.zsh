@@ -1,5 +1,12 @@
-# Oh My Posh prompt for interactive zsh, sourced from ~/.zshrc by ./install.
-[[ -o interactive ]] && (( $+commands[oh-my-posh] )) || return 0
+# mise and the Oh My Posh prompt for interactive zsh, sourced from ~/.zshrc by ./install.
+[[ -o interactive ]] || return 0
+
+# Activate mise unless ~/.zshrc already did; child shells do not inherit its hook function.
+if ! (( $+functions[_mise_hook] )) && (( $+commands[mise] )); then
+    eval "$(mise activate zsh)"
+fi
+
+(( $+commands[oh-my-posh] )) || return 0
 
 # ${(%):-%x} is this file, even when FUNCTION_ARGZERO is off.
 eval "$(oh-my-posh init zsh --config "${${(%):-%x}:A:h}/oh-my-posh.omp.json")"

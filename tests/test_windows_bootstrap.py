@@ -171,6 +171,18 @@ class CheckTests(ScoopTestCase):
         self.assertEqual(self.check_ssh(version='OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2\n'),
                          {'installed': [], 'upgraded': [], 'skipped': [], 'failed': []})
 
+    def test_missing_vc_runtime_is_a_failure(self):
+        run = self.scoop()
+        with patch.object(bootstrap, 'VCRUNTIME', Path(run.scoop) / 'vcruntime140.dll'):
+            run.vc_runtime(['bat'])
+            self.assertEqual(run.summary['failed'], [])
+            run.vc_runtime(['bat', 'extras/vcredist2022'])
+            self.assertIn('scoop uninstall vcredist2022; scoop install extras/vcredist2022', run.summary['failed'][0])
+            run.summary['failed'].clear()
+            bootstrap.VCRUNTIME.write_text('', encoding='ascii')
+            run.vc_runtime(['bat', 'extras/vcredist2022'])
+        self.assertEqual(run.summary['failed'], [])
+
     def test_missing_terminal_is_reported(self):
         run = self.scoop()
         with patch.dict(os.environ, {'LOCALAPPDATA': str(run.scoop)}):

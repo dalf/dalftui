@@ -27,11 +27,16 @@ Set-Item -Path Function:\global:dssh -Value $dalftuiCommand
 # Unix-like commands. clear, pwd and man are built in. An alias to a tool that
 # setup does not install exists only when the tool does. Windows PowerShell 5.1
 # makes ls and wget AllScope aliases, which Set-Alias replaces only with AllScope.
-foreach ($dalftuiAlias in @(@('ls', 'lsd'), @('wget', 'wget2'), @('htop', 'btop'), @('sudo', 'gsudo'))) {
+foreach ($dalftuiAlias in @(@('ls', 'lsd'), @('wget', 'wget2'), @('htop', 'btop'), @('sudo', 'gsudo'),
+                             @('notepad', 'notepad++'))) {
     if (Get-Command $dalftuiAlias[1] -CommandType Application -ErrorAction SilentlyContinue) {
         Set-Alias -Name $dalftuiAlias[0] -Value $dalftuiAlias[1] -Option AllScope -Scope Global
     }
 }
+# Windows' own curl lacks HTTP/2, SFTP and more, and 5.1's curl is Invoke-WebRequest.
+$dalftuiCurl = Get-Command curl -CommandType Application -All -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -notlike "$env:SystemRoot\*" } | Select-Object -First 1
+if ($dalftuiCurl) { Set-Alias -Name curl -Value $dalftuiCurl.Source -Option AllScope -Scope Global }
 if (Get-Command bat -CommandType Application -ErrorAction SilentlyContinue) {
     Remove-Item Alias:cat -ErrorAction SilentlyContinue
     function global:cat { $input | & bat --style=plain @args }
@@ -203,6 +208,13 @@ if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) {
     Set-PSReadLineOption -HistorySearchCursorMovesToEnd
     # PSReadLine 2.0 (Windows PowerShell 5.1) and the legacy console lack predictions.
     try { Set-PSReadLineOption -PredictionSource History -ErrorAction Stop } catch { }
+}
+
+# Activate mise unless the personal profile already did. It must come before
+# Oh My Posh, whose prompt otherwise stops showing failed exit codes.
+if ((Get-Command mise -CommandType Application -ErrorAction SilentlyContinue) -and
+    -not (Test-Path -Path Function:\_mise_hook)) {
+    (& mise activate pwsh) | Out-String | Invoke-Expression
 }
 
 # Draw the prompt with the Oh My Posh theme shared with Linux. Its init needs

@@ -498,8 +498,8 @@ in an administrator session.
 
 The profile adds a Unix-like `touch`, and `du`, `df` and `wc` unless such programs
 are on PATH. When installed,
-`lsd`, `wget2`, `btop`, `gsudo` and `bat` replace `ls`, `wget`, `htop`, `sudo` and
-`cat`; setup does not install them.
+`lsd`, `wget2`, `btop`, `gsudo`, `notepad++` and `bat` replace `ls`, `wget`, `htop`,
+`sudo`, `notepad` and `cat`, and a `curl` outside Windows' folder replaces `curl`; setup does not install them.
 
 In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
 tab, pick a host, and connect using remote tmux when available or a plain shell.
