@@ -42,30 +42,3 @@ args = ["-c", 'case ${XDG_CONFIG_HOME-} in /*) config_home=$XDG_CONFIG_HOME ;; *
 # Selections are also copied automatically; Ctrl+Shift+C still works.
 [selection]
 save_to_clipboard = true
-
-# Browser-style shortcuts for tmux windows.
-[keyboard]
-bindings = [
-    # Help, SSH host picker and VS Code use the same function-key modifiers.
-    # Translate to the existing tmux actions, including over SSH.
-    { key = "F1", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOP" },
-    { key = "F2", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOQ" },
-    { key = "F3", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\u001bOR" },
-    # Alternative shortcut for the guide.
-    { key = "H", mods = "Super|Shift", chars = "\u0002\u001bOP" },
-    # Send Shift+Page Up to tmux instead of Alacritty scrollback.
-    { key = "PageUp", mods = "Shift", mode = "~Vi|~Search", chars = "\u001b[5;2~" },
-    { key = "T", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002c" },
-    { key = "PageUp", mods = "Control", mode = "~Vi|~Search", chars = "\u0002p" },
-    { key = "PageDown", mods = "Control", mode = "~Vi|~Search", chars = "\u0002n" },
-    { key = "D", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002%" },
-    { key = "E", mods = "Control|Shift", mode = "~Vi|~Search", chars = "\u0002\"" },
-    { key = "ArrowLeft", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7D" },
-    { key = "ArrowRight", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7C" },
-    { key = "ArrowUp", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7A" },
-    { key = "ArrowDown", mods = "Control|Alt", mode = "~Vi|~Search", chars = "\u001b[1;7B" },
-    { key = "ArrowLeft", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8D" },
-    { key = "ArrowRight", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8C" },
-    { key = "ArrowUp", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8A" },
-    { key = "ArrowDown", mods = "Control|Alt|Shift", mode = "~Vi|~Search", chars = "\u001b[1;8B" },
-]

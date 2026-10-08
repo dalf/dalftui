@@ -42,8 +42,7 @@ needed. Representative layout:
 │       ├── vscode.py
 │       ├── terminal_settings.py
 │       ├── setup.ps1
-│       ├── profile.ps1
-│       └── ssh-tab.ps1
+│       └── profile.ps1
 ├── bridge_protocol.py
 ├── mise.toml
 ├── install
@@ -58,7 +57,6 @@ needed. Representative layout:
 │   ├── terminal_settings.py
 │   ├── tmux_label.py
 │   ├── profile.ps1
-│   ├── ssh-tab.ps1
 │   └── tmux-start.sh
 ├── config/
 ├── tests/
@@ -107,7 +105,6 @@ live in `bin/`:
 | [bin/ssh_picker.py](../bin/ssh_picker.py) | Shared SSH launcher |
 | [bin/vscode.py](../bin/vscode.py) | Shared editor launcher and remote discovery target |
 | [bin/profile.ps1](../bin/profile.ps1) | PowerShell profile loader |
-| [bin/ssh-tab.ps1](../bin/ssh-tab.ps1) | Terminal SSH-tab launcher |
 | [bin/terminal_settings.py](../bin/terminal_settings.py) | Terminal settings CLI |
 | [bin/tmux_label.py](../bin/tmux_label.py) | Git/directory context for tmux program tabs |
 | [bin/tmux-start.sh](../bin/tmux-start.sh) | Local terminal startup target |
@@ -117,7 +114,7 @@ Each launcher resolves the checkout and forwards to the package implementation.
 No pip installation or particular working directory is required. The previous
 root runtime paths have been removed. After updating from that layout, rerun
 `./install` on Linux, or `.\install.cmd` on Windows, to
-regenerate links, profile entries, and Terminal actions. `bridge_protocol.py`
+regenerate links, profile entries, and Terminal settings. `bridge_protocol.py`
 contains the actual contract and version declaration; it is not a forwarding
 wrapper.
 
@@ -128,7 +125,7 @@ These conventions apply to filenames, directories, and placement:
 - Importable Python modules and package directories use `snake_case`.
 - Python command launchers in `bin/` also use `snake_case`.
 - Shell and PowerShell script filenames use lowercase words, with hyphens when
-  needed. Prefer purpose-specific names such as `profile.ps1`, `ssh-tab.ps1`,
+  needed. Prefer purpose-specific names such as `profile.ps1`
   and `terminal_settings.py`.
 - Platform directories normally supply the platform context; avoid redundant
   platform prefixes within them.

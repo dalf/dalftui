@@ -2,23 +2,15 @@
 
 ## Shortcuts
 
-- **Ctrl+Shift+F1:** open the keyboard shortcut guide.
-- **Ctrl+Shift+F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
-- **Ctrl+Shift+F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
-- **Ctrl+Shift+T:** new tmux window.
-- **Ctrl+Page Up / Page Down:** previous / next window.
-- **Ctrl+Shift+D / Ctrl+Shift+E:** split side by side / top and bottom.
-- **Ctrl+Alt+arrow:** change pane.
-- **Ctrl+Alt+Shift+arrow:** resize pane.
+- **Ctrl+B, then F1:** open the keyboard shortcut guide.
+- **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
+- **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
+
+Other shortcuts are standard tmux keys; see the [README](../README.md#shortcuts).
 
 The guide reads Alacritty imports and local overrides, and shows live tmux
 bindings. The terminal font needs glyphs for the rounded Powerline caps (`` and
 ``) and the status circle (`⬤`). The system monospace font remains the default.
-
-Alacritty translates Ctrl+Shift+F1/F2/F3 to the existing tmux actions. The
-tmux prefix bindings remain available as fallbacks. Reload locally to use
-the new Alacritty shortcuts; existing remote tmux configurations already
-understand the translated keys.
 
 ## Selecting and copying
 
@@ -64,10 +56,11 @@ session policy:
 - Multiple sessions: list their IDs, names, and client counts. Enter a session ID to
   attach, `n` or Enter for a new session, `s` for a plain login shell, or `q` to cancel.
 
-With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window while
-leaving its session running. Connection errors stay visible
+With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window (after
+`dssh` typed at a PowerShell prompt, it returns to that prompt) while leaving its
+session running. Connection errors stay visible
 until Enter is pressed. A plain shell has no tmux shortcuts, persistence, or
-remote **Ctrl+Shift+F3** integration. SSH windows override Alacritty's local
+remote **Ctrl+B, then F3** integration. SSH windows override Alacritty's local
 startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--tmux-only` on each server where you want the shared configuration.

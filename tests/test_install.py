@@ -135,8 +135,6 @@ class InstallationTests(DisposableSetup):
         target = self.repo / 'config/alacritty.toml'
         target.write_text(target.read_text().replace('size = 10.5', 'size = 12.5'))
         self.assertEqual(alacritty_config.load(self.paths.alacritty)['font']['size'], 12.5)
-        bindings = alacritty_config.load(self.paths.alacritty)['keyboard']['bindings']
-        self.assertTrue(any(item['key'] == 'T' and item['mods'] == 'Control|Shift' for item in bindings))
         self.assertEqual(self.paths.root.resolve(), self.repo)
 
     def test_alacritty_starts_the_shared_tmux_session_policy(self):
@@ -787,6 +785,7 @@ class MacTests(DisposableSetup):
             content = shortcuts.render(tmux_only=True)
         self.assertIn('Cmd+C / Cmd+V', content)
         self.assertIn('Option+drag', content)
+        self.assertIn('Ctrl+B → Fn+F1', content)
         self.assertNotIn('Alacritty', content)
         # The F1 popup may run an older python3; the server guide must not need tomllib.
         script = ('import sys; sys.path.insert(0, sys.argv[1]); import dalftui.linux.shortcuts as s\n'
@@ -829,23 +828,23 @@ class MacTmuxTests(TmuxFixture):
     def test_mac_copies_with_pbcopy_and_switching_back_removes_mac_keys(self):
         self.start()
         self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')  # From the older configuration.
+        removed = ['C-S-F1', 'C-S-F3', *(f'C-M-{shift}{arrow}' for shift in ('', 'S-')
+                                         for arrow in ('Up', 'Down', 'Left', 'Right'))]
+        for key in removed:  # Root keys bound by earlier versions.
+            self.tmux('bind-key', '-n', key, 'display-message', 'old')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
         self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
         prefix, root = self.keys('prefix'), self.keys('root')
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
-        self.assertIn('bin/shortcuts.py --tmux-only', root['C-S-F1'])
-        self.assertIn('bin/vscode.py', root['C-S-F3'])
+        self.assertFalse(set(removed) & set(root))
         self.assertIn('Hold Fn', root['MouseDrag1Pane'])
         self.install(profile='tmux-only')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
         self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
-        root = self.keys('root')
-        self.assertNotIn('C-S-F1', root)
-        self.assertNotIn('C-S-F3', root)
-        self.assertIn('Hold Shift', root['MouseDrag1Pane'])
+        self.assertIn('Hold Shift', self.keys('root')['MouseDrag1Pane'])
 
 
 class UninstallTests(DisposableSetup):

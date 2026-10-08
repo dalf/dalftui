@@ -1,4 +1,4 @@
-"""Install the SSH picker and VS Code shortcuts, preserving Terminal settings."""
+"""Set the Terminal and VS Code fonts and PowerShell 7 profiles, preserving other settings."""
 import argparse
 import json
 import os
@@ -10,12 +10,9 @@ import sys
 import uuid
 
 sys.dont_write_bytecode = True
-CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
+# Ctrl+Shift+F2/F3 actions installed by earlier versions; setup removes them.
 ACTION_ID = 'User.DalftuiSshPicker'
-SHORTCUT = 'ctrl+shift+f2'
 EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
-EDITOR_SHORTCUT = 'ctrl+shift+f3'
-EDITOR_INPUT = '\x02\x1bOR'
 PROMPT_FONT = 'Hack Nerd Font'
 # Also applied by the Linux desktop installer.
 VSCODE_SETTINGS = {'terminal.integrated.fontFamily': PROMPT_FONT, 'terminal.integrated.fontSize': 12}
@@ -75,21 +72,8 @@ def members(text, start, object_mode=False):
     return result, index
 
 
-def normalized_key(key):
-    return tuple(sorted(part.strip().lower() for part in key.split('+')))
-
-
-def has_shortcut(entry, shortcut=SHORTCUT):
-    keys = entry.get('keys', [])
-    if isinstance(keys, str):
-        keys = [keys]
-    return isinstance(keys, list) and any(
-        isinstance(key, str) and normalized_key(key) == normalized_key(shortcut)
-        for key in keys)
-
-
-def updated_settings(text, commandline, pwsh=None):
-    text = shortcut_settings(text, commandline)
+def updated_settings(text, pwsh=None):
+    text = font_settings(removed_actions(text))
     return profile_settings(text, pwsh) if pwsh else text
 
 
@@ -141,80 +125,15 @@ def profile_settings(text, pwsh):
     return text
 
 
-def shortcut_settings(text, commandline):
+def font_settings(text):
     clean = clean_jsonc(text)
     settings = json.loads(clean, object_pairs_hook=unique_object)
-    if not isinstance(settings, dict):
-        raise ValueError('Terminal settings must be a JSON object.')
     root_items, root_end = members(clean, skip_space(clean, 0), object_mode=True)
-    properties = {name: (value, begin, end) for name, value, begin, end in root_items}
-    arrays = {}
-    for name in ('actions', 'keybindings'):
-        if name in properties:
-            value, begin, _ = properties[name]
-            if not isinstance(value, list):
-                raise ValueError(f'Terminal {name} must be an array.')
-            arrays[name] = members(clean, begin)
-            for entry in value:
-                for shortcut, action_id, label in (
-                        (SHORTCUT, ACTION_ID, 'Ctrl+Shift+F2'),
-                        (EDITOR_SHORTCUT, EDITOR_ACTION_ID, 'Ctrl+Shift+F3')):
-                    if isinstance(entry, dict) and has_shortcut(entry, shortcut) and entry.get('id') != action_id:
-                        raise ValueError(f'{label} already has a binding. Remove that binding in Terminal settings, then rerun setup. The existing settings were preserved.')
-
-    modern = 'keybindings' in properties
-    picker_action = {
-        'id': ACTION_ID,
-        'name': 'SSH host picker (dssh)',
-        'command': {
-            'action': 'newTab', 'commandline': commandline,
-            'startingDirectory': '%USERPROFILE%', 'tabTitle': 'SSH',
-            'suppressApplicationTitle': False, 'elevate': False,
-        },
-    }
-    editor_action = {
-        'id': EDITOR_ACTION_ID,
-        'name': 'Open current folder in VS Code',
-        'command': {'action': 'sendInput', 'input': EDITOR_INPUT},
-    }
-    actions = [(picker_action, SHORTCUT), (editor_action, EDITOR_SHORTCUT)]
-    if not modern:
-        # Inline keys are supported by older Terminal versions as well.
-        for action, shortcut in actions:
-            action['keys'] = shortcut
-    desired = {'actions': actions}
-    if modern:
-        desired['keybindings'] = [({'id': action['id'], 'keys': shortcut}, shortcut)
-                                  for action, shortcut in actions]
     edits = []
-    missing = []
     newline = '\r\n' if '\r\n' in text else '\n'
-    for name, entries in desired.items():
-        additions = []
-        if name not in arrays:
-            missing.append(json.dumps(name) + ': ' + json.dumps([entry for entry, _ in entries], ensure_ascii=False))
-            continue
-        items, end = arrays[name]
-        for entry, shortcut in entries:
-            encoded = json.dumps(entry, ensure_ascii=False)
-            owned = [item for item in items if isinstance(item[1], dict) and
-                     item[1].get('id') == entry['id'] and
-                     (name == 'actions' or has_shortcut(item[1], shortcut))]
-            if len(owned) > 1:
-                raise ValueError(f'Duplicate dalftui entries in {name}; remove the duplicates before rerunning setup.')
-            if owned:
-                _, previous, begin, finish = owned[0]
-                if previous != entry:
-                    edits.append((begin, finish, encoded))
-            else:
-                additions.append(encoded)
-        if additions:
-            append_entry(text, items, end, (',' + newline + '    ').join(additions), newline, edits)
     font = font_edit(text, clean, settings, root_items, newline, edits)
     if font:
-        missing.append(font)
-    if missing:
-        append_entry(text, root_items, root_end, (',' + newline + '    ').join(missing), newline, edits)
+        append_entry(text, root_items, root_end, font, newline, edits)
     for begin, end, replacement in sorted(edits, reverse=True):
         text = text[:begin] + replacement + text[end:]
     # Validate the result before creating a backup or changing anything.
@@ -345,13 +264,19 @@ def has_guid(item, guid):
     return isinstance(item[1], dict) and str(item[1].get('guid')).lower() == guid
 
 
-def removed_settings(text):
-    """Remove what setup added to Terminal settings, while it still holds dalftui's values."""
+def removed_actions(text):
+    """Remove the actions and key bindings that earlier setup versions added."""
     if not isinstance(json.loads(clean_jsonc(text), object_pairs_hook=unique_object), dict):
         raise ValueError('Terminal settings must be a JSON object.')
     ids = (ACTION_ID, EDITOR_ACTION_ID)
     for name in ('actions', 'keybindings'):
         text = remove_matching(text, (name,), lambda item: isinstance(item[1], dict) and item[1].get('id') in ids)
+    return text
+
+
+def removed_settings(text):
+    """Remove what setup added to Terminal settings, while it still holds dalftui's values."""
+    text = removed_actions(text)
     profiles = ('profiles', 'list')
     text = remove_matching(text, profiles, lambda item: has_guid(item, ADMIN_GUID))
     # Terminal regenerates its own stub; keep one that has other settings.
@@ -433,17 +358,16 @@ def save(path, original, updated, label):
     return backup
 
 
-def configure(path, commandline, pwsh=None):
+def configure(path, pwsh=None):
     original = path.read_bytes()
     text = original.decode('utf-8-sig')
-    updated = updated_settings(text, commandline, pwsh)
+    updated = updated_settings(text, pwsh)
     if updated == text:
-        print(f'Terminal shortcut already configured: {path}')
+        print(f'Terminal already configured: {path}')
         return
     backup = save(path, original, updated, 'Terminal')
     print(f'Terminal backup: {backup}')
-    print(f'Ctrl+Shift+F2 opens dssh in a new tab: {path}')
-    print('Ctrl+Shift+F3 opens the current folder in VS Code (local PowerShell or remote tmux).')
+    print(f'Terminal configured: {path}')
     print(f'Default profile font: {PROMPT_FONT}')
     if pwsh:
         print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
@@ -508,7 +432,6 @@ def main():
     sys.stdout.reconfigure(errors='backslashreplace')
     sys.stderr.reconfigure(errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--shell')
     parser.add_argument('--settings', action='append', type=Path)
     parser.add_argument('--pwsh', help='PowerShell 7 path for the Terminal profiles')
     parser.add_argument('--vscode-settings', type=Path, help='VS Code settings.json to set the terminal font in')
@@ -518,8 +441,6 @@ def main():
     if args.uninstall:
         return uninstall(args.settings or settings_paths(os.environ.get('LOCALAPPDATA', '')),
                          args.vscode_settings, args.dry_run)
-    if not args.shell:
-        parser.error('--shell is required')
     status = 0
     if args.vscode_settings:
         try:
@@ -527,9 +448,6 @@ def main():
         except (OSError, UnicodeError, ValueError) as error:
             print(f'VS Code font setup failed: {error}', file=sys.stderr)
             status = 1
-    launcher = CHECKOUT_ROOT / 'bin/ssh-tab.ps1'
-    commandline = subprocess.list2cmdline([
-        args.shell, '-NoLogo', '-NoProfile', '-File', str(launcher)])
     pwsh = subprocess.list2cmdline([args.pwsh]) if args.pwsh else None
     if not pwsh:
         print('PowerShell 7 not found; Windows Terminal PowerShell 7 profiles were not added.')
@@ -539,9 +457,9 @@ def main():
         return status
     try:
         for path in dict.fromkeys(paths):
-            configure(path, commandline, pwsh)
+            configure(path, pwsh)
     except (OSError, UnicodeError, ValueError) as error:
-        print(f'Terminal shortcut setup failed: {error}', file=sys.stderr)
+        print(f'Terminal setup failed: {error}', file=sys.stderr)
         return 1
     return status
 

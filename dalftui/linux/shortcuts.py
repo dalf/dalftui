@@ -39,24 +39,22 @@ def render(tmux_only=False):
                          for part in textwrap.wrap(description, width - 2))
 
     heading("Keyboard shortcuts")
-    intro = ("Ctrl+B then F1 opens this guide. These tmux keys work over SSH." if tmux_only
-             else "Ctrl+Shift+F1 opens this guide. Win means the Windows/Super key.")
-    paragraph(intro, MUTED)
+    paragraph("Ctrl+B then F1 opens this guide. These tmux keys work over SSH.", MUTED)
     paragraph("↑/↓ or Page Up/Down: scroll   /: find a shortcut   q: close", MUTED)
     paragraph("Ctrl+B → key means release Ctrl+B, then press the next key.", MUTED)
 
     groups = {
         "Tabs / tmux windows": [
-            ("Ctrl+Shift+T", "New tab"),
-            ("Ctrl+Page Up / Page Down", "Previous / next tab"),
-            ("Ctrl+B → ,", "Rename tab"),
-            ("Ctrl+B → &", "Close tab (asks for confirmation)"),
+            ("Ctrl+B → c", "New window"),
+            ("Ctrl+B → p / n", "Previous / next window"),
+            ("Ctrl+B → ,", "Rename window"),
+            ("Ctrl+B → &", "Close window (asks for confirmation)"),
         ],
         "Panes": [
-            ("Ctrl+Shift+D", "Split into side-by-side panes"),
-            ("Ctrl+Shift+E", "Split into top and bottom panes"),
-            ("Ctrl+Alt+arrow", "Move to the pane in that direction"),
-            ("Ctrl+Alt+Shift+arrow", "Resize the pane by five cells"),
+            ("Ctrl+B → %", "Split into side-by-side panes"),
+            ('Ctrl+B → "', "Split into top and bottom panes"),
+            ("Ctrl+B → arrow", "Move to the pane in that direction"),
+            ("Ctrl+B → Ctrl+arrow", "Resize the pane"),
             ("Ctrl+B → z", "Zoom pane / restore layout"),
             ("Ctrl+B → x", "Close pane (asks for confirmation)"),
         ],
@@ -80,68 +78,38 @@ def render(tmux_only=False):
             ("Ctrl+Shift+F / Ctrl+Shift+B", "Search Alacritty's own buffer forward / backward"),
         ],
         "SSH / servers": [
-            ("Ctrl+Shift+F2", "Choose a host tagged dalftui; open a new Alacritty window with remote tmux"),
+            ("Ctrl+B → F2", "Choose a host tagged dalftui; open a new Alacritty window with remote tmux"),
             ("Type / arrows / Enter", "Filter hosts / select / connect in the host picker"),
             ("Esc", "Close the host picker"),
         ],
         "Session / help": [
-            ("Ctrl+Shift+F1", "Open this guide"),
-            ("Win+Shift+H", "Alternative in Alacritty"),
+            ("Ctrl+B → F1", "Open this guide"),
             ("Ctrl+B → ?", "Open tmux's native key reference"),
-            ("Ctrl+B → d", "Detach and leave the tmux session running"),
+            ("Ctrl+B → d", "Detach from tmux; leave the session running"),
         ],
         "Editor": [
-            ("Ctrl+Shift+F3", "Open the current pane's folder in a new VS Code window"),
+            ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window"),
             ("Remote VS Code", "Reconnect through the dalftui SSH launcher after updating; each client needs credentials"),
         ],
     }
     if tmux_only:
-        groups["Tabs / tmux windows"] = [
-            ("Ctrl+B → c", "New window"),
-            ("Ctrl+B → p / n", "Previous / next window"),
-            ("Ctrl+B → ,", "Rename window"),
-            ("Ctrl+B → &", "Close window (asks for confirmation)"),
-        ]
-        groups["Panes"] = [
-            ("Ctrl+B → %", "Split into side-by-side panes"),
-            ('Ctrl+B → "', "Split into top and bottom panes"),
-            ("Ctrl+B → arrow", "Move to the pane in that direction"),
-            ("Ctrl+B → Ctrl+arrow", "Resize the pane"),
-            ("Ctrl+B → z", "Zoom pane / restore layout"),
-            ("Ctrl+B → x", "Close pane (asks for confirmation)"),
-        ]
         groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
         groups["Select / copy / paste"][3] = ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then Shift+drag")
         del groups["Alacritty terminal"]
         del groups["SSH / servers"]
-        groups["Session / help"] = [
-            ("Ctrl+B → F1", "Open this guide"),
-            ("Ctrl+B → ?", "Open tmux's native key reference"),
-            ("Ctrl+B → d", "Detach from tmux; leave the session running"),
-        ]
-        groups["Editor"][0] = ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window")
-        groups["From your dalftui Alacritty client"] = [
-            ("Ctrl+Shift+F1", "Open this shortcut guide"),
-            ("Ctrl+Shift+F3", "Open the current remote pane's folder in local VS Code"),
-            ("Ctrl+Shift+T", "New remote tmux window"),
-            ("Ctrl+Page Up / Page Down", "Previous / next remote window"),
-            ("Ctrl+Shift+D / Ctrl+Shift+E", "Split side by side / top and bottom"),
-            ("Ctrl+Alt+arrow", "Move to the pane in that direction"),
-            ("Ctrl+Alt+Shift+arrow", "Resize the pane by five cells"),
-        ]
     if tmux_only and sys.platform == "darwin":
-        del groups["From your dalftui Alacritty client"]
         groups["Select / copy / paste"][:4] = [
             ("Fn+drag / Option+drag", "Select text in Terminal.app / iTerm2"),
             ("Cmd+C / Cmd+V", "Copy selection / paste"),
             ("Split panes", "Ctrl+B → z to zoom, select, then Ctrl+B → z to restore"),
             ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then select"),
         ]
+        # Apple keyboards send F1/F3 with Fn unless set to standard function keys.
+        groups["Session / help"][0] = ("Ctrl+B → Fn+F1", "Open this guide")
+        groups["Editor"][0] = ("Ctrl+B → Fn+F3", groups["Editor"][0][1])
         del groups["Editor"][1]  # Relaying to an SSH client's editor is not supported on a Mac.
     for title, bindings in groups.items():
         heading(title)
-        if title == "From your dalftui Alacritty client":
-            paragraph("These shortcuts are supplied by Alacritty on your computer.", MUTED)
         for keys, description in bindings:
             row(keys, description)
 
@@ -152,7 +120,9 @@ def render(tmux_only=False):
         paragraph("Read from alacritty.toml and its imports each time this guide opens. Terminal defaults are listed above.", MUTED)
         config = config_path()
         try:
-            bindings = load(config)["keyboard"]["bindings"]
+            bindings = load(config).get("keyboard", {}).get("bindings", [])
+            if not bindings:
+                paragraph("None.", MUTED)
             for binding in bindings:
                 mods = binding.get("mods", "").replace("Control", "Ctrl").replace("Super", "Win").replace("|", "+")
                 key = binding.get("key", "?")

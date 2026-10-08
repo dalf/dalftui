@@ -297,12 +297,7 @@ function Set-DalftuiTerminalShortcut {
     param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
           [string[]]$SettingsPaths, [string]$PowerShell7, [string]$VSCodeSettingsPath,
           [switch]$Uninstall, [switch]$DryRun)
-    # Use the same PowerShell version as setup, without loading personal profiles.
-    $shellName = 'powershell.exe'
-    if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
-    $shellPath = Join-Path $PSHOME $shellName
-    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'), '--shell', $shellPath)
+    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'))
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
     if ($PowerShell7) { $arguments += @('--pwsh', $PowerShell7) }
     if ($VSCodeSettingsPath) { $arguments += @('--vscode-settings', $VSCodeSettingsPath) }
@@ -402,7 +397,7 @@ function Invoke-DalftuiWindowsUninstall {
         return
     }
     Write-Host 'Fonts, Oh My Posh, backups and this checkout were kept.'
-    Write-Host 'PowerShell sessions already open keep dssh and Ctrl+Shift+F3 until you open a new session.'
+    Write-Host 'PowerShell sessions already open keep dssh and Ctrl+B F2/F3 until you open a new session.'
 }
 
 function Invoke-DalftuiWindowsSetup {
@@ -447,7 +442,7 @@ function Invoke-DalftuiWindowsSetup {
             -VSCodeSettingsPath $(if ($vscode) { Get-DalftuiVSCodeSettingsPath $vscode })
     }
     Write-Host 'dssh HOST is ready.'
-    Write-Host 'Open a new PowerShell session to load dssh and Ctrl+Shift+F3.'
+    Write-Host 'Open a new PowerShell session to load dssh, Ctrl+B F2 (picker) and Ctrl+B F3 (VS Code).'
     Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).'
     Write-Host 'In the picker, Ctrl+O connects to a typed hostname, IP address or user@host.'
 }

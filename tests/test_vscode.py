@@ -19,7 +19,6 @@ import unittest
 from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture
-from dalftui.linux.alacritty_config import load
 from dalftui import vscode
 from dalftui.linux import tmux_editor
 
@@ -627,9 +626,7 @@ class EditorTmuxTests(TmuxFixture):
         self.fail('The tmux client did not attach')
 
     def press_f3(self, master):
-        binding = next(item for item in load(self.repo / 'config/alacritty.toml')['keyboard']['bindings']
-                       if item['key'] == 'F3' and item['mods'] == 'Control|Shift')
-        os.write(master, binding['chars'].encode())
+        os.write(master, b'\x02\x1bOR')  # Ctrl+B, then F3.
         until = time.monotonic() + 5
         while time.monotonic() < until:
             if self.log.exists():

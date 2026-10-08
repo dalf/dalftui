@@ -17,10 +17,10 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 }
 function Copy-DalftuiWindowsCheckout([string]$Source, [string]$Destination) {
     [IO.Directory]::CreateDirectory((Join-Path $Destination 'dalftui\windows')) | Out-Null
-    foreach ($file in @('install.cmd', 'install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
+    foreach ($file in @('install.cmd', 'install.ps1', 'bin/profile.ps1',
                          'bin/terminal_settings.py', 'dalftui\__init__.py',
                          'dalftui\windows\__init__.py', 'dalftui\windows\setup.ps1',
-                         'dalftui\windows\profile.ps1', 'dalftui\windows\ssh-tab.ps1',
+                         'dalftui\windows\profile.ps1',
                          'dalftui\windows\terminal_settings.py', 'config\oh-my-posh.omp.json')) {
         $destinationPath = Join-Path $Destination $file
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destinationPath)) | Out-Null
@@ -36,9 +36,8 @@ try {
         Assert-True (Test-Path -LiteralPath ("Function:\" + $function)) `
             "Dot-sourcing root install.ps1 must expose $function without running setup"
     }
-    foreach ($file in @('install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
-                         'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1',
-                         'dalftui\windows\ssh-tab.ps1')) {
+    foreach ($file in @('install.ps1', 'bin/profile.ps1',
+                         'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1')) {
         $parseErrors = $null
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file),
             [ref]$null, [ref]$parseErrors) | Out-Null
@@ -459,9 +458,9 @@ function Invoke-DalftuiWindowsSetup {
                 Assert-True ([regex]::Matches($installedText, '(?m)^# >>> dalftui >>>').Count -eq 1) `
                     'Default installation must configure each PowerShell profile exactly once'
                 . $installedProfile
-                $editorHandlers = @(Get-PSReadLineKeyHandler | Where-Object { $_.Function -eq 'DalftuiOpenFolderInCode' })
-                Assert-True ($editorHandlers.Count -eq 2) `
-                    'Each installed profile must load the native and translated Ctrl+Shift+F3 handlers'
+                $keyHandlers = @(Get-PSReadLineKeyHandler | Where-Object { $_.Function -in @('DalftuiSshPicker', 'DalftuiOpenFolderInCode') })
+                Assert-True ($keyHandlers.Count -eq 2) `
+                    'Each installed profile must load the Ctrl+B F2 and Ctrl+B F3 handlers'
                 Assert-True (@(Get-ChildItem -LiteralPath (Split-Path $installedProfile) -Filter '*.bak').Count -eq 0) `
                     'Repeating default setup must leave configured profiles unchanged'
             }
@@ -593,24 +592,27 @@ function Invoke-DalftuiWindowsSetup {
     # Windows PowerShell ships an older PSReadLine without the -Chord option on Get-PSReadLineKeyHandler.
     $handlers = @(Get-PSReadLineKeyHandler)
     $handler = $handlers | Where-Object { $_.Key -eq 'Ctrl+b,F3' }
-    Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Translated Terminal shortcut must have a local PowerShell handler'
+    Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Ctrl+B F3 must have a local PowerShell handler'
+    $handler = $handlers | Where-Object { $_.Key -eq 'Ctrl+b,F2' }
+    Assert-True ($handler.Function -eq 'DalftuiSshPicker') 'Ctrl+B F2 must have a local PowerShell handler'
     Assert-True ((Get-PSReadLineOption).EditMode -eq 'Emacs') 'The profile must enable Emacs editing'
     foreach ($binding in @(@('Ctrl+b,Ctrl+b', 'BackwardChar'), @('Ctrl+LeftArrow', 'BackwardWord'), @('Ctrl+RightArrow', 'ForwardWord'))) {
         $handler = $handlers | Where-Object { $_.Key -eq $binding[0] }
         Assert-True ($handler.Function -eq $binding[1]) "$($binding[0]) must run $($binding[1])"
     }
-    $handler = $handlers | Where-Object { $_.Key -in @('Shift+Ctrl+F3', 'Ctrl+Shift+F3') }
-    Assert-True ($handler.Function -eq 'DalftuiOpenFolderInCode') 'Native Ctrl+Shift+F3 must also work at a PowerShell prompt'
-    # Exercise the bin Terminal launcher in a fresh process without a personal
-    # PowerShell profile before generating settings.
+    Assert-True (-not ($handlers | Where-Object { $_.Key -in @('Shift+Ctrl+F3', 'Ctrl+Shift+F3') })) `
+        'The profile must not bind Ctrl+Shift+F3'
+    # The Ctrl+B F2 handler starts the picker as a console process.
+    $pickLog = Join-Path $root 'pick.json'
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'),
+        "import json, sys; open(r'$pickLog', 'w').write(json.dumps(sys.argv[1:]))")
+    Start-DalftuiSshPicker
+    $arguments = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($pickLog))
+    Assert-True (($arguments -join ' ') -eq '--pick') 'Ctrl+B F2 must open the picker from the checkout'
     $shellName = 'powershell.exe'
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
     $terminalShell = Join-Path $PSHOME $shellName
-    $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'bin/ssh-tab.ps1')
-    $arguments = ConvertFrom-Json -InputObject $argumentJson
-    Assert-True (($arguments -join ' ') -eq '--pick') 'The Terminal launcher must forward --pick without a personal profile'
-    Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
 
     # Unix-like aliases need their tools. Load the profile at global scope in a
     # fresh shell, first without the tools, then with fakes that echo arguments.
@@ -701,26 +703,25 @@ function Invoke-DalftuiWindowsSetup {
     } finally { Pop-Location }
 
     $settingsPath = Join-Path $root 'terminal-settings.json'
-    [IO.File]::WriteAllText($settingsPath, '{"actions":[],"keybindings":[]}')
+    # Earlier versions installed Ctrl+Shift+F2/F3 actions; setup removes them.
+    [IO.File]::WriteAllText($settingsPath, '{"actions":[{"id":"User.DalftuiSshPicker","command":{"action":"newTab"}},' +
+        '{"id":"User.DalftuiOpenFolderInCode","command":{"action":"sendInput","input":"x"}}],' +
+        '"keybindings":[{"id":"User.DalftuiSshPicker","keys":"ctrl+shift+f2"},' +
+        '{"id":"User.DalftuiOpenFolderInCode","keys":"ctrl+shift+f3"}]}')
     $python = Find-DalftuiPython
     $pythonArguments = $python.Arguments
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath)
     $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
-    Assert-True ($settings.keybindings[0].keys -eq 'ctrl+shift+f2') 'Setup must install Ctrl+Shift+F2'
-    Assert-True ($settings.actions[0].command.action -eq 'newTab') 'Shortcut must open a new tab'
-    Assert-True ($settings.keybindings[1].keys -eq 'ctrl+shift+f3') 'Setup must install Ctrl+Shift+F3'
-    Assert-True ($settings.actions[1].command.input -eq ([char]2 + [string][char]27 + 'OR')) 'Editor shortcut must send the existing tmux F3 sequence'
-    Assert-True ($settings.actions[0].command.commandline.Contains(
-                    (Join-Path $checkout 'bin/ssh-tab.ps1'))) `
-        'Generated Terminal actions must target the bin launcher'
+    Assert-True (@($settings.actions).Count -eq 0 -and @($settings.keybindings).Count -eq 0) `
+        'Setup must remove the Terminal actions of earlier versions'
     $installedSettings = [IO.File]::ReadAllBytes($settingsPath)
     $terminalBackups = @(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak')
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath)
     Assert-True ([Convert]::ToBase64String($installedSettings) -eq
                  [Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath))) `
-        'An unchanged setup must not rewrite an already configured Terminal action'
+        'An unchanged setup must not rewrite an already configured Terminal'
     Assert-True (@(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak').Count -eq
                  $terminalBackups.Count) `
         'An idempotent Terminal rerun must not create another backup'

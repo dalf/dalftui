@@ -76,11 +76,9 @@ guide link, `~/.config/tmux/local.conf`, and the `~/.bashrc` prompt line. It
 preserves existing Alacritty files and installs no font: your local terminal draws the icons.
 
 The server uses the same rounded tabs, Claude status styling, pane bindings,
-and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys
-and reminders for shortcuts supplied by your local Alacritty, plus the
-[selection rules](tmux.md#selecting-and-copying) shared with Windows Terminal. The guide reads
+and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys,
+plus the [selection rules](tmux.md#selecting-and-copying) shared with Windows Terminal. The guide reads
 live tmux bindings and does not try to read Alacritty settings on the server.
-From dalftui Alacritty, **Ctrl+Shift+F1** also opens that guide.
 **Ctrl+B, then F2** is disabled in server mode because its picker launches a
 local Alacritty window.
 
@@ -90,9 +88,9 @@ the styled popup border and separate search history. The rounded tab design and
 Claude status colors are the same on every supported version.
 
 Your local terminal renders the fonts and rounded glyphs. Use the desktop SSH
-picker to open a direct remote tmux session; the Alacritty shortcuts then reach
-remote tmux. An SSH connection started inside a local tmux pane creates nested
-sessions, where the local tmux may handle those shortcuts first.
+picker to open a direct remote tmux session; tmux keys then reach remote tmux.
+An SSH connection started inside a local tmux pane creates nested sessions,
+where the local tmux handles **Ctrl+B** first.
 
 The installation mode is recorded in the private `~/.tmux.conf` loader and
 survives Git updates. Both `./bin/reload` and a repeated `./install` recognize it,
@@ -301,9 +299,6 @@ Keys and terminals:
 
 - **Ctrl+B, then F1 / F3** open the guide and VS Code. Apple keyboards need Fn for
   F-keys unless they are set as standard function keys.
-- **Ctrl+Shift+F1 / F3** should work in iTerm2 without configuration (untested). In Terminal.app
-  add them under Settings > Profiles > Keyboard: Ctrl+Shift+F1 sends `\033[1;6P`,
-  Ctrl+Shift+F3 sends `\033[1;6R`.
 - **Ctrl+B, then F2** (SSH picker) is not bound, as on a server.
 - **F3** opens local VS Code only and needs its `code` command on the PATH of the
   shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
@@ -311,10 +306,10 @@ Keys and terminals:
   Relaying to the editor of a client connected over SSH is not supported on a Mac.
 - **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
   Cmd+C copies.
-- **Ctrl+Alt+arrow** pane keys need Option to act as Meta (Terminal.app: *Use
-  Option as Meta key*; iTerm2: *Left Option key: Esc+*). dalftui does not set it:
-  it stops Option from typing characters such as `@`, `#`, `[` on AZERTY and other
-  non-US layouts. Ctrl+Left/Right also switch Mission Control spaces by default.
+- **Ctrl+B, then Ctrl+arrow** (resize pane): by default macOS takes all four
+  Ctrl+arrow keys (Left/Right switch spaces, Up opens Mission Control, Down shows
+  the app's windows); drag the pane border instead, or turn them off in System
+  Settings > Keyboard > Keyboard Shortcuts > Mission Control.
 
 Uninstall works as on Linux; the font is kept. GitHub's macOS CI checks
 installation, the prompt, tmux settings, copy-mode copies and uninstall in a
@@ -416,8 +411,8 @@ On Windows:
 
 This removes the managed block from each PowerShell profile (or the one given
 with `-ProfilePath`). A block that contains other lines is kept and reported. It
-removes the Ctrl+Shift+F2 and F3 actions and their keybindings from Windows
-Terminal, the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
+removes from Windows Terminal the Ctrl+Shift+F2 and F3 actions and keybindings
+that earlier versions installed, the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
 PowerShell 7 profile, and the default `Hack Nerd Font` face, and the VS Code font
 settings above, in each case while they still hold the values setup wrote.
 `-TerminalSettingsPath`, `-VSCodePath` and `-SkipTerminal` work as for setup;
@@ -494,7 +489,7 @@ It backs up an existing profile before changing it, preserves your personal
 settings, and loads `bin/profile.ps1` from this checkout. Repeated setup keeps one
 managed block per profile; rerun it if you move the checkout or install another
 PowerShell version. After `mise run install:windows` or `install.cmd`, open a new
-PowerShell session to use `dssh` and **Ctrl+Shift+F3**. Use `-ProfilePath PATH` to
+PowerShell session to use `dssh`, **Ctrl+B, then F2** and **Ctrl+B, then F3**. Use `-ProfilePath PATH` to
 configure only a specific profile, including a different PowerShell host.
 
 The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
@@ -517,34 +512,28 @@ are on PATH. When installed,
 `lsd`, `wget2`, `btop`, `gsudo`, `notepad++` and `bat` replace `ls`, `wget`, `htop`,
 `sudo`, `notepad` and `cat`, and a `curl` outside Windows' folder replaces `curl`; setup does not install them.
 
-In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
-tab, pick a host, and connect using remote tmux when available or a plain shell.
-The shortcut works while the current tab is in SSH, tmux, or another program.
-It uses Terminal's
-[new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
-and keeps your default profile and appearance.
-After choosing a host, the launcher sets the tab title to `username@host-alias`
-using the effective SSH username (or the login you enter). This also works when
-remote tmux does not set a terminal title; remote applications can still update it.
+At a local PowerShell prompt, **Ctrl+B, then F2** runs `dssh` to pick a host and
+connect, using remote tmux when available or a plain shell. After choosing a
+host, `dssh` sets the tab title to `username@host-alias` using the effective SSH
+username (or the login you enter). This also works when remote tmux does not set
+a terminal title; remote applications can still update it.
 
-**Ctrl+Shift+F3** opens the current directory in a new VS Code window:
+**Ctrl+B, then F3** opens the current directory in a new VS Code window:
 
 - At a local PowerShell prompt, it uses the current filesystem directory and
   preserves any command you are typing.
 - In remote tmux connected through `dssh`, it opens the active pane's directory
   in Windows VS Code with Remote - SSH, including while an app is running.
 
-Terminal translates this shortcut to the existing **Ctrl+B, then F3** sequence,
-so existing remote dalftui configurations already support it. PowerShell setup
-installs the local handler through
+PowerShell setup installs the prompt handlers through
 [PSReadLine](https://learn.microsoft.com/en-us/powershell/module/psreadline/set-psreadlinekeyhandler).
 Other local shells and running
 local programs need their own handler; use a PowerShell prompt for local folders.
 
 Setup finds existing Stable, Preview, Canary, and unpackaged Terminal settings.
 It backs up each changed `settings.json`, preserves comments and other settings,
-and adds no duplicates on repeated runs. An existing Ctrl+Shift+F2 or F3 binding is
-preserved; setup reports the conflict so you can remove that binding and rerun.
+and adds no duplicates on repeated runs. It removes the Ctrl+Shift+F2 and F3
+actions installed by earlier versions.
 When PowerShell 7 is installed, setup turns on ClearType in Terminal's own PowerShell
 profile and adds **Windows PowerShell 7 (Admin)**, which opens it as administrator
 (Terminal 1.13+). Profiles you already have, or later edit, are kept.

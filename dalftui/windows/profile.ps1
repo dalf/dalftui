@@ -228,8 +228,8 @@ if ((Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContin
     oh-my-posh init pwsh --config (Join-Path $Checkout 'config/oh-my-posh.omp.json') | Invoke-Expression
 }
 
-# Terminal sends the same Ctrl+B, F3 sequence used by remote tmux. PSReadLine
-# handles it at a local prompt without inserting or executing command-line text.
+# Ctrl+B, F2 and Ctrl+B, F3 are tmux keys. PSReadLine handles them at a local
+# prompt without inserting or executing command-line text.
 $dalftuiEditorPath = Join-Path $Checkout 'bin/vscode.py'
 $dalftuiOpenFolder = {
     $location = Get-Location
@@ -243,11 +243,30 @@ $dalftuiOpenFolder = {
     if ($global:LASTEXITCODE -ne 0) { throw 'Could not open VS Code; see the error above.' }
 }.GetNewClosure()
 Set-Item -Path Function:\global:Open-DalftuiCurrentFolder -Value $dalftuiOpenFolder
+# A key handler's output is redirected, so the picker runs as its own console process.
+$dalftuiPick = {
+    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $uv) { throw 'uv is required. Install it (scoop install uv), then open a new PowerShell window.' }
+    Start-Process -FilePath $uv.Source -NoNewWindow -Wait -ArgumentList @(
+        'run', '--no-project', '--python', '>=3.11', ('"' + $dalftuiPickerPath + '"'), '--pick')
+}.GetNewClosure()
+Set-Item -Path Function:\global:Start-DalftuiSshPicker -Value $dalftuiPick
 
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
     # Like tmux, Ctrl+B is a prefix; Ctrl+B Ctrl+B moves back one character.
     Set-PSReadLineKeyHandler -Chord 'Ctrl+b,Ctrl+b' -Function BackwardChar
-    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F3', 'Ctrl+Shift+F3' `
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F2' `
+        -BriefDescription 'DalftuiSshPicker' `
+        -Description 'Choose an SSH host with dssh; keep the input line' `
+        -ScriptBlock {
+            $previousExitCode = $global:LASTEXITCODE
+            try { Start-DalftuiSshPicker }
+            catch { [Console]::Error.WriteLine('dssh: ' + $_.Exception.Message) }
+            finally { $global:LASTEXITCODE = $previousExitCode }
+            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+        }
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F3' `
         -BriefDescription 'DalftuiOpenFolderInCode' `
         -Description 'Open the current directory in VS Code; keep the input line' `
         -ScriptBlock {

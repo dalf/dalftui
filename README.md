@@ -36,25 +36,28 @@ The intended everyday workflow on a configured Linux desktop is (keys in
 
 `Ctrl+B` `c` means press `Ctrl+B`, release, then `c`.
 
-| Action | tmux (any terminal, incl. SSH) | Alacritty (Linux) | Windows Terminal | macOS (Terminal.app / iTerm2) | Notes |
-| --- | --- | --- | --- | --- | --- |
-| Shortcut guide | `Ctrl+B` `F1` | `Ctrl+Shift+F1` or `Win+Shift+H` | — | tmux key; `Ctrl+Shift+F1` needs a Terminal.app key mapping (iTerm2 untested) | Needs dalftui's tmux config |
-| Pick SSH host | `Ctrl+B` `F2` | `Ctrl+Shift+F2` | `Ctrl+Shift+F2`, or `dssh` | — (F2 unavailable) | tmux key: Linux desktop profile only; opens a new window or tab |
-| Open folder in VS Code | `Ctrl+B` `F3` | `Ctrl+Shift+F3` | `Ctrl+Shift+F3` | tmux key; `Ctrl+Shift+F3` needs a Terminal.app key mapping (iTerm2 untested) | Remote needs dalftui on the server and a picker or `dssh` connection; macOS opens local folders only |
-| New tab | `Ctrl+B` `c` | `Ctrl+Shift+T` | — (`Ctrl+Shift+T` opens a Windows Terminal tab) | tmux key (`Cmd+T` opens a Terminal.app tab) | |
-| Previous / next tab | `Ctrl+B` `p` / `n` | `Ctrl+PgUp` / `Ctrl+PgDn` | — | tmux key | |
-| Rename tab | `Ctrl+B` `,` | — | — | tmux key | |
-| Close tab | `Ctrl+B` `&` | — | — | tmux key | Asks for confirmation |
-| Split side by side | `Ctrl+B` `%` | `Ctrl+Shift+D` | — (`Ctrl+Shift+D` duplicates the Windows Terminal tab) | tmux key | |
-| Split top / bottom | `Ctrl+B` `"` | `Ctrl+Shift+E` | — | tmux key | |
-| Move to pane | `Ctrl+B` arrow | `Ctrl+Alt+arrow` | `Ctrl+Alt+Up/Down/Right` (dssh tabs; `Ctrl+Alt+Left` is taken by Windows Terminal) | tmux key; `Ctrl+Alt+arrow` needs Option as Meta | `Ctrl+Alt+arrow` needs dalftui's tmux config |
-| Resize pane | `Ctrl+B` `Ctrl+arrow` | `Ctrl+Alt+Shift+arrow` (5 cells) | `Ctrl+Alt+Shift+arrow` (dssh tabs) | tmux key; `Ctrl+Alt+Shift+arrow` needs Option as Meta; `Ctrl+Left/Right` switch Mission Control spaces | `Ctrl+Alt+Shift+arrow` needs dalftui's tmux config |
-| Zoom pane / restore | `Ctrl+B` `z` | — | — | tmux key | |
-| Close pane | `Ctrl+B` `x` | — | — | tmux key | Asks for confirmation |
-| Scrollback | `Ctrl+B` `PgUp` | `Shift+PgUp` | `Shift+PgUp` (dssh tabs) | tmux key | `Esc` leaves; `Shift+PgUp` needs dalftui's tmux config |
-| Search history | `Ctrl+F`, text, `Enter` while in scrollback | — | — | tmux key | Needs dalftui's tmux config |
-| Detach | `Ctrl+B` `d` | — | — | tmux key | Closes the window or tab; the session keeps running |
-| tmux key list | `Ctrl+B` `?` | — | — | tmux key | |
+All shortcuts are tmux keys: they work in any terminal, including over SSH.
+`F1`–`F3`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
+
+| Action | Keys | Notes |
+| --- | --- | --- |
+| Shortcut guide | `Ctrl+B` `F1` | |
+| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh` |
+| Open folder in VS Code | `Ctrl+B` `F3` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection; macOS opens local folders only |
+| New tab | `Ctrl+B` `c` | |
+| Previous / next tab | `Ctrl+B` `p` / `n` | |
+| Rename tab | `Ctrl+B` `,` | |
+| Close tab | `Ctrl+B` `&` | Asks for confirmation |
+| Split side by side | `Ctrl+B` `%` | |
+| Split top / bottom | `Ctrl+B` `"` | |
+| Move to pane | `Ctrl+B` arrow | |
+| Resize pane | `Ctrl+B` `Ctrl+arrow` | On macOS, Mission Control and Spaces take the `Ctrl+arrow` keys |
+| Zoom pane / restore | `Ctrl+B` `z` | |
+| Close pane | `Ctrl+B` `x` | Asks for confirmation |
+| Scrollback | `Ctrl+B` `PgUp` or `Shift+PgUp` | `Esc` leaves |
+| Search history | `Ctrl+F`, text, `Enter` while in scrollback | |
+| Detach | `Ctrl+B` `d` | The session keeps running. Closes the SSH window or tab; after `dssh` typed at a prompt, returns to that prompt |
+| tmux key list | `Ctrl+B` `?` | |
 
 In Windows Terminal, tmux keys apply in `dssh` tabs, where tmux runs on the
 server. Apple keyboards need Fn for F-keys.
@@ -80,7 +83,8 @@ PowerShell prompt keys (Windows):
 | --- | --- |
 | `Ctrl+Left` / `Ctrl+Right` | Move by word |
 | `Ctrl+B` `Ctrl+B` | Move back one character |
-| `Ctrl+Shift+F3` or `Ctrl+B` `F3` | Open the folder in VS Code, keeping the typed line |
+| `Ctrl+B` `F2` | Choose an SSH host with `dssh`, keeping the typed line |
+| `Ctrl+B` `F3` | Open the folder in VS Code, keeping the typed line |
 | Other keys | Emacs editing, as in bash |
 
 Select, copy, paste:
@@ -138,11 +142,9 @@ integration tests, and GitHub Actions.
   directly from it without a pip installation. Installed links and configuration
   loaders point back to the checkout. Many shortcuts use `uv run --no-project`
   to run a suitable Python. Keep the checkout at a stable path.
-- **Alacritty shortcuts become tmux keystrokes.** This lets familiar tab and
-  split keys work over SSH as well. In Windows Terminal, only `Ctrl+Shift+F3` is
-  sent to tmux. Mouse selection is opinionated: a plain drag in a shell displays
-  a hint (over SSH, only with dalftui on the server); Shift+drag selects text on
-  Linux and Windows.
+- **Mouse selection is opinionated.** A plain drag in a shell displays a hint
+  (over SSH, only with dalftui on the server); Shift+drag selects text on Linux
+  and Windows.
 - **Startup avoids automatically sharing an occupied session.** With no tmux
   session, it creates one. With one detached session, it reattaches. With one
   attached session, it creates another. With several, it asks which to use.

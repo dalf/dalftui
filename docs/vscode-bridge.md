@@ -2,10 +2,10 @@
 
 ## Open a folder
 
-Press **Ctrl+Shift+F3** in an Alacritty pane to open its directory in a new local
+Press **Ctrl+B, then F3** in a tmux pane to open its directory in a new local
 VS Code window. Install VS Code's `code` command on your desktop.
 
-In an SSH window opened through **Ctrl+Shift+F2** to a server with a compatible
+In an SSH window opened through **Ctrl+B, then F2** to a server with a compatible
 dalftui bridge installed, the same shortcut opens the remote pane's directory
 in local VS Code using Microsoft's **Remote - SSH** extension. VS Code uses
 the same SSH host alias and login as the picker, so your
@@ -96,7 +96,7 @@ Protocol version 2 records the move to `bin/`, including the remote editor's
 discovery path. Update both desktop and server checkouts and rerun installation
 before reconnecting. An old desktop cannot discover a new server's moved editor;
 a new desktop refuses bridge credentials for a server using the old root layout.
-On Windows, rerun `.\install.cmd` to regenerate the profile and Terminal actions.
+On Windows, rerun `.\install.cmd` to regenerate the profile and Terminal settings.
 
 The check makes no freshness request to GitHub on login. The authenticated v1
 wire format remains supported: requests and responses without the optional

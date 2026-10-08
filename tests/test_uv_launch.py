@@ -96,8 +96,8 @@ class MacUvTests(UvBindingFixture):
     profile = 'macos'
 
     def test_mac_keys_run_through_uv(self):
-        root, prefix = self.commands('root'), self.commands('prefix')
-        for command in (prefix['F1'], prefix['F3'], root['C-S-F1'], root['C-S-F3']):
+        prefix = self.commands('prefix')
+        for command in (prefix['F1'], prefix['F3']):
             self.assertIn(UV_RUN, command)
 
 

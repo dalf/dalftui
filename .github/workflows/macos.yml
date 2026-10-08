@@ -64,7 +64,7 @@ jobs:
           test "$(tmux -L ci show -sv copy-command)" = pbcopy
           tmux -L ci list-keys -T prefix | grep ' F1 .*--tmux-only'
           if tmux -L ci list-keys -T prefix | grep ' F2 '; then exit 1; fi
-          tmux -L ci list-keys -T root | grep ' C-S-F3 .*uv run --no-project'
+          tmux -L ci list-keys -T prefix | grep ' F3 .*uv run --no-project'
           if tmux -L ci show-messages | grep -i error; then exit 1; fi
           tmux -L ci send-keys -t t 'printf "dalftui-%s\n" clip' Enter
           pane_wait_attempt=0

@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-Install dssh, its host picker, and the Windows Terminal SSH/VS Code shortcuts, or remove them with -Uninstall.
+Install dssh, its host picker, and the PowerShell and Windows Terminal settings, or remove them with -Uninstall.
 .EXAMPLE
 .\install.ps1
 .EXAMPLE

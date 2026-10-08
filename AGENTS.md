@@ -61,7 +61,7 @@ not establish compatibility when their meaning or bootstrap behavior changes.
 
 - Importable Python modules and package directories use `snake_case`. Shell and
   PowerShell filenames use lowercase words with hyphens when needed.
-- Prefer purpose-specific names such as `profile.ps1`, `ssh-tab.ps1`, and
+- Prefer purpose-specific names such as `profile.ps1` and
   `terminal_settings.py`. Platform directories normally supply platform context;
   avoid redundant platform prefixes inside them.
 - Tests use `test_<feature>.py`; Windows-focused launcher/integration suites may
@@ -76,11 +76,11 @@ Keep installation entrypoints at the root: `install` is the Linux installer;
 execution-policy bypass; `bootstrap.cmd` runs `bootstrap` with the Python uv finds, as one
 parenthesized block, because bootstrap's `git pull` can rewrite it while cmd runs it. Runtime and maintenance launchers belong in `bin/`:
 `reload`, `shortcuts.py`, `ssh_picker.py`, `vscode.py`, `terminal_settings.py`,
-`profile.ps1`, `ssh-tab.ps1`, and `tmux-start.sh`. They forward to implementations
+`profile.ps1`, and `tmux-start.sh`. They forward to implementations
 under `dalftui/` and resolve the checkout independently of the working directory.
 Python launchers resolve symlinks before finding the checkout.
 The previous root runtime paths were deliberately removed; do not add aliases
-for them. Regenerate installed links, profiles, and Terminal actions by rerunning
+for them. Regenerate installed links, profiles, and Terminal settings by rerunning
 installation when changing these paths. Remote discovery requires `bin/vscode.py`.
 Root `bridge_protocol.py` contains the actual standalone contract and version
 declaration; it remains importable without platform integrations.

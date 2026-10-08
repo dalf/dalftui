@@ -132,9 +132,8 @@ the tab immediately updates the layout. Selection connects in the current termin
 configured username; if none is configured, the launcher asks for one. It
 creates or reattaches tmux using the usual session policy when tmux is installed,
 or silently opens a plain login shell otherwise. With a compatible remote
-dalftui bridge installed, **Ctrl+Shift+F3** opens the active pane's remote folder
+dalftui bridge installed, **Ctrl+B, then F3** opens the active pane's remote folder
 in Windows VS Code.
-**Ctrl+B, then F3** remains available as a tmux fallback.
 
 Without PowerShell setup, including from Command Prompt, you can run the
 launcher directly:
