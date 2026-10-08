@@ -6,7 +6,8 @@ Full detail behind the install steps in the [README](../README.md#installation-a
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Alacritty 0.14+,
 tmux 3.2+, OpenSSH 9.4+, Git, `less`, and
-[Oh My Posh](https://ohmyposh.dev/docs/installation/linux) for the desktop mode.
+[Oh My Posh](https://ohmyposh.dev/docs/installation/linux) 29.12+ (the prompt's Git
+conflict count uses its `cmd` template function) for the desktop mode.
 The server mode below needs Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My
 Posh. `./install`, `./bootstrap` and `bin/reload` run with `python3`; the tmux
 keys run dalftui's Python with `uv run` and also look for uv in `~/.local/bin`,
@@ -69,7 +70,7 @@ cd ~/code/dalftui
 ./install --tmux-only
 ```
 
-Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh**. Alacritty
+Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh 29.12+**. Alacritty
 and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
 server installer manages the shared configuration link, tmux loader, shortcut
 guide link, `~/.config/tmux/local.conf`, and the `~/.bashrc` prompt line. It
