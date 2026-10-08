@@ -12,7 +12,7 @@ the same SSH host alias and login as the picker, so your
 SSH configuration supplies the hostname, keys, port, and jump hosts. This uses
 VS Code's documented [remote folder command](https://code.visualstudio.com/docs/remote/troubleshooting#_connect-to-a-remote-host-from-the-terminal).
 
-Update dalftui and run `./bin/reload` on both machines. Reconnect older SSH windows
+Update dalftui and run `./install` on both machines. Reconnect older SSH windows
 through the dalftui launcher (the picker or `--connect HOST`): attachments without
 credentials cannot use F3, even if their old Unix socket is still reachable.
 Local folder opening continues to work without bridge credentials.
@@ -90,7 +90,6 @@ Update from the server's existing checkout, then reconnect:
 ```sh
 git pull --ff-only
 ./install
-./bin/reload
 ```
 
 Protocol version 2 records the move to `bin/`, including the remote editor's
@@ -200,7 +199,7 @@ Update and reload dalftui on the VM before connecting from Windows:
 ```sh
 cd ~/code/dalftui
 git pull --ff-only
-./bin/reload
+./install
 ```
 
 ## Open a remote folder without dalftui

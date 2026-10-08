@@ -69,7 +69,7 @@ range. **Home/End** select the first/last host and **Ctrl+U** clears the filter.
 Filtering is case-insensitive and accepts abbreviated hostnames and multiple
 search terms while preserving alphabetical order (ignoring case). Hosts are sorted
 down each column, then continue in the next column. The Linux tmux popup uses
-the full client size; run `bin/reload` after updating to apply its new dimensions.
+the full client size; run `./install` after updating to apply its new dimensions.
 
 Picker tag checks disable `CanonicalizeHostname` so building the list does not
 wait for DNS lookups, including when a VPN or private DNS is unavailable. Put

@@ -295,8 +295,6 @@ class Bootstrap:
             self.add('failed', ['install'])
             return
         self.add('skipped' if 'Already installed' in result.stdout else 'installed', ['install'])
-        if not self.dry_run and self.run([sys.executable, str(self.root / 'bin/reload')]).returncode:
-            self.add('failed', ['reload'])
 
     def report(self):
         labels = (('installed', 'Would install' if self.dry_run else 'Installed'),

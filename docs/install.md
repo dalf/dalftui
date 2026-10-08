@@ -23,8 +23,9 @@ Keep the checkout at a stable path, such as `~/code/dalftui`, then run:
 cd ~/code/dalftui
 ./install --dry-run
 ./install
-./bin/reload
 ```
+
+`./install` then reloads running tmux and Alacritty.
 
 Optional [mise tasks](development.md#repository-tasks) provide named shortcuts for installation,
 reloads, spelling, and tests.
@@ -66,7 +67,6 @@ Clone this repository to a stable directory on the server, then run:
 cd ~/code/dalftui
 ./install --tmux-only --dry-run
 ./install --tmux-only
-./bin/reload
 ```
 
 Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh**. Alacritty
@@ -105,7 +105,7 @@ To receive later configuration updates on the server:
 
 ```sh
 git pull --ff-only
-./bin/reload
+./install
 ```
 
 ## New machine (Fedora, Debian, Ubuntu)
@@ -154,7 +154,7 @@ Each run, in order (a failed step does not stop the next ones):
    `mise self-update --yes --no-plugins` and `uv self update`. A copy that the user cannot write,
    such as an rpm, is left alone.
 5. Runs `./install` (with `--tmux-only` when given; otherwise the existing
-   profile, or desktop on a new machine), then `./bin/reload`.
+   profile, or desktop on a new machine), which also reloads.
 6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
    with 1 when anything failed.
 
@@ -227,7 +227,7 @@ task, where msiexec is unavailable, so Scoop extracts MSIs with lessmsi there.
 
 The same `bootstrap` installs and upgrades the formulae and casks in
 [packages/Brewfile](../packages/Brewfile) with [Homebrew](https://brew.sh/), then
-runs `./install` and `./bin/reload`. On a new Apple Silicon Mac, in Terminal.app:
+runs `./install`. On a new Apple Silicon Mac, in Terminal.app:
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv)" && brew install uv && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
@@ -267,7 +267,6 @@ the bootstrap above, and make sure `brew shellenv` runs in your shell setup:
 brew install tmux oh-my-posh uv
 ./install --dry-run
 ./install
-./bin/reload
 ```
 
 On a Mac, `./install` uses the `macos` mode; `--desktop` (Alacritty) is refused
@@ -332,20 +331,21 @@ After a Git remote is configured:
 ```sh
 cd ~/code/dalftui
 git pull --ff-only
-./bin/reload
+./install
 ```
 
 The symlink makes new repository files available immediately. The helper
-scripts read their configuration whenever you open them. `./bin/reload` requests
+scripts read their configuration whenever you open them. `./install` writes
+nothing when nothing changed, then requests
 an Alacritty refresh in desktop mode and sources tmux's configuration again without ending
 sessions or restarting running programs. It rewrites the Alacritty loader in
 place because file replacements from Git or an editor may not trigger a reload.
 
 Settings that affect terminal startup apply to new Alacritty windows. If tmux
-is not running, `./bin/reload` leaves it stopped; the next server loads the updated
+is not running, the reload leaves it stopped; the next server loads the updated
 configuration. From inside tmux, reload targets the current server. Outside tmux,
-it targets the default server. Use `./bin/reload --socket /path/to/socket` for another
-server.
+it targets the default server. Use `--socket /path/to/socket` with `./install` or `./bin/reload` for
+another server.
 
 Terminal capability entries occupy fixed tmux array slots (`[100]`), so repeated
 reloads do not append duplicates. New terminal capabilities can require a new

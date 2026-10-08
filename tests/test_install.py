@@ -440,7 +440,7 @@ class RelocationTests(DisposableSetup):
         outside.mkdir()
         environment = dict(os.environ, HOME=str(self.paths.home_dir),
                            XDG_CONFIG_HOME=str(self.paths.config_dir),
-                           XDG_STATE_HOME=str(self.paths.state_dir),
+                           XDG_STATE_HOME=str(self.paths.state_dir), TMUX_TMPDIR=str(self.directory),
                            PATH=str(command_dir) + os.pathsep + os.environ['PATH'])
         environment.pop('PYTHONPATH', None)
         return environment, outside
@@ -613,7 +613,7 @@ class ServerInstallationTests(DisposableSetup):
             self.assertIsNone(shutil.which('ssh'))
             with patch.object(setup.Paths, 'current', return_value=self.paths):
                 for flags in [['--tmux-only'], []]:
-                    with patch.object(sys, 'argv', ['install', *flags]):
+                    with patch.object(sys, 'argv', ['install', *flags, '--socket', str(self.directory / 'tmux.socket')]):
                         with redirect_stdout(io.StringIO()):
                             self.assertEqual(installer.main(), 0)
         self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
@@ -988,7 +988,7 @@ class UninstallTests(DisposableSetup):
                     with patch.object(sys, 'argv', ['install', *flags]):
                         with redirect_stdout(io.StringIO()) as output:
                             self.assertEqual(installer.main(), 0)
-                    self.assertNotIn('./bin/reload', output.getvalue())
+                    self.assertNotIn('reload', output.getvalue())
                     self.assertEqual(self.paths.root.is_symlink(), '--dry-run' in flags)
                 with patch.object(sys, 'argv', ['install', '--uninstall', '--tmux-only']):
                     with redirect_stdout(io.StringIO()), patch('sys.stderr', io.StringIO()):

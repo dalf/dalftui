@@ -524,10 +524,9 @@ class InstallStepTests(unittest.TestCase):
             quietly(run.install, tmux_only=tmux_only)
         return run
 
-    def test_passes_tmux_only_and_reloads(self):
+    def test_passes_tmux_only(self):  # ./install reloads tmux itself.
         run = self.install('Installed (tmux-only): ...\n', tmux_only=True)
-        self.assertEqual(run.commands, [[sys.executable, str(ROOT / 'install'), '--tmux-only'],
-                                        [sys.executable, str(ROOT / 'bin/reload')]])
+        self.assertEqual(run.commands, [[sys.executable, str(ROOT / 'install'), '--tmux-only']])
         self.assertEqual(run.summary['installed'], ['install'])
 
     def test_desktop_keeps_the_installed_profile_and_reports_no_change(self):
@@ -535,12 +534,12 @@ class InstallStepTests(unittest.TestCase):
         self.assertEqual(run.commands[0], [sys.executable, str(ROOT / 'install')])
         self.assertEqual(run.summary['skipped'], ['install'])
 
-    def test_failure_skips_reload(self):
+    def test_failure_is_reported(self):
         run = self.install('Install failed: tmux missing\n', returncode=1)
         self.assertEqual(len(run.commands), 1)
         self.assertEqual(run.summary['failed'], ['install'])
 
-    def test_dry_run_previews_without_reload(self):
+    def test_dry_run_previews(self):
         run = self.install('Already installed; personal overrides preserved.\n', dry_run=True)
         self.assertEqual(run.commands, [[sys.executable, str(ROOT / 'install'), '--dry-run']])
 

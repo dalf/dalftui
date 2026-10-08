@@ -2,8 +2,8 @@
 
 ## Repository
 
-On a new machine, clone your repository to a stable path and run `./install`
-and `./bin/reload`, adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
+On a new machine, clone your repository to a stable path and run `./install`,
+adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
 repository and connect it once:
 
 ```sh
@@ -116,7 +116,7 @@ live in `bin/`:
 Each launcher resolves the checkout and forwards to the package implementation.
 No pip installation or particular working directory is required. The previous
 root runtime paths have been removed. After updating from that layout, rerun
-`./install` and `./bin/reload` on Linux, or `.\install.cmd` on Windows, to
+`./install` on Linux, or `.\install.cmd` on Windows, to
 regenerate links, profile entries, and Terminal actions. `bridge_protocol.py`
 contains the actual contract and version declaration; it is not a forwarding
 wrapper.

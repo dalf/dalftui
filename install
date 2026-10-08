@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install or uninstall dalftui configuration links and loaders; changed files are backed up."""
+"""Install or uninstall dalftui configuration links and loaders, then reload running tmux and Alacritty."""
 import argparse
 import os
 import shutil
@@ -13,7 +13,7 @@ if sys.version_info < (3, 11):  # The setup module needs Python 3.11 to import.
                          *sys.argv[1:]])
     raise SystemExit('Install failed: Python 3.11 or newer is required'
                      + (' (macOS: brew install uv, then rerun).' if sys.platform == 'darwin' else '.'))
-from dalftui.linux.setup import dependencies, install, installed_profile, uninstall
+from dalftui.linux.setup import dependencies, install, installed_profile, reload_config, uninstall
 
 
 def main():
@@ -28,6 +28,7 @@ def main():
                       help='Configure tmux and the zsh prompt on macOS (the default for a new Mac installation)')
     mode.add_argument('--uninstall', action='store_true',
                       help='Remove the links, loaders and settings that install added')
+    parser.add_argument('--socket', metavar='PATH', help='Reload this tmux server socket instead of the default one')
     args = parser.parse_args()
     if args.uninstall:
         try:
@@ -43,9 +44,13 @@ def main():
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'Install failed: {error}', file=sys.stderr)
         return 1
-    if not args.dry_run:
-        target = 'Alacritty and tmux' if profile == 'desktop' else 'tmux'
-        print(f'Run ./bin/reload to apply the configuration to running {target}.')
+    if args.dry_run:
+        return 0
+    try:
+        reload_config(socket=args.socket)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f'Reload failed: {error}', file=sys.stderr)
+        return 1
     return 0
 
 

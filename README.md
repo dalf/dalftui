@@ -155,10 +155,10 @@ configuration. You do not need to run the installer separately afterward.
 
 | Platform or profile | Bootstrap command from an existing checkout | What it runs afterward |
 | --- | --- | --- |
-| Linux desktop | `./bootstrap` | `./install`, then `./bin/reload` |
-| Linux server or tmux-only | `./bootstrap --tmux-only` | `./install --tmux-only`, then `./bin/reload` |
+| Linux desktop | `./bootstrap` | `./install` |
+| Linux server or tmux-only | `./bootstrap --tmux-only` | `./install --tmux-only` |
 | Windows | `.\bootstrap.cmd` | `install.cmd`; open a new PowerShell session afterward |
-| macOS | `./bootstrap` | `./install` in macOS mode, then `./bin/reload` |
+| macOS | `./bootstrap` | `./install` in macOS mode |
 
 Remote folder opening also requires VS Code's Remote - SSH extension on the
 desktop, dalftui installed on the Linux server, a connection made through the
@@ -342,11 +342,11 @@ On Linux, including a server, or macOS:
 ```sh
 cd ~/code/dalftui
 git pull --ff-only
-./bin/reload
+./install
 ```
 
-If the repository was updated by another method, only `./bin/reload` is needed
-for ordinary tmux and Alacritty configuration changes. Reload preserves running
+`./install` changes nothing when nothing changed, then reloads running tmux, and
+Alacritty in desktop mode. Reload preserves running
 pane programs. New shell sessions load prompt changes; startup settings apply
 to new terminal windows. Removing a tmux binding from a file does not remove
 an already loaded binding automatically.
@@ -362,7 +362,7 @@ Then open a new PowerShell session, or reload the current profile with
 `. $PROFILE`. Reconnect SSH sessions to use new bridge and connection code.
 
 If an update changes installed launcher paths or loaders, or you move the
-checkout, rerun the installer: `./install` and `./bin/reload` on Linux/macOS,
+checkout, rerun the installer: `./install` on Linux/macOS,
 or `.\install.cmd` on Windows. A full bootstrap run already includes these
 steps, with a new PowerShell session still needed on Windows. For remote editor
 integration, keep desktop and server installations compatible and reconnect
