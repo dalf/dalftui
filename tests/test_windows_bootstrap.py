@@ -154,34 +154,122 @@ class PackageTests(ScoopTestCase):
         self.assertEqual(run.summary['failed'], ['extras bucket'])
 
 
+AGENT = {'qc': '        START_TYPE         : {}   AUTO_START\n', 'query': '        STATE              : {}  RUNNING\n'}
+
+
 class CheckTests(ScoopTestCase):
-    def check_ssh(self, *, exists=True, version=''):
-        run = self.scoop()
-        with patch.object(bootstrap, 'OPENSSH', Path(run.scoop) / 'ssh.exe'):
-            if exists:
+    def check_ssh(self, *, system32=True, msi=False, version='OpenSSH_for_Windows_9.5p1\n', agent=(2, 4),
+                  enabled=(2, 4), desktop=True, gsudo=True, dry_run=False, names=(), vcredist=False):
+        """Run the OpenSSH step; the elevated command, when run, turns the agent state into enabled."""
+        run = self.scoop(dry_run=dry_run)
+        state = {'agent': agent}
+        if vcredist:
+            run.app('extras/vcredist2022').mkdir(parents=True)
+            (run.app('extras/vcredist2022') / 'vc_redist.x64.exe').write_text('', encoding='ascii')
+        if gsudo:
+            run.app('gsudo').mkdir(parents=True)
+            (run.app('gsudo') / 'gsudo.exe').write_text('', encoding='ascii')
+
+        def query(command):
+            if command[-1] != 'ssh-agent' or state['agent'] is None:
+                return done(command, stderr=version)
+            return done(command, stdout=AGENT[command[1]].format(state['agent'][command[1] == 'query']))
+
+        def elevate(command, **_):
+            run.commands.append(command)
+            state['agent'] = enabled
+            if 'Add-WindowsCapability' in command[-1]:
                 bootstrap.OPENSSH.write_text('', encoding='ascii')
-            with patch.object(run, 'query', return_value=done([], stderr=version)):
-                run.openssh()
-        return run.summary
+            if 'vc_redist.x64.exe' in command[-1]:
+                bootstrap.VCRUNTIME.write_text('', encoding='ascii')
+            return done(command)
+        with patch.object(bootstrap, 'OPENSSH', run.scoop / 'System32/ssh.exe'), \
+                patch.object(bootstrap, 'VCRUNTIME', run.scoop / 'System32/vcruntime140.dll'), \
+                patch.object(bootstrap, 'OPENSSH_MSI', run.scoop / 'Program Files/ssh.exe'), \
+                patch.object(bootstrap, 'interactive', return_value=desktop), \
+                patch.object(run, 'query', side_effect=query), patch.object(run, 'run', side_effect=elevate):
+            for path, present in ((bootstrap.OPENSSH, system32), (bootstrap.OPENSSH_MSI, msi)):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if present:
+                    path.write_text('', encoding='ascii')
+            quietly(run.system, names)
+        return run.summary, run.commands
 
-    def test_openssh_missing_old_or_current(self):
-        self.assertIn('Add-WindowsCapability -Online -Name OpenSSH.Client', self.check_ssh(exists=False)['failed'][0])
-        self.assertEqual(self.check_ssh(version='OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2\n')['skipped'],
+    def test_openssh_old_or_current(self):
+        self.assertEqual(self.check_ssh(version='OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2\n')[0]['skipped'],
                          ['OpenSSH client 8.1 (Tag dalftui needs 9.4+)'])
-        self.assertEqual(self.check_ssh(version='OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2\n'),
-                         {'installed': [], 'upgraded': [], 'skipped': [], 'failed': []})
+        self.assertEqual(self.check_ssh(), ({'installed': [], 'upgraded': [], 'skipped': [], 'failed': []}, []))
+        # The MSI client (winget Microsoft.OpenSSH.Preview) counts; the built-in one is not added back.
+        self.assertEqual(self.check_ssh(system32=False, msi=True)[1], [])
 
-    def test_missing_vc_runtime_is_a_failure(self):
+    def test_agent_service_is_enabled_through_one_uac_prompt(self):
+        summary, commands = self.check_ssh(agent=(4, 1))
+        self.assertEqual(summary['installed'], ['ssh-agent service'])
+        self.assertEqual(len(commands), 1)
+        self.assertTrue(commands[0][0].endswith('gsudo.exe'))
+        self.assertIn(bootstrap.AGENT_ENABLE, commands[0][-1])
+        summary, commands = self.check_ssh(system32=False, agent=None)
+        self.assertEqual(summary['installed'], ['OpenSSH client', 'ssh-agent service'])
+        self.assertIn(bootstrap.OPENSSH_ADD + '; ' + bootstrap.AGENT_ENABLE, commands[0][-1])
+
+    def test_declined_prompt_reports_the_commands(self):
+        summary = self.check_ssh(agent=(4, 1), enabled=(4, 1))[0]
+        self.assertEqual(summary['failed'], [f'ssh-agent service (as administrator: {bootstrap.AGENT_ENABLE})'])
+
+    def test_without_a_desktop_or_gsudo_nothing_is_elevated(self):
+        summary, commands = self.check_ssh(agent=None, desktop=False)
+        self.assertEqual((summary['skipped'], commands), ([f'ssh-agent service (not visible without a desktop '
+                                                           f'session; as administrator: {bootstrap.AGENT_ENABLE})'], []))
+        summary, commands = self.check_ssh(system32=False, agent=None, desktop=False)
+        self.assertIn(f'no desktop for the UAC prompt; as administrator: {bootstrap.OPENSSH_ADD}', summary['failed'][0])
+        self.assertIn('ssh-agent service (no desktop', summary['skipped'][0])
+        self.assertEqual(commands, [])
+        summary, commands = self.check_ssh(agent=(3, 1), gsudo=False)
+        self.assertIn('gsudo is not installed', summary['skipped'][0])
+        self.assertEqual(commands, [])
+
+    def test_dry_run_lists_the_administrator_steps(self):
+        summary, commands = self.check_ssh(agent=(4, 1), dry_run=True)
+        self.assertEqual((summary['installed'], commands), (['ssh-agent service (administrator)'], []))
+
+    def git_ssh(self, current='', *, client='System32/OpenSSH/ssh.exe', dry_run=False):
+        run = self.scoop(dry_run=dry_run)
+        (run.scoop / 'shims').mkdir(parents=True)
+        (run.scoop / 'shims/git.exe').write_text('', encoding='ascii')
+        with patch.object(bootstrap, 'openssh_client', return_value=Path('C:/', client)), \
+                patch.object(run, 'query', return_value=done([], stdout=current + '\n' if current else '')):
+            quietly(run.git_ssh)
+        return run.summary, [command[1:] for command in run.commands]
+
+    def test_git_uses_the_windows_ssh_client(self):
+        summary, commands = self.git_ssh()
+        self.assertEqual(summary['installed'], ['Git core.sshCommand'])
+        self.assertEqual(commands, [['config', '--global', 'core.sshCommand', 'C:/System32/OpenSSH/ssh.exe']])
+        self.assertEqual(self.git_ssh(client='Program Files/OpenSSH/ssh.exe')[1][0][-1],
+                         "'C:/Program Files/OpenSSH/ssh.exe'")
+        for same in ('C:/System32/OpenSSH/ssh.exe', 'C:\\SYSTEM32\\OpenSSH\\ssh.exe'):
+            self.assertEqual(self.git_ssh(same), ({'installed': [], 'upgraded': [], 'skipped': [], 'failed': []}, []))
+        self.assertEqual(self.git_ssh('plink'), ({'installed': [], 'upgraded': [], 'skipped':
+                                                   ['Git core.sshCommand (kept: plink)'], 'failed': []}, []))
+        self.assertEqual(self.git_ssh(dry_run=True), ({'installed': ['Git core.sshCommand'], 'upgraded': [],
+                                                        'skipped': [], 'failed': []}, []))
+
+    def test_vc_runtime_shares_the_uac_prompt(self):
         run = self.scoop()
-        with patch.object(bootstrap, 'VCRUNTIME', Path(run.scoop) / 'vcruntime140.dll'):
-            run.vc_runtime(['bat'])
-            self.assertEqual(run.summary['failed'], [])
-            run.vc_runtime(['bat', 'extras/vcredist2022'])
-            self.assertIn('scoop uninstall vcredist2022; scoop install extras/vcredist2022', run.summary['failed'][0])
-            run.summary['failed'].clear()
+        installer = run.app('extras/vcredist2022') / "vc_redist.x64.exe"
+        installer.parent.mkdir(parents=True)
+        installer.write_text('', encoding='ascii')
+        with patch.object(bootstrap, 'VCRUNTIME', run.scoop / 'vcruntime140.dll'):
+            self.assertIsNone(run.vc_runtime(['bat']))
+            label, command, check = run.vc_runtime(['bat', 'extras/vcredist2022'])
+            self.assertEqual((label, check()), ('VC++ runtime', False))
+            self.assertEqual(command, f"Start-Process -Wait '{installer}' '/install /quiet /norestart'")
             bootstrap.VCRUNTIME.write_text('', encoding='ascii')
-            run.vc_runtime(['bat', 'extras/vcredist2022'])
-        self.assertEqual(run.summary['failed'], [])
+            self.assertIsNone(run.vc_runtime(['bat', 'extras/vcredist2022']))
+        summary, commands = self.check_ssh(agent=(4, 1), names=['extras/vcredist2022'], vcredist=True)
+        self.assertEqual(summary['installed'], ['VC++ runtime', 'ssh-agent service'])
+        self.assertEqual(len(commands), 1)
+        self.assertIn("'/install /quiet /norestart'; " + bootstrap.AGENT_ENABLE, commands[0][-1])
 
     def test_missing_terminal_is_reported(self):
         run = self.scoop()

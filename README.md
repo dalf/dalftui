@@ -84,7 +84,10 @@ listed packages with dnf or apt, installs or upgrades Oh My Posh, mise and uv, u
 `--dry-run`, `--tmux-only`. See [New machine](docs/install.md#new-machine-fedora-debian-ubuntu).
 
 On Windows, in a non-elevated Windows PowerShell, the same bootstrap uses Scoop
-([packages/windows.txt](packages/windows.txt)) and then runs `install.cmd`:
+([packages/windows.txt](packages/windows.txt)), installs the VC++
+runtime and enables the Windows `ssh-agent` service (one UAC prompt, only while
+needed), points Git at Windows OpenSSH, and
+then runs `install.cmd`:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; uv run --no-project --python ">=3.11" --script "$HOME\code\dalftui\bootstrap"

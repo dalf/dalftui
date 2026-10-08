@@ -191,14 +191,27 @@ Each run updates the checkout as on Linux, adds the `extras` bucket when it is
 missing, runs `scoop update`, installs each missing app with its own
 `scoop install`, and runs `scoop update APP` for each listed app that its bucket
 has newer; other apps are not updated. Installed versions, not Scoop's exit
-status, decide the result. It then checks the Windows OpenSSH client and
-Windows Terminal, runs `install.cmd`, and prints the same summary. The log is
+status, decide the result. It then sets up OpenSSH, checks Windows Terminal,
+runs `install.cmd`, and prints the same summary. The log is
 `%LOCALAPPDATA%\dalftui\bootstrap.log`. A dry run changes nothing, compares
 with the buckets as of the last `scoop update`, and does not run `install.cmd`.
 
-Not installed, only reported: the Windows OpenSSH client (adding it needs an
-administrator: `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`;
-`Tag dalftui` needs 9.4+), and Windows Terminal (from the Microsoft Store on
+Some steps need an administrator once. Bootstrap prints them and runs them
+through `gsudo` in one UAC prompt, each only when needed: the VC++ runtime that
+bat and mise need (Scoop's `vcredist2022` cannot run its installer elevated, so
+bootstrap runs the `vc_redist.x64.exe` it downloaded), `Add-WindowsCapability
+-Online -Name OpenSSH.Client~~~~0.0.1.0` when no client is installed, and
+`Set-Service ssh-agent -StartupType Automatic; Start-Service ssh-agent`. On a standard account the prompt asks for an
+administrator's password. Without a desktop (over SSH, or in CI) it changes
+nothing and lists what is left to run. The client in `C:\Program Files\OpenSSH` (winget
+`Microsoft.OpenSSH.Preview`) counts as installed. `Tag dalftui` needs 9.4+.
+
+Bootstrap also sets `git config --global core.sshCommand` to that Windows
+`ssh.exe` when it is unset, so Git uses the agent's keys; an existing value is
+kept and listed. See [manual configuration](manual-configuration.md#windows-ssh-agent-and-forwarding)
+for loading keys and forwarding them.
+
+Not installed, only reported: Windows Terminal (from the Microsoft Store on
 Windows 10; open it once so setup finds its settings). Scoop cannot update an
 app that is running: the uv running bootstrap, or PowerShell 7 when you run
 bootstrap from it, is reported as in use; close it and run `scoop update uv`
