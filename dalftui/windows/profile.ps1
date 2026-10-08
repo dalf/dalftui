@@ -260,20 +260,22 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
         -BriefDescription 'DalftuiSshPicker' `
         -Description 'Choose an SSH host with dssh; keep the input line' `
         -ScriptBlock {
+            [Console]::WriteLine()  # Output and errors go below the input line, not under the redrawn prompt.
             $previousExitCode = $global:LASTEXITCODE
             try { Start-DalftuiSshPicker }
             catch { [Console]::Error.WriteLine('dssh: ' + $_.Exception.Message) }
             finally { $global:LASTEXITCODE = $previousExitCode }
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, [Console]::CursorTop)
         }
     Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F3' `
         -BriefDescription 'DalftuiOpenFolderInCode' `
         -Description 'Open the current directory in VS Code; keep the input line' `
         -ScriptBlock {
+            [Console]::WriteLine()  # Output and errors go below the input line, not under the redrawn prompt.
             $previousExitCode = $global:LASTEXITCODE
             try { Open-DalftuiCurrentFolder | Out-Host }
             catch { [Console]::Error.WriteLine('VS Code: ' + $_.Exception.Message) }
             finally { $global:LASTEXITCODE = $previousExitCode }
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, [Console]::CursorTop)
         }
 }
