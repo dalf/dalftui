@@ -23,7 +23,7 @@ wget
 nano
 tar
 diffutils
-gh
+gh                 # from GitHub's repository that bootstrap adds
 htop
 mc
 strace

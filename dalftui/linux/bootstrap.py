@@ -38,6 +38,16 @@ DVC_KEYRING = Path('/usr/share/keyrings/iterative.asc')
 DVC_SOURCES = Path('/etc/apt/sources.list.d/dvc.sources')
 DVC_SOURCES_TEXT = ('Types: deb\nURIs: https://dvc.org/deb/\nSuites: stable\nComponents: main\n'
                     f'Architectures: amd64\nSigned-By: {DVC_KEYRING}\n')
+# GitHub's documented setup: https://github.com/cli/cli/blob/trunk/docs/install_linux.md; distro gh is old or broken.
+# Its instructions write github-cli.list and gh-cli.repo, which the repository step then keeps.
+GH_KEY = 'https://cli.github.com/packages/githubcli-archive-keyring.asc'
+GH_REPO = Path('/etc/yum.repos.d/gh-cli.repo')
+GH_REPO_TEXT = ('[gh-cli]\nname=packages for the GitHub CLI\nbaseurl=https://cli.github.com/packages/rpm\n'
+                f'enabled=1\ngpgcheck=1\ngpgkey={GH_KEY}\n')
+GH_KEYRING = Path('/usr/share/keyrings/githubcli-archive-keyring.asc')
+GH_SOURCES = Path('/etc/apt/sources.list.d/github-cli.sources')
+GH_SOURCES_TEXT = ('Types: deb\nURIs: https://cli.github.com/packages\nSuites: stable\nComponents: main\n'
+                   f'Signed-By: {GH_KEYRING}\n')
 BREWFILE = PACKAGES / 'Brewfile'
 BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
 BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
@@ -285,6 +295,13 @@ class Bootstrap:
         else:
             self.repository('DVC repository', DVC_RPM_KEY, DVC_REPO, DVC_REPO_TEXT)
 
+    def gh_repo(self):
+        """Add GitHub CLI's repository once, so dnf or apt installs and upgrades the gh package."""
+        if self.apt:
+            self.repository('GitHub CLI repository', GH_KEY, GH_SOURCES, GH_SOURCES_TEXT, GH_KEYRING)
+        else:
+            self.repository('GitHub CLI repository', GH_KEY, GH_REPO, GH_REPO_TEXT)
+
     def repository(self, name, key, path, text, keyring=None):
         """Write a repository file once; apt gets the key in `keyring`, dnf imports it with rpm."""
         # A .list: an older apt setup; a second source with another Signed-By makes apt fail.
@@ -460,8 +477,9 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     with run.step('Checkout'):
         run.update_repo(list(argv))
     packages = read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only)
-    if not tmux_only:
-        with run.step('Repositories'):
+    with run.step('Repositories'):
+        run.gh_repo()
+        if not tmux_only:
             run.vscode_repo()
             if platform.machine() == 'x86_64':
                 run.dvc_repo()

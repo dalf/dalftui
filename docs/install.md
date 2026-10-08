@@ -134,7 +134,11 @@ Each run, in order (a failed step does not stop the next ones):
 1. Updates its own checkout with `git pull --ff-only` and restarts if new
    commits arrived. It skips this on a detached HEAD, without an upstream branch,
    or with uncommitted changes to tracked files.
-2. Asks for the sudo password once and, unless `--tmux-only`, adds Microsoft's
+2. Asks for the sudo password once and adds
+   [GitHub CLI's repository](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
+   (its key and `/etc/yum.repos.d/gh-cli.repo`, or `/etc/apt/sources.list.d/github-cli.sources`
+   on apt) when that file, or the `github-cli.list` from GitHub's instructions, is missing; the
+   distribution's `gh` is old or broken and is upgraded from it. Unless `--tmux-only`, it adds Microsoft's
    [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
    and `/etc/yum.repos.d/vscode.repo`, or `/etc/apt/sources.list.d/vscode.sources`
    on apt) when that file is missing. A `code` package installed from a download

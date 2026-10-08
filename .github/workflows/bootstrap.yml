@@ -7,7 +7,7 @@ on:
   pull_request:
     paths: [bootstrap, bootstrap.cmd, packages/**, dalftui/linux/bootstrap.py, dalftui/windows/bootstrap.py, .github/workflows/bootstrap.yml]
   schedule:
-    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu, Scoop and Homebrew package names, the VS Code and DVC repositories and the oh-my-posh, mise and uv installers can change.
+    - cron: '17 5 * * 1'  # Weekly: Fedora, Debian, Ubuntu, Scoop and Homebrew package names, the GitHub CLI, VS Code and DVC repositories and the oh-my-posh, mise and uv installers can change.
   workflow_dispatch:
 
 permissions:
@@ -97,6 +97,13 @@ jobs:
             test -L ~/.config/dalftui
             cd ~/code/dalftui && ./install ${{ matrix.flags }} | grep "Already installed"
             test -s ~/.local/state/dalftui/bootstrap.log'
+      - name: gh comes from GitHub's repository
+        run: |
+          if command -v dnf; then
+            dnf repoquery --installed --qf '%{from_repo}\n' gh | grep -x gh-cli
+          else
+            apt-cache policy gh | grep -A1 '^ \*\*\* ' | grep -F https://cli.github.com/packages
+          fi
       - name: Desktop tools answer
         if: matrix.desktop
         run: |

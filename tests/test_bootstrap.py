@@ -313,11 +313,29 @@ class StartTests(unittest.TestCase):
                     patch.object(bootstrap, 'Bootstrap') as bootstrap_class:
                 bootstrap.bootstrap()
             run = bootstrap_class.return_value
+            run.gh_repo.assert_called_once_with()
             run.vscode_repo.assert_called_once_with()
             self.assertEqual(run.dvc_repo.called, dvc)
             self.assertEqual('dvc' in run.packages.call_args.args[0], dvc)
             skipped = [call.args for call in run.add.call_args_list]
             self.assertEqual(skipped, [] if dvc else [('skipped', ['DVC repository and dvc (x86-64 only)'])])
+
+    def test_tmux_only_adds_only_the_github_cli_repository(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(bootstrap.os, 'geteuid', return_value=1000), \
+                patch.object(bootstrap.sys, 'platform', 'linux'), \
+                patch.object(bootstrap, 'family', return_value='debian'), \
+                patch.object(bootstrap.shutil, 'which', return_value='/usr/bin/sudo'), \
+                patch.object(bootstrap, 'state_directory', return_value=Path(directory)), \
+                patch.dict(os.environ, {'PATH': os.environ.get('PATH', '')}), \
+                patch.object(bootstrap, 'Bootstrap') as bootstrap_class:
+            bootstrap.bootstrap(tmux_only=True)
+        run = bootstrap_class.return_value
+        run.gh_repo.assert_called_once_with()
+        run.vscode_repo.assert_not_called()
+        run.dvc_repo.assert_not_called()
+        self.assertIn('gh', run.packages.call_args.args[0])
+        self.assertEqual([call.args[0] for call in run.step.call_args_list][1:3], ['Repositories', 'Packages'])
 
     def test_macos_refuses_root_without_mentioning_sudo(self):
         with patch.object(bootstrap.os, 'geteuid', return_value=0), patch.object(bootstrap.sys, 'platform', 'darwin'), \
@@ -413,6 +431,7 @@ class UserToolTests(unittest.TestCase):
 REPOSITORIES = (
     ('vscode_repo', 'VS Code repository', 'vscode', 'VSCODE_KEY', 'VSCODE_KEY', '/usr/share/keyrings/microsoft.asc'),
     ('dvc_repo', 'DVC repository', 'dvc', 'DVC_RPM_KEY', 'DVC_APT_KEY', '/usr/share/keyrings/iterative.asc'),
+    ('gh_repo', 'GitHub CLI repository', 'gh', 'GH_KEY', 'GH_KEY', '/usr/share/keyrings/githubcli-archive-keyring.asc'),
 )
 
 
@@ -438,6 +457,11 @@ class RepositoryStepTests(unittest.TestCase):
         self.assertIn('baseurl=https://packages.microsoft.com/yumrepos/vscode\n', bootstrap.VSCODE_REPO_TEXT)
         self.assertIn('baseurl=https://dvc.org/rpm/\n', bootstrap.DVC_REPO_TEXT)
         self.assertIn('gpgcheck=1\ngpgkey=https://dvc.org/rpm/iterative.asc\n', bootstrap.DVC_REPO_TEXT)
+        self.assertEqual(bootstrap.GH_REPO_TEXT, '[gh-cli]\nname=packages for the GitHub CLI\n'
+                         'baseurl=https://cli.github.com/packages/rpm\nenabled=1\ngpgcheck=1\n'
+                         'gpgkey=https://cli.github.com/packages/githubcli-archive-keyring.asc\n')
+        # GitHub's own instructions create this file; it is kept.
+        self.assertEqual(bootstrap.GH_REPO, Path('/etc/yum.repos.d/gh-cli.repo'))
 
     def test_existing_repository_and_dry_run_change_nothing(self):
         for method, name, stem, _, _, _ in REPOSITORIES:
@@ -474,6 +498,11 @@ class AptRepositoryStepTests(unittest.TestCase):
                 self.assertEqual(run.summary['installed'], [name])
         self.assertEqual(bootstrap.DVC_SOURCES_TEXT, 'Types: deb\nURIs: https://dvc.org/deb/\nSuites: stable\n'
                          'Components: main\nArchitectures: amd64\nSigned-By: /usr/share/keyrings/iterative.asc\n')
+        self.assertEqual(bootstrap.GH_SOURCES_TEXT, 'Types: deb\nURIs: https://cli.github.com/packages\n'
+                         'Suites: stable\nComponents: main\n'
+                         'Signed-By: /usr/share/keyrings/githubcli-archive-keyring.asc\n')
+        # GitHub's own instructions write github-cli.list, which the step keeps.
+        self.assertEqual(bootstrap.GH_SOURCES.with_suffix('.list'), Path('/etc/apt/sources.list.d/github-cli.list'))
 
     def test_existing_sources_or_older_list_change_nothing(self):
         for method, name, stem, _, _, _ in REPOSITORIES:
