@@ -123,3 +123,10 @@ opens the selected connection action in a new Alacritty window; `--pick` and
 Windows use the current terminal. Plain mode skips dalftui's tmux policy; your
 own shell startup files still run. Editor integration follows the same installed
 remote compatibility checks as a normal connection.
+
+The system overview also runs over plain SSH, with nothing installed on the
+server (`status_view=compact` gives the short form shown in ops mode):
+
+```sh
+ssh HOST 'status_view=compact timeout --kill-after=5s 10s sh -s' < dalftui/linux/system-status.sh
+```

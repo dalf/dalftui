@@ -1,317 +1,412 @@
-# dalftui
+# dalftui: overview, installation, and updates
 
-My terminal setup. On Linux: Alacritty, tmux with rounded tabs, an Oh My Posh
-prompt, an SSH host picker, and a key to open the current folder in VS Code,
-also on a remote server. On Windows: the same prompt, picker and VS Code key
-in PowerShell and Windows Terminal, plus a few Unix-like commands. On macOS
-(Terminal.app or iTerm2, zsh): tmux, the prompt and the VS Code key, tested
-only on CI so far.
+dalftui is a personal terminal environment stored in Git: configuration files
+plus Python, shell, and PowerShell programs that make existing tools work
+together. Its purpose is to give local and remote terminals consistent
+shortcuts, appearance, SSH access, and VS Code integration.
 
-## Try one thing
+## What it does
 
-You do not need to install everything. Clone the repo (the examples use
-`~/code/dalftui`), pick a feature below and follow its **Take it alone** step.
-Each feature says what it needs, where it works, and how to turn parts off.
+| Layer | Tool | Role |
+| --- | --- | --- |
+| Terminal window | Alacritty on Linux; Windows Terminal on Windows; Terminal.app or iTerm2 on macOS | Displays text and handles keyboard input and the clipboard |
+| Sessions, tabs, and splits | tmux on Linux and macOS, including Linux SSH servers | Organizes terminals and keeps programs running after detaching |
+| Command shell | bash on Linux, PowerShell on Windows, zsh on macOS | Runs commands |
+| Prompt | Oh My Posh | Shows the directory, Git state, environments, command duration, and failures |
+| Remote access | OpenSSH plus dalftui's host picker | Selects servers and starts remote sessions |
+| Editor integration | VS Code plus dalftui's bridge | Opens the active terminal pane's folder in VS Code |
 
-## Install everything
+The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
+contains *windows*, displayed like tabs; each window contains one or more
+*panes*, the splits. Windows uses local PowerShell without local tmux; tmux
+runs on the Linux server when connecting remotely.
 
-Linux desktop. Needs Python 3.11+, [uv](https://docs.astral.sh/uv/), Alacritty 0.14+, tmux 3.2+,
-OpenSSH 9.4+, Git, `less` and [Oh My Posh](https://ohmyposh.dev/docs/installation/linux):
+The intended everyday workflow on a configured Linux desktop is (keys in
+[Shortcuts](#shortcuts)):
+
+1. Open Alacritty. It creates or attaches to a tmux session.
+2. Work in tmux tabs and split panes.
+3. Choose an SSH host. The connection opens in a separate Alacritty window,
+   using remote tmux when available and a login shell otherwise.
+4. Open the active pane's folder in VS Code. For a remote pane with editor
+   integration available, the request travels back to the desktop and opens
+   that folder through VS Code Remote - SSH.
+
+### Shortcuts
+
+`Ctrl+B` `c` means press `Ctrl+B`, release, then `c`.
+
+| Action | tmux (any terminal, incl. SSH) | Alacritty (Linux) | Windows Terminal | macOS (Terminal.app / iTerm2) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Shortcut guide | `Ctrl+B` `F1` | `Ctrl+Shift+F1` or `Win+Shift+H` | — | tmux key; `Ctrl+Shift+F1` needs a Terminal.app key mapping (iTerm2 untested) | Needs dalftui's tmux config |
+| Pick SSH host | `Ctrl+B` `F2` | `Ctrl+Shift+F2` | `Ctrl+Shift+F2`, or `dssh` | — (F2 unavailable) | tmux key: Linux desktop profile only; opens a new window or tab |
+| Open folder in VS Code | `Ctrl+B` `F3` | `Ctrl+Shift+F3` | `Ctrl+Shift+F3` | tmux key; `Ctrl+Shift+F3` needs a Terminal.app key mapping (iTerm2 untested) | Remote needs dalftui on the server and a picker or `dssh` connection; macOS opens local folders only |
+| New tab | `Ctrl+B` `c` | `Ctrl+Shift+T` | — (`Ctrl+Shift+T` opens a Windows Terminal tab) | tmux key (`Cmd+T` opens a Terminal.app tab) | |
+| Previous / next tab | `Ctrl+B` `p` / `n` | `Ctrl+PgUp` / `Ctrl+PgDn` | — | tmux key | |
+| Rename tab | `Ctrl+B` `,` | — | — | tmux key | |
+| Close tab | `Ctrl+B` `&` | — | — | tmux key | Asks for confirmation |
+| Split side by side | `Ctrl+B` `%` | `Ctrl+Shift+D` | — (`Ctrl+Shift+D` duplicates the Windows Terminal tab) | tmux key | |
+| Split top / bottom | `Ctrl+B` `"` | `Ctrl+Shift+E` | — | tmux key | |
+| Move to pane | `Ctrl+B` arrow | `Ctrl+Alt+arrow` | `Ctrl+Alt+Up/Down/Right` (dssh tabs; `Ctrl+Alt+Left` is taken by Windows Terminal) | tmux key; `Ctrl+Alt+arrow` needs Option as Meta | `Ctrl+Alt+arrow` needs dalftui's tmux config |
+| Resize pane | `Ctrl+B` `Ctrl+arrow` | `Ctrl+Alt+Shift+arrow` (5 cells) | `Ctrl+Alt+Shift+arrow` (dssh tabs) | tmux key; `Ctrl+Alt+Shift+arrow` needs Option as Meta; `Ctrl+Left/Right` switch Mission Control spaces | `Ctrl+Alt+Shift+arrow` needs dalftui's tmux config |
+| Zoom pane / restore | `Ctrl+B` `z` | — | — | tmux key | |
+| Close pane | `Ctrl+B` `x` | — | — | tmux key | Asks for confirmation |
+| Scrollback | `Ctrl+B` `PgUp` | `Shift+PgUp` | `Shift+PgUp` (dssh tabs) | tmux key | `Esc` leaves; `Shift+PgUp` needs dalftui's tmux config |
+| Search history | `Ctrl+F`, text, `Enter` while in scrollback | — | — | tmux key | Needs dalftui's tmux config |
+| Detach | `Ctrl+B` `d` | — | — | tmux key | Closes the window or tab; the session keeps running |
+| tmux key list | `Ctrl+B` `?` | — | — | tmux key | |
+
+In Windows Terminal, tmux keys apply in `dssh` tabs, where tmux runs on the
+server. Apple keyboards need Fn for F-keys.
+
+SSH picker keys:
+
+| Key | Action |
+| --- | --- |
+| Type | Filter hosts |
+| Arrows, `Home` / `End`, `PgUp` / `PgDn` | Select |
+| `Enter` | Connect |
+| `Ctrl+O` | Connect to exactly what was typed: hostname, IP or `user@host` |
+| `Ctrl+U` | Clear the filter |
+| `F4` | Connection details (`ssh -G`) |
+| `F5` | Login shell without tmux |
+| `F6` | Ops mode: process monitor, journal and shell |
+| `F7` | Choose a saved check, then a shell |
+| `Esc` | Cancel, or go back from `F4` / `F7` |
+
+PowerShell prompt keys (Windows):
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+Left` / `Ctrl+Right` | Move by word |
+| `Ctrl+B` `Ctrl+B` | Move back one character |
+| `Ctrl+Shift+F3` or `Ctrl+B` `F3` | Open the folder in VS Code, keeping the typed line |
+| Other keys | Emacs editing, as in bash |
+
+Select, copy, paste:
+
+- **Alacritty:** `Shift`+drag selects and copies; `Ctrl+Shift+C` / `Ctrl+Shift+V`.
+  `Shift+Insert` or `Shift`+middle click pastes the primary selection.
+- **Windows Terminal:** `Shift`+drag, then `Ctrl+Shift+C` (select first, or it
+  may reach the pane as `Ctrl+C`); `Ctrl+Shift+V` pastes.
+- **macOS:** `Fn`+drag (Terminal.app) or `Option`+drag (iTerm2), then `Cmd+C` / `Cmd+V`.
+- **tmux:** a plain drag in a shell only shows a hint; mouse programs such as
+  htop still receive it. To select inside one split pane, zoom it first with `Ctrl+B` `z`.
+
+The setup also provides rounded tmux tabs, Git-aware titles, scrollback
+search, and optional status circles from the separately installed
+claude-tabstatus project. Ops mode and checks: [docs/ops-mode.md](docs/ops-mode.md).
+
+The Oh My Posh prompt is shared by bash, zsh and PowerShell. It shows
+`user@host` only over SSH, the path, the Python environment, Git branch and
+changes, run time over 2 s, and failed exit codes. The window title is
+`repo@branch` in Git, otherwise the path; on Windows it starts with 🛡️ when
+elevated. The prompt also activates mise when it is installed.
+
+On Windows, the PowerShell profile also adds a few Unix-like commands and the
+`dssh` command (open the SSH picker, or `dssh HOST` to connect directly), and setup
+adds a **Windows PowerShell 7 (Admin)** Windows Terminal profile. Setup also
+sets VS Code's terminal font on Linux, Windows and macOS. See
+[Windows](docs/install.md#windows).
+
+## Built on standard tools
+
+The building blocks are conventional: Git-managed terminal settings, a
+customized prompt, tmux sessions, OpenSSH configuration, and VS Code Remote -
+SSH. SSH aliases, users, ports, keys, and jump hosts remain in the user's SSH
+configuration. The repository's installer does not populate that configuration.
+
+The implementation uses shared logic with operating-system adapters, unit and
+integration tests, and GitHub Actions.
+
+## What works differently
+
+- **Opening a remote folder in VS Code goes through dalftui's own bridge.** A
+  remote pane sends an authenticated request through SSH forwarding to a
+  temporary desktop listener. The desktop launches VS Code with a fixed SSH destination. Linux and
+  macOS desktops use Unix sockets by default; Windows desktops use TCP.
+  Credentials belong to the connection, so two desktops attached to the same
+  tmux session can open folders on their respective desktops. The bridge has a
+  versioned protocol, cleanup logic, timeouts, and frozen historical
+  compatibility tests.
+- **SSH performs an extra setup connection.** Before the interactive
+  connection, dalftui checks remote editor compatibility and prepares
+  credentials when supported. Password authentication can therefore ask twice.
+  Ordinary SSH/tmux access works without dalftui installed remotely; the
+  integrated remote editor shortcut requires a compatible remote installation.
+- **The checkout stays part of the running setup.** Python launchers run
+  directly from it without a pip installation. Installed links and configuration
+  loaders point back to the checkout. Many shortcuts use `uv run --no-project`
+  to run a suitable Python. Keep the checkout at a stable path.
+- **Alacritty shortcuts become tmux keystrokes.** This lets familiar tab and
+  split keys work over SSH as well. In Windows Terminal, only `Ctrl+Shift+F3` is
+  sent to tmux. Mouse selection is opinionated: a plain drag in a shell displays
+  a hint (over SSH, only with dalftui on the server); Shift+drag selects text on
+  Linux and Windows.
+- **Startup avoids automatically sharing an occupied session.** With no tmux
+  session, it creates one. With one detached session, it reattaches. With one
+  attached session, it creates another. With several, it asks which to use.
+
+## Installation and update strategy
+
+**Use bootstrap for a full setup, and rerun it for full updates.** A successful
+bootstrap run installs or upgrades the listed tools and applies dalftui's
+configuration. You do not need to run the installer separately afterward.
+
+| Platform or profile | Bootstrap command from an existing checkout | What it runs afterward |
+| --- | --- | --- |
+| Linux desktop | `./bootstrap` | `./install`, then `./bin/reload` |
+| Linux server or tmux-only | `./bootstrap --tmux-only` | `./install --tmux-only`, then `./bin/reload` |
+| Windows | `.\bootstrap.cmd` | `install.cmd`; open a new PowerShell session afterward |
+| macOS | `./bootstrap` | `./install` in macOS mode, then `./bin/reload` |
+
+Remote folder opening also requires VS Code's Remote - SSH extension on the
+desktop, dalftui installed on the Linux server, a connection made through the
+picker or `dssh` (plain `ssh` has no bridge), and an sshd allowing Unix-socket
+forwarding (Linux or macOS desktop) or remote TCP forwarding (Windows desktop).
+Add your SSH hosts with `Tag dalftui` ([example](#personal-configuration-and-backups)).
+
+Bootstrap includes the author's personal tool selection, beyond dalftui's
+minimum requirements. Review the appropriate list before using it:
+
+- [Fedora packages](packages/fedora.txt)
+- [Debian and Ubuntu packages](packages/debian.txt)
+- [Windows Scoop apps](packages/windows.txt)
+- [macOS Brewfile](packages/Brewfile)
+
+Bootstrap first runs `git pull --ff-only` when the checkout is clean. Check its
+final summary: a failed step does not stop later steps, and it exits nonzero
+when failures remain.
+
+To install without bootstrap, when the tools are already present, or for the
+Windows installer options (`-VSCodePath`, `-ProfilePath`, `-TerminalSettingsPath`,
+`-SkipTerminal`), see the [installation reference](docs/install.md).
+
+### Linux desktop: Fedora or Debian 13
+
+The desktop requirements include Alacritty 0.14+, tmux 3.2+, and OpenSSH 9.4+
+for the tagged host picker. The documented bootstrap coverage includes Fedora
+44 and Debian 13. Debian 12 and Ubuntu 24.04 need the tmux-only path below
+because their packaged desktop tools do not meet all requirements. Ubuntu
+22.04 is refused because its Python is 3.10.
+
+Start with Python 3.11+, Git, and sudo available. On Fedora, install those
+prerequisites with:
+
+```sh
+sudo dnf install -y python3 git
+```
+
+On Debian 13:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y python3 git
+```
+
+Debian installed with a root password gives your user no sudo. Fix that first,
+then log out and back in:
+
+```sh
+su -c "apt-get install -y sudo && usermod -aG sudo $USER"
+```
+
+Clone once if the checkout does not already exist:
+
+```sh
+git clone https://github.com/dalf/dalftui.git ~/code/dalftui
+```
+
+Then preview and run bootstrap as your normal user; it asks for sudo when needed:
 
 ```sh
 cd ~/code/dalftui
-./install --dry-run
-./install
-./bin/reload
+./bootstrap --dry-run
+./bootstrap
 ```
 
-Linux server (tmux, prompt and shortcut guide only; Python 3.11+, uv, tmux 3.2+,
-Git, `less`, Oh My Posh): `./install --tmux-only`.
+Bootstrap installs or upgrades the listed packages, Oh My Posh, mise, and uv.
+Desktop mode also sets up Microsoft's VS Code package repository. Installation
+then configures Alacritty, tmux, the prompt, and installs Hack Nerd Font. Open a new
+Alacritty window afterward.
 
-Windows. Needs uv (`scoop install uv`), Windows OpenSSH, Oh My Posh
-(`winget install JanDeDobbeleer.OhMyPosh`) and VS Code with Remote - SSH:
+### Linux server or tmux-only setup
+
+Use this on a Linux server, or when you want tmux and the prompt without the
+Alacritty desktop setup. Python 3.11+, Git, and sudo must exist first. On
+Debian or Ubuntu:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y python3 git
+```
+
+On Fedora, use `sudo dnf install -y python3 git` instead. Clone once if needed,
+then run:
+
+```sh
+git clone https://github.com/dalf/dalftui.git ~/code/dalftui
+cd ~/code/dalftui
+./bootstrap --tmux-only --dry-run
+./bootstrap --tmux-only
+```
+
+On an existing checkout, skip the clone. This skips the `[desktop]` package
+section and VS Code repository setup, configures tmux and the bash prompt,
+leaves Alacritty alone, and installs no font; the terminal you connect from
+needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the tmux-only profile; `./bootstrap`
+does not, so keep passing `--tmux-only`.
+
+Remote tmux startup itself does not require a dalftui installation. Install on
+the server when you want its tmux theme, shortcuts, prompt, and the remote half
+of the VS Code bridge.
+
+### Windows 10 or 11
+
+Use a normal, non-elevated Windows PowerShell session. Install Scoop, Git, and
+uv first if they are missing:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+irm get.scoop.sh | iex
+scoop install git uv
+```
+
+**Windows Terminal is not installed by bootstrap.** Install it separately if
+missing and open it once so setup can find its settings. The SSH picker needs
+OpenSSH 9.4+ for `Tag dalftui`; providing a Windows OpenSSH client alone does
+not guarantee that version. Add the Remote - SSH extension to VS Code for
+remote folder opening.
+
+Clone once, then preview and run bootstrap:
 
 ```powershell
 git clone https://github.com/dalf/dalftui.git "$HOME\code\dalftui"
-cd "$HOME\code\dalftui"
-.\install.cmd
+& "$HOME\code\dalftui\bootstrap.cmd" --dry-run
+& "$HOME\code\dalftui\bootstrap.cmd"
 ```
 
-Options: `-VSCodePath` (portable VS Code), `-ProfilePath` (one profile only),
-`-TerminalSettingsPath`, `-SkipTerminal`. If PowerShell then says scripts are
-disabled, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+Skip the clone on an existing checkout. uv supplies Python when needed.
+Bootstrap installs or upgrades the listed Scoop apps, sets up Windows OpenSSH
+and its agent, sets Git's global `core.sshCommand` to Windows `ssh.exe` when
+unset, and runs `install.cmd` to configure PowerShell and Terminal
+integration. Administrator steps (VC++ runtime, missing OpenSSH client,
+ssh-agent service) share one gsudo UAC prompt; without a desktop session it
+lists them instead. Bootstrap itself must remain
+non-elevated.
 
-macOS (Terminal.app or iTerm2, zsh; no Alacritty). Needs uv, tmux 3.2+ and Oh
-My Posh, from Homebrew: `brew install tmux oh-my-posh uv`. Then `./install --dry-run`,
-`./install`, `./bin/reload`; with Apple's Python 3.9 they run themselves through uv. It sets up tmux, the
-zsh prompt, Hack Nerd Font and VS Code's terminal font. Tested on macOS CI only;
-see [macOS](docs/install.md#macos).
+Open a new PowerShell session afterward.
 
-With [mise](docs/development.md#repository-tasks):
-`mise run install:linux -- --dry-run`, `mise run install:windows`.
+Scoop cannot update an app that is running. If bootstrap reports PowerShell 7
+as in use, close it and run `scoop update pwsh` from Windows PowerShell.
 
-Linux and macOS: existing files are backed up to `~/.local/state/dalftui/backups/`
-before they are replaced. Personal overrides go in `~/.config/tmux/local.conf`
-and `~/.config/alacritty/local.toml`; installs keep them. Windows: the profile,
-Terminal `settings.json` and VS Code `settings.json` are copied to
-`<file>.dalftui-<id>.bak` next to the original.
+### macOS: Terminal.app or iTerm2 with zsh
 
-Update: `git pull --ff-only && ./bin/reload` on Linux and macOS. On Windows,
-`git pull --ff-only`, then open a new PowerShell session.
-
-Uninstall: `./install --uninstall` on Linux and macOS, `.\install.cmd -Uninstall` on Windows
-(preview with `--dry-run` or `-DryRun`); see [Uninstall](docs/install.md#uninstall).
-
-Details: [docs/install.md](docs/install.md).
-
-## Set up a new machine (Fedora, Debian, Ubuntu, Windows, macOS)
-
-Opt-in, and the package lists are my personal tool set: edit
-[packages/fedora.txt](packages/fedora.txt) or [packages/debian.txt](packages/debian.txt)
-before using it. On a new Fedora machine, or a Debian or Ubuntu server:
+Homebrew and uv must exist before bootstrap. On a new Apple Silicon Mac:
 
 ```sh
-sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
-sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+eval "$(/opt/homebrew/bin/brew shellenv)"
+brew install uv
+git clone https://github.com/dalf/dalftui.git ~/code/dalftui
+cd ~/code/dalftui
+./bootstrap --dry-run
+./bootstrap
 ```
 
-The desktop mode works on Fedora and Debian 13; Debian 12 and Ubuntu 24.04 need
-`--tmux-only`; Ubuntu 22.04 is refused (Python 3.10).
+Skip the prerequisite setup and clone when already present. Follow Homebrew's
+instructions to add its shell environment to `~/.zprofile` for future shells.
+The `/opt/homebrew` example is for Apple Silicon; the code also recognizes
+Intel Homebrew at `/usr/local`, but that path is documented as untested.
 
-`./bootstrap` adds Microsoft's VS Code repository, installs and upgrades the
-listed packages with dnf or apt, installs or upgrades Oh My Posh, mise and uv, updates the checkout with `git pull --ff-only`, then runs
-`./install` and `./bin/reload`. Run it again at any time to update. Options:
-`--dry-run`, `--tmux-only`. See [New machine](docs/install.md#new-machine-fedora-debian-ubuntu).
+Bootstrap runs `brew update` and `brew bundle` for `packages/Brewfile`, then
+installation and reload. It configures tmux and the zsh prompt, installs Hack
+Nerd Font, and sets VS Code's terminal font. Select Hack Nerd Font yourself in
+Terminal.app or iTerm2. If Apple's Python is too old, `bootstrap`, `install`,
+and `bin/reload` rerun themselves through uv; the other launchers always use
+uv. Run bootstrap as your normal user; `--tmux-only` is
+refused by the macOS bootstrap.
 
-On Windows, in a non-elevated Windows PowerShell, the same bootstrap uses Scoop
-([packages/windows.txt](packages/windows.txt)), installs the VC++
-runtime and enables the Windows `ssh-agent` service (one UAC prompt, only while
-needed), points Git at Windows OpenSSH, and
-then runs `install.cmd`:
+macOS support has been exercised on CI; interactive keys and selection are
+documented as untested in real terminals. Local VS Code opening uses `code`
+(CI-tested only with a stand-in). Remote editor forwarding from a Mac desktop is
+untested, and macOS is not a supported server target for the bridge.
+
+## Applying repository changes without upgrading tools
+
+For a lighter update that only pulls repository changes, use the following.
+This is useful when the required tools are already installed and current.
+
+On Linux, including a server, or macOS:
+
+```sh
+cd ~/code/dalftui
+git pull --ff-only
+./bin/reload
+```
+
+If the repository was updated by another method, only `./bin/reload` is needed
+for ordinary tmux and Alacritty configuration changes. Reload preserves running
+pane programs. New shell sessions load prompt changes; startup settings apply
+to new terminal windows. Removing a tmux binding from a file does not remove
+an already loaded binding automatically.
+
+On Windows:
 
 ```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force; irm get.scoop.sh | iex; scoop install git uv; git clone https://github.com/dalf/dalftui "$HOME\code\dalftui"; & "$HOME\code\dalftui\bootstrap.cmd"
+Set-Location "$HOME\code\dalftui"
+git pull --ff-only
 ```
 
-Rerun `& "$HOME\code\dalftui\bootstrap.cmd"` to update. See [New machine (Windows)](docs/install.md#new-machine-windows).
+Then open a new PowerShell session, or reload the current profile with
+`. $PROFILE`. Reconnect SSH sessions to use new bridge and connection code.
 
-On macOS, Homebrew's installer asks for your password once; `./bootstrap` then
-installs and upgrades [packages/Brewfile](packages/Brewfile) with `brew bundle`
-and runs `./install` and `./bin/reload`:
+If an update changes installed launcher paths or loaders, or you move the
+checkout, rerun the installer: `./install` and `./bin/reload` on Linux/macOS,
+or `.\install.cmd` on Windows. A full bootstrap run already includes these
+steps, with a new PowerShell session still needed on Windows. For remote editor
+integration, keep desktop and server installations compatible and reconnect
+after updates; Git revisions do not have to be identical.
+
+## Uninstall
+
+Uninstall removes what the installer created and backs up every file it
+changes. Fonts, tools, backups and the checkout are kept. Preview first.
+
+On Linux or macOS:
 
 ```sh
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv)" && brew install uv && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap
+cd ~/code/dalftui
+./install --uninstall --dry-run
+./install --uninstall
 ```
 
-Rerun `~/code/dalftui/bootstrap` to update. See [New machine (macOS)](docs/install.md#new-machine-macos).
-
-## tmux bindings and look
-
-What: tabs at the top as rounded pills on a black bar, Catppuccin Mocha
-colours, mouse on, 100000 lines of history. Ctrl+Alt+arrow moves between
-panes, Ctrl+Alt+Shift+arrow resizes them. Shift+Page Up scrolls back through
-history; once scrolled, Ctrl+F searches it. Select with Shift+drag; a plain drag in a shell only shows a
-hint. Programs can set the desktop clipboard (OSC 52). Ctrl+B F1 opens a
-shortcut guide. The prefix stays Ctrl+B.
-
-Files: `config/tmux.conf`, `vendor/catppuccin/` (Catppuccin tmux v2.3.1, MIT),
-`bin/shortcuts.py`, `dalftui/linux/shortcuts.py`.
-
-Needs: tmux 3.2+ (3.3+ for styled popups). uv and `less` for the guide. A
-font with the rounded caps and `⬤`, such as Hack Nerd Font, in the terminal you look at (for a server, your local terminal).
-
-Works on: Linux. Windows: only inside tmux on a Linux server. macOS: installed
-and loaded on macOS CI, where tmux copies go to the clipboard through `pbcopy`;
-keys not tried in a real Terminal.app or iTerm2.
-
-Take it alone: in your own `~/.tmux.conf`:
-
-```tmux
-set -g @dalftui_profile tmux-only
-source-file ~/code/dalftui/config/tmux.conf
-# your own overrides after this line
-```
-
-Keep the `tmux-only` line before `source-file`. Without it, Ctrl+B F2 opens the
-SSH picker, which needs Alacritty.
-
-Turn off / parts: lines after `source-file` (or in `~/.config/tmux/local.conf`)
-win. For example:
-
-```tmux
-unbind -n C-M-Left            # also C-M-Right/Up/Down, C-M-S-Left/...
-unbind F1                     # shortcut guide
-unbind F3                     # VS Code
-set -s set-clipboard off      # no OSC 52
-set -g status-position bottom
-bind -n MouseDrag1Pane if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send -M } { copy-mode -M }
-```
-
-The last line gives back the plain drag. If you later delete a `bind` line (or
-stop sourcing dalftui), restart the tmux server; a reload does not remove
-bindings that are no longer in the config. You cannot skip loading Catppuccin, only
-override its options. The double- and triple-click change can only be undone
-by rebinding those keys.
-
-Details: [docs/tmux.md](docs/tmux.md).
-
-## tmux tab labels and claude-tabstatus
-
-What: with [claude-tabstatus](https://github.com/dalf/claude-tabstatus)
-installed, each tab shows status circles (idle grey, question orange, working
-blue, workflow purple) and `repository@branch` for a Claude pane. Shell tabs show
-their pane title. Other programs show `repository@branch · program`, such as
-`dalftui@main · codex`, or `directory · program` outside Git. The Git context
-follows the active pane's directory and refreshes every five seconds, including
-while the program runs. An explicitly renamed window keeps its name after `·`.
-
-Files: `config/tmux.conf` (`@claude_window_label`, `@dalftui_program_label`,
-`@claude_tab_active_strip`, `@claude_tab_inactive_strip`, the
-`window-status-*format` lines), `bin/tmux_label.py`, `dalftui/linux/tmux_label.py`.
-
-Needs: the tmux feature above, claude-tabstatus installed separately (also on
-the server if Claude runs there), a font with `⬤`.
-
-Works on: Linux. Windows: through tmux on a Linux server. macOS: untested.
-
-Take it alone: comes with `config/tmux.conf`. To copy only the labels, take the
-three `@claude_*` options, `@dalftui_program_label` and the `DALFTUI_PYTHON`
-line before it, point its helper command at your checkout's `bin/tmux_label.py`,
-and use `#{E:@claude_window_label}` and
-`#{E:@claude_tab_active_strip}` / `#{E:@claude_tab_inactive_strip}` in your own
-window formats. Not tested with a real claude-tabstatus.
-
-Turn off / parts: stop claude-tabstatus. For window names everywhere:
-`set -g @claude_window_label '#{window_name}'` (untested). dalftui does not
-touch Claude hooks.
-
-## Alacritty
-
-What: black background, high-contrast colours, font size 10.5, copy on
-select, and Windows-Terminal-like keys: Ctrl+Shift+T new window,
-Ctrl+Page Up/Down switch, Ctrl+Shift+D/E split, Ctrl+Shift+F1/F2/F3 for guide,
-SSH picker and VS Code. Each new window starts in tmux: no session: create one;
-one session: attach if it is detached, else create a new one; several: ask.
-
-Files: `config/alacritty.toml`, `bin/tmux-start.sh`,
-`dalftui/linux/tmux-start.sh`, `bin/reload`.
-
-Needs: Alacritty 0.14+, the dalftui tmux config (the keys send Ctrl+B
-sequences), and the `~/.config/dalftui` link to the checkout (the startup
-command uses that path).
-
-Works on: Linux. Windows: not configured (Windows Terminal is used instead).
-macOS: not used.
-
-Take it alone: `ln -s ~/code/dalftui ~/.config/dalftui`, then in
-`~/.config/alacritty/alacritty.toml`:
-
-```toml
-[general]
-import = ["~/code/dalftui/config/alacritty.toml"]
-```
-
-Turn off / parts: add to `~/.config/alacritty/local.toml` (or after the
-import). `[terminal]` then `shell = "bash"` skips tmux at startup; it must be
-this string form, because `[terminal.shell]` args are appended to the imported
-ones. At the startup prompt, `s` gives a plain shell. You cannot remove the
-imported key bindings: Alacritty appends arrays. To drop them, do not import;
-copy the `[colors.*]`, `[font]` and `[selection]` parts you want.
-
-Details: [docs/tmux.md](docs/tmux.md#shortcuts),
-[docs/install.md](docs/install.md#update-without-reinstalling) (reload).
-
-## Oh My Posh prompt and window title
-
-What: one theme for bash and PowerShell. It shows job counts, `user@host` only
-over SSH, the path, venv or conda env, git branch and changes, run time over
-2 s, and the exit code with a name like `130(interrupted)`. The window title is
-`repo@branch` in git, else the path; over SSH the host comes first. On Windows
-the title keeps the last two folders and starts with 🛡️ when admin. In tmux a
-shell's title becomes the tab label.
-
-Colors: blue path, green clean Git, yellow local changes or commits ahead of
-upstream, and red command failures. Untracked files use a yellow `*`.
-
-Files: `config/oh-my-posh.omp.json`, `config/prompt.bash`,
-`dalftui/windows/profile.ps1`. They also activate mise when it is installed and
-your shell startup has not already done so.
-
-Needs: Oh My Posh (tested with 31.5.0) and a Nerd Font in the terminal you look
-at. In PowerShell, PSReadLine.
-
-Works on: Linux (bash), Windows (PowerShell 5.1 and 7; not cmd or Git Bash).
-macOS (zsh, `config/prompt.zsh`): loads and counts jobs on macOS CI; not seen in
-a real terminal.
-
-Take it alone: bash, in `~/.bashrc` after any other prompt setup:
-
-```sh
-[ -f ~/code/dalftui/config/prompt.bash ] && . ~/code/dalftui/config/prompt.bash
-```
-
-PowerShell, in `$PROFILE`:
+On Windows:
 
 ```powershell
-oh-my-posh init pwsh --config "$HOME\code\dalftui\config\oh-my-posh.omp.json" | Invoke-Expression
+Set-Location "$HOME\code\dalftui"
+.\install.cmd -Uninstall -DryRun
+.\install.cmd -Uninstall
 ```
 
-Remove your own `oh-my-posh init` line.
+Details: [Uninstall](docs/install.md#uninstall).
 
-Turn off / parts: Linux: delete the `prompt.bash` line from `~/.bashrc` but
-keep the `# dalftui: Oh My Posh prompt` marker line, or `./install` adds it
-back. Both installers require Oh My Posh. On Windows the prompt comes with the
-whole profile and has no switch of its own. The title cannot be turned off
-separately; edit a copy of the theme.
+## Personal configuration and backups
 
-## Hack Nerd Font
+Keep Linux personal overrides outside the checkout:
 
-What: the installers install Hack Nerd Font so prompt and tab glyphs render.
-On Windows it also becomes Windows Terminal's default font. On Linux,
-Alacritty keeps the system monospace font and gets the glyphs by fallback.
+```text
+~/.config/alacritty/local.toml
+~/.config/tmux/local.conf
+```
 
-Files: `dalftui/linux/setup.py`, `dalftui/windows/setup.ps1`,
-`dalftui/windows/terminal_settings.py`.
+Server and macOS profiles use the tmux override file. Run `./bin/reload` after
+editing these files. On Windows, keep personal settings in your PowerShell
+profile, outside dalftui's block. Linux and macOS installers back up replaced
+configuration under `~/.local/state/dalftui/backups/`; Windows uses adjacent
+`.dalftui-<id>.bak` files.
 
-Needs: Oh My Posh (it downloads the font), network access once. Linux:
-`fc-list`.
-
-Works on: Linux (desktop mode only), Windows. macOS: detection in
-`~/Library/Fonts` tested on CI; the download is not run there. Select the font
-yourself in Terminal.app or iTerm2 (Settings > Profiles > Text).
-
-Take it alone: `oh-my-posh font install Hack`. To name it in Alacritty, put
-`normal.family = "Hack Nerd Font"` under `[font]` in `local.toml`. In Windows
-Terminal's `settings.json`, under `profiles`:
-`"defaults": { "font": { "face": "Hack Nerd Font" } }`.
-
-Turn off / parts: no flag. Install the font yourself first and Linux skips the
-download. On Windows, `-SkipTerminal` leaves Terminal's font alone (and skips
-all Terminal and VS Code font changes). A Terminal profile with its own font
-keeps it.
-
-## dssh SSH picker
-
-What: a full-screen list of the hosts in `~/.ssh/config` tagged
-`Tag dalftui`. Type to filter, Enter connects, Esc cancels. Ctrl+O connects to
-exactly what you typed (host, IP or `user@host`). F4 shows `ssh -G` details,
-F5 opens a plain shell, F6 ops mode, F7 a saved check. A connection attaches
-remote tmux if the server has it, else a plain shell; nothing is needed on the
-server. The title becomes `user@host`. Linux: Ctrl+Shift+F2 (or Ctrl+B F2)
-opens it and connects in a new Alacritty window. Windows: `dssh` in PowerShell,
-Ctrl+Shift+F2 in Windows Terminal.
-
-Files: `bin/ssh_picker.py`, `dalftui/ssh.py`, `dalftui/host_picker.py`,
-`dalftui/linux/ssh_picker.py`, `dalftui/windows/` (`ssh.py`, `host_picker.py`,
-`profile.ps1`, `ssh-tab.ps1`).
-
-Needs: Python 3.11+, OpenSSH 9.4+ for `Tag`. Linux default mode: Alacritty on
-PATH. Windows: uv on PATH.
-
-Works on: Linux, Windows. macOS: untested; `--pick` and `--connect` should
-work.
-
-Take it alone: tag hosts (Windows: `%USERPROFILE%\.ssh\config`):
+For the SSH picker, add hosts to your own SSH configuration, for example:
 
 ```sshconfig
 Host work-server
@@ -320,226 +415,27 @@ Host work-server
     Tag dalftui
 ```
 
-Then run it from the clone, nothing installed:
+Use `~/.ssh/config` on Linux or macOS, or `$HOME\.ssh\config` on Windows.
+`Tag` requires OpenSSH 9.4+.
+SSH keys and credentials remain outside the repository.
 
-```sh
-python3 ~/code/dalftui/bin/ssh_picker.py --pick            # pick, this terminal
-python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST    # direct
-```
+## Repository map and references
 
-On Windows use `uv run --no-project --python ">=3.11" "$HOME\code\dalftui\bin\ssh_picker.py" --pick`. A
-minimal `dssh` for `$PROFILE`:
+| Location | Responsibility |
+| --- | --- |
+| `config/` | Appearance, keybindings, and prompt theme |
+| `bin/` | Public command launchers |
+| `dalftui/ssh.py` | Shared SSH and connection orchestration |
+| `dalftui/host_picker.py` | Shared picker layout, filtering, and navigation |
+| `dalftui/vscode.py` | Editor launching and bridge lifecycle |
+| `dalftui/linux/`, `dalftui/windows/` | Integration for the target environment |
+| `bridge_protocol.py` | Standalone editor bridge contract and version rules |
+| `tests/`, `mise.toml` | Verification and task definitions |
 
-```powershell
-function dssh {
-    param([string]$HostName)
-    $picker = "$HOME\code\dalftui\bin\ssh_picker.py"
-    $run = 'run', '--no-project', '--python', '>=3.11', $picker
-    if ($HostName) { uv @run --connect $HostName } else { uv @run --pick }
-}
-```
-
-Turn off / parts: `unbind F2` in tmux; `./install --tmux-only` never binds it.
-`-SkipTerminal` drops the Windows Terminal key (and the other Terminal
-changes). Cannot turn off: the tag filter, the F4-F7 keys, and an extra SSH
-connection that checks for the VS Code bridge, so password logins ask twice
-(keys or an agent avoid it). Without `User` in your SSH config it asks for a
-login.
-
-Details: [docs/ssh-picker.md](docs/ssh-picker.md).
-
-## Open folder in VS Code
-
-What: Ctrl+Shift+F3 (or Ctrl+B F3 in tmux) opens the current pane's folder in
-a new VS Code window. In an SSH window opened by the picker, it opens the
-remote folder with Remote - SSH, through a forwarded and authenticated bridge.
-On Windows it also works at a local PowerShell prompt.
-
-Files: `config/tmux.conf` (the F3 binding), `bin/vscode.py`,
-`dalftui/vscode.py`, `dalftui/linux/tmux_editor.py`,
-`dalftui/linux/remote_bootstrap.py`, `bridge_protocol.py`,
-`dalftui/windows/profile.ps1`.
-
-Needs: VS Code with `code` on PATH (Windows: the installer records
-`Code.exe`). uv, which runs Python 3.11+. For remote: the Remote - SSH
-extension; on the server tmux, python3 and a current dalftui at `~/.config/dalftui`
-(`./install --tmux-only`); sshd allowing `AllowStreamLocalForwarding` (Linux)
-or remote TCP forwarding with `GatewayPorts` `no` or `clientspecified`
-(Windows). Connect through the picker, `dssh` or `--connect`; a plain `ssh`
-has no bridge. Desktop and server need compatible versions, or F3 is skipped.
-
-Works on: Linux (local and remote), Windows (local PowerShell prompt and remote
-tmux). macOS: local VS Code only, which needs VS Code's `code` command on PATH;
-launch tested with a fake `code` on CI. Remote from a Mac is untested.
-Servers: Linux only.
-
-Take it alone: in your `tmux.conf`:
-
-```tmux
-bind-key F3 run-shell -b 'python3 ~/code/dalftui/bin/vscode.py --pane #{pane_id} --client #{client_pid} --client-tty #{q:client_tty}'
-```
-
-For remote, do the same on the server and link the clone there:
-`ln -s ~/code/dalftui ~/.config/dalftui`. Without dalftui at all:
-`code --new-window --folder-uri "vscode-remote://ssh-remote+HOST/path"`.
-
-Turn off / parts: `unbind F3` in tmux. No dalftui on the server means no
-bridge. `-SkipTerminal` drops the Windows Terminal key. Cannot turn off: the
-bridge check on each picker connection (see the double password prompt above).
-
-Details: [docs/vscode-bridge.md](docs/vscode-bridge.md).
-
-## PowerShell Emacs editing and Ctrl+B prefix
-
-What: bash-like (Emacs) line editing, Ctrl+Left/Right by word, history
-suggestions where PSReadLine supports them. Ctrl+B is a prefix like in tmux:
-Ctrl+B Ctrl+B moves back one character, Ctrl+B F3 opens VS Code.
-
-Files: `dalftui/windows/profile.ps1`, `bin/profile.ps1`.
-
-Needs: PowerShell 5.1 or 7. Suggestions need PSReadLine 2.1+ (5.1 ships 2.0).
-
-Works on: Windows. pwsh on Linux works by hand. macOS: untested.
-
-Take it alone: in `$PROFILE`, before any `oh-my-posh init` line (changing the
-edit mode drops existing key handlers):
-
-```powershell
-if ((Get-PSReadLineOption).EditMode -ne 'Emacs') { Set-PSReadLineOption -EditMode Emacs }
-Set-PSReadLineKeyHandler -Chord 'Ctrl+LeftArrow' -Function BackwardWord
-Set-PSReadLineKeyHandler -Chord 'Ctrl+RightArrow' -Function ForwardWord
-Set-PSReadLineOption -HistorySearchCursorMovesToEnd
-try { Set-PSReadLineOption -PredictionSource History -ErrorAction Stop } catch { }
-Set-PSReadLineKeyHandler -Chord 'Ctrl+b,Ctrl+b' -Function BackwardChar
-```
-
-Turn off / parts: the installed profile is all or nothing. After its block in
-`$PROFILE`, to get plain Ctrl+B back:
-
-```powershell
-Remove-PSReadLineKeyHandler -Chord 'Ctrl+b,Ctrl+b','Ctrl+b,F3'
-Set-PSReadLineKeyHandler -Chord 'Ctrl+b' -Function BackwardChar
-```
-
-That also breaks local Ctrl+Shift+F3 in Windows Terminal, which sends Ctrl+B F3.
-Switching back to `-EditMode Windows` drops every handler, including Oh My
-Posh's.
-
-## PowerShell Unix-like commands
-
-What: `touch`, `du` (MB only, flags ignored), `df` and `wc`. `du`, `df` and
-`wc` are skipped when a real program has that name on PATH. If installed,
-`lsd`, `wget2`, `btop`, `gsudo`, `notepad++` and `bat` replace `ls`, `wget`, `htop`,
-`sudo`, `notepad` and `cat`, and a `curl` outside Windows' folder replaces `curl`; setup does not install them.
-
-Files: `dalftui/windows/profile.ps1` (from `# Unix-like commands` to
-`# Bash-like line editing`).
-
-Needs: PowerShell 5.1 or 7.
-
-Works on: Windows. macOS: untested.
-
-Take it alone: copy that block of `profile.ps1` into `$PROFILE`; it does not
-need the checkout. Or load the whole profile:
-`. "$HOME\code\dalftui\bin\profile.ps1"`.
-
-Turn off / parts: after the profile block, e.g. `Remove-Item Function:\wc` or
-`Set-Alias ls Get-ChildItem -Option AllScope -Scope Global`.
-
-## Windows Terminal PowerShell 7 profiles
-
-What: when PowerShell 7 is installed, setup turns on ClearType for Terminal's
-PowerShell 7 profile and adds a **Windows PowerShell 7 (Admin)** profile that
-runs it elevated. It also adds the Ctrl+Shift+F2/F3 actions and the default
-font. `settings.json` is backed up; comments are kept.
-
-Files: `dalftui/windows/terminal_settings.py`, `dalftui/windows/setup.ps1`.
-
-Needs: Windows Terminal 1.13+, opened once. PowerShell 7 on PATH at setup.
-
-Works on: Windows only.
-
-Take it alone: in Terminal's `settings.json`, add
-`"antialiasingMode": "cleartype"` to the PowerShell 7 profile, and add:
-
-```json
-{"guid": "{267e52e6-0ec9-495c-a8b0-e4437770bc55}", "name": "Windows PowerShell 7 (Admin)", "commandline": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\"", "elevate": true, "startingDirectory": "%USERPROFILE%", "icon": "ms-appx:///ProfileIcons/pwsh.png", "antialiasingMode": "cleartype"}
-```
-
-Turn off / parts: `-SkipTerminal` skips all Terminal changes. To keep the rest,
-set `"hidden": true` on the Admin profile; deleting it does not stick, setup
-adds it back. Your own `antialiasingMode` is kept.
-
-## VS Code terminal font
-
-What: sets VS Code's terminal to Hack Nerd Font, size 12. The rest of
-`settings.json` is kept.
-
-Files: `dalftui/linux/setup.py`, `dalftui/windows/terminal_settings.py`,
-`dalftui/windows/setup.ps1`.
-
-Needs: VS Code, Hack Nerd Font.
-
-Works on: Linux (desktop mode), Windows. macOS: settings written on CI under
-`~/Library/Application Support/Code/User/`; not checked in VS Code.
-
-Take it alone: in VS Code's user `settings.json`:
-
-```json
-"terminal.integrated.fontFamily": "Hack Nerd Font",
-"terminal.integrated.fontSize": 12
-```
-
-Turn off / parts: Linux desktop has no flag; every `./install` resets these two
-keys. Windows: only `-SkipTerminal`, which skips the Terminal changes too.
-
-## Ops mode and system checks
-
-What: F6 in the picker (or `--ops`) opens a new remote tmux session with htop,
-a live journal, and a shell that starts with a short system overview. F7 (or
-`--check NAME`) runs a saved check, then gives a shell. Built in: `system`
-(detailed overview) and `packages` (APT, from cached lists). Nothing uses sudo
-or changes the server.
-
-Files: `dalftui/linux/ops.py`, `dalftui/linux/system-status.sh`,
-`dalftui/linux/package-status.sh`, `~/.ssh/dalftui-checks.json` (your checks).
-
-Needs: on the server nothing from dalftui; `sh`, GNU `timeout`, tmux for the
-layout, `journalctl`, `apt-get` for `packages`.
-
-Works on: Linux and Windows clients; macOS client untested. Servers: Debian and
-Ubuntu; other systemd Linux mostly works except `packages`.
-
-Take it alone:
-
-```sh
-python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST --ops
-python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST --check system
-ssh HOST 'status_view=compact timeout --kill-after=5s 10s sh -s' < ~/code/dalftui/dalftui/linux/system-status.sh
-```
-
-Your own checks in `~/.ssh/dalftui-checks.json`:
-
-```json
-{"checks": [{"name": "disk-space", "command": "df -h; df -i", "timeout": 10, "hosts": ["web-*"]}]}
-```
-
-Turn off / parts: nothing runs unless you press F6/F7. The two built-in checks
-always appear. Detaching leaves the ops session running.
-
-Details: [docs/ops-mode.md](docs/ops-mode.md).
-
-## Reference
-
-- [docs/install.md](docs/install.md): installed paths, server mode, reload,
-  overrides, backups, Windows setup.
-- [docs/tmux.md](docs/tmux.md): shortcuts, selecting and copying, session
-  policy, theme.
-- [docs/ssh-picker.md](docs/ssh-picker.md): tags, keys, cache, login, `dssh`.
-- [docs/ops-mode.md](docs/ops-mode.md): saved checks, ops layout, reports.
-- [docs/vscode-bridge.md](docs/vscode-bridge.md): bridge security, TCP bridge,
-  version compatibility, changing the bridge.
-- [docs/development.md](docs/development.md): layout, conventions, mise tasks,
-  [verification](docs/development.md#verification).
-- [docs/manual-configuration.md](docs/manual-configuration.md): settings dalftui
-  does not apply.
+- [Installation reference](docs/install.md)
+- [tmux and shortcuts](docs/tmux.md)
+- [SSH picker](docs/ssh-picker.md)
+- [Ops mode and checks](docs/ops-mode.md)
+- [VS Code bridge](docs/vscode-bridge.md)
+- [Manual configuration](docs/manual-configuration.md)
+- [Development guide](docs/development.md)

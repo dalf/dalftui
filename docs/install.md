@@ -1,6 +1,6 @@
 # Installation reference
 
-Full detail behind the install steps in the [README](../README.md#install-everything).
+Full detail behind the install steps in the [README](../README.md#installation-and-update-strategy).
 
 ## Linux desktop
 
@@ -124,8 +124,9 @@ On Debian or Ubuntu (a server):
 sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
 ```
 
-A minimal Debian may lack sudo: install it with `su -c 'apt-get install sudo'`
-and add your user to the `sudo` group. The desktop mode needs Alacritty 0.14+,
+Debian installed with a root password gives your user no sudo: run
+`su -c "apt-get install -y sudo && usermod -aG sudo $USER"`, then log out and
+back in. The desktop mode needs Alacritty 0.14+,
 so it works on Fedora and Debian 13; on Debian 12 and Ubuntu 24.04 the packages
 install but `./install` then fails, so use `--tmux-only` there. Ubuntu 22.04 is
 refused: its Python is 3.10.
@@ -505,7 +506,8 @@ It also sets `terminal.integrated.fontFamily` to Hack Nerd Font and
 (in `data\user-data` for a portable installation), creating the file when needed.
 
 The profile enables bash-like Emacs line editing, with **Ctrl+Left/Right** moving
-by word and history suggestions where PSReadLine supports them. As in tmux,
+by word and history suggestions where PSReadLine supports them (2.1+;
+Windows PowerShell 5.1 ships 2.0). As in tmux,
 **Ctrl+B** is a prefix: **Ctrl+B, then Ctrl+B** moves back one character. The window title
 shortens long paths to their last two folders (`…\Local\Temp`) and starts with 🛡️
 in an administrator session.
