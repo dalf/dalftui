@@ -239,8 +239,16 @@ $dalftuiOpenFolder = {
     $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if (-not $uv) { throw 'uv is required to open VS Code.' }
-    & $uv.Source run --no-project --python '>=3.11' $dalftuiEditorPath --folder $location.ProviderPath
-    if ($global:LASTEXITCODE -ne 0) { throw 'Could not open VS Code; see the error above.' }
+    # Keep the editor's error text: a key handler discards a program's error output.
+    # Under Stop, Windows PowerShell 5.1 would throw on the first captured error line.
+    $ErrorActionPreference = 'Continue'
+    $errors = @()
+    & $uv.Source run --no-project --python '>=3.11' $dalftuiEditorPath --folder $location.ProviderPath 2>&1 |
+        ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { $errors += "$_" } else { $_ } }
+    if ($global:LASTEXITCODE -ne 0) {
+        $message = (($errors -join "`n") -replace '(?m)^VS Code: ', '').Trim()
+        throw $(if ($message) { $message } else { 'Could not open VS Code.' })
+    }
 }.GetNewClosure()
 Set-Item -Path Function:\global:Open-DalftuiCurrentFolder -Value $dalftuiOpenFolder
 # A key handler's output is redirected, so the picker runs as its own console process.

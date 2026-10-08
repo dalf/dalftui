@@ -588,6 +588,11 @@ function Invoke-DalftuiWindowsSetup {
         $argumentJson = Open-DalftuiCurrentFolder
         $arguments = ConvertFrom-Json -InputObject $argumentJson
         Assert-True ($arguments.Count -eq 2 -and $arguments[0] -eq '--folder' -and $arguments[1] -eq $editorFolder) 'Editor callback must use the current folder and preserve its path'
+        # A key handler discards a program's error output, so the error text travels in the exception.
+        [IO.File]::WriteAllText((Join-Path $checkout 'bin/vscode.py'), 'import sys; print("VS Code: boom", file=sys.stderr); sys.exit(1)')
+        $editorError = $null
+        try { Open-DalftuiCurrentFolder } catch { $editorError = $_.Exception.Message }
+        Assert-True ($editorError -eq 'boom') "A failed editor launch must report the editor's error: $editorError"
     } finally { Pop-Location }
     # Windows PowerShell ships an older PSReadLine without the -Chord option on Get-PSReadLineKeyHandler.
     $handlers = @(Get-PSReadLineKeyHandler)
