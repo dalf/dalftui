@@ -108,6 +108,11 @@ changes, run time over 2 s, and failed exit codes. The window title is
 elevated. Git conflicts appear as a red `!N` count of unresolved files, separately
 from the `~N` modified count. The prompt also activates mise when it is installed.
 
+When using Oh My Posh, the shell loaders set `VIRTUAL_ENV_DISABLE_PROMPT=1` and
+`CONDA_CHANGEPS1=false`, so Python venv and Conda leave the environment label to
+the theme. If your personal shell setup activates an environment earlier, set
+these variables before that activation as well.
+
 On Windows, the PowerShell profile also adds a few Unix-like commands and the
 `dssh` command (open the SSH picker, or `dssh HOST` to connect directly), and setup
 adds a **Windows PowerShell 7 (Admin)** Windows Terminal profile. Setup also

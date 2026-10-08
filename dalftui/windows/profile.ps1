@@ -210,6 +210,14 @@ if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) {
     try { Set-PSReadLineOption -PredictionSource History -ErrorAction Stop } catch { }
 }
 
+# Let Oh My Posh display environments, before mise can activate one.
+# Match its initialization requirements, including PSReadLine.
+if ((Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContinue) -and
+    (Get-Command Get-PSReadLineOption -ErrorAction SilentlyContinue)) {
+    $env:VIRTUAL_ENV_DISABLE_PROMPT = '1'
+    $env:CONDA_CHANGEPS1 = 'false'
+}
+
 # Activate mise unless the personal profile already did. It must come before
 # Oh My Posh, whose prompt otherwise stops showing failed exit codes.
 if ((Get-Command mise -CommandType Application -ErrorAction SilentlyContinue) -and

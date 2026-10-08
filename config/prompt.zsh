@@ -1,6 +1,11 @@
 # mise and the Oh My Posh prompt for interactive zsh, sourced from ~/.zshrc by ./install.
 [[ -o interactive ]] || return 0
 
+# Let Oh My Posh display environments, before mise can activate one.
+if (( $+commands[oh-my-posh] )); then
+    export VIRTUAL_ENV_DISABLE_PROMPT=1 CONDA_CHANGEPS1=false
+fi
+
 # Activate mise unless ~/.zshrc already did; child shells do not inherit its hook function.
 if ! (( $+functions[_mise_hook] )) && (( $+commands[mise] )); then
     eval "$(mise activate zsh)"
