@@ -214,6 +214,8 @@ if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) {
 # Oh My Posh, whose prompt otherwise stops showing failed exit codes.
 if ((Get-Command mise -CommandType Application -ErrorAction SilentlyContinue) -and
     -not (Test-Path -Path Function:\_mise_hook)) {
+    # Windows PowerShell 5.1 lacks the directory-change hook; mise warns every session.
+    if ($PSVersionTable.PSVersion.Major -lt 7 -and -not $env:MISE_PWSH_CHPWD_WARNING) { $env:MISE_PWSH_CHPWD_WARNING = '0' }
     (& mise activate pwsh) | Out-String | Invoke-Expression
 }
 
