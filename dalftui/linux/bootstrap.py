@@ -42,8 +42,10 @@ BREWFILE = PACKAGES / 'Brewfile'
 BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
 BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 PULLED = 'DALFTUI_BOOTSTRAP_PULLED'  # Set before restarting with updated code; stops a loop.
-SYMBOLS, PLAIN_SYMBOLS = '▸✓✗·', '>+x-'  # Step heading, done, failed and skipped; the plain ones for other consoles.
-BOLD, GREEN, RED, DIM = '1', '32', '31', '2'  # ANSI styles, shown on a terminal only.
+# Step heading, done, failed and skipped; the plain ones for other consoles. Windows console fonts
+# draw ▶ as an empty box but have ►.
+SYMBOLS, PLAIN_SYMBOLS = ('►' if os.name == 'nt' else '▶') + '✓✗·', '>+x-'
+HEADING, GREEN, RED, DIM = '1;36', '32', '31', '2'  # ANSI styles (bold cyan headings), shown on a terminal only.
 
 
 def read_packages(path, *, tmux_only=False):
@@ -115,7 +117,7 @@ class Bootstrap:
     def step(self, title):
         """Show a heading, then one result line for each kind of summary entry the step adds."""
         self.say('\n')
-        self.say(f'{self.symbols[0]} {title}\n', BOLD)
+        self.say(f'{self.symbols[0]} {title}\n', HEADING)
         before = {key: len(names) for key, names in self.summary.items()}
         yield
         lines = self.results({key: names[before[key]:] for key, names in self.summary.items()})
@@ -364,13 +366,15 @@ class Bootstrap:
         labels = (('installed', 'Would install' if self.dry_run else 'Installed'),
                   ('upgraded', 'Would upgrade' if self.dry_run else 'Upgraded'),
                   ('skipped', 'Skipped'), ('failed', 'Failed'))
-        lines = ['', 'Dry run: nothing was changed.' if self.dry_run else 'Bootstrap summary:']
+        self.say('\n')
+        self.say(f"{self.symbols[0]} Summary{' (dry run: nothing was changed)' if self.dry_run else ''}\n", HEADING)
         for key, label in labels:
             names = self.summary[key]
-            lines.append(f'{label}: {len(names)}' + (f" ({', '.join(names)})" if names else ''))
-        self.say('\n'.join(lines) + '\n')
+            # Changes and failures above 0 stand out in green and red; the long skipped list is always dim.
+            style = DIM if key == 'skipped' else (RED if key == 'failed' else GREEN) if names else None
+            self.say(f'{label}: {len(names)}' + (f" ({', '.join(names)})" if names else '') + '\n', style)
         if self.log:
-            self.say(f'Log: {self.log.name}\n')
+            self.say(f'Log: {self.log.name}\n', DIM)
             self.log.close()
         return 1 if self.summary['failed'] else 0
 

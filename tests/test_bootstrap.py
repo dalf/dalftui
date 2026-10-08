@@ -589,7 +589,7 @@ class LogAndSummaryTests(unittest.TestCase):
     def test_summary_and_log(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'state/dalftui/bootstrap.log'
-            run = bootstrap.Bootstrap(ROOT, log_path=log)
+            run, _ = quietly(bootstrap.Bootstrap, ROOT, log_path=log)  # Colour depends on the output when created.
             run.add('installed', ['fzf'])
             run.add('skipped', ['git', 'tmux'])
             status, output = quietly(run.report)
@@ -600,7 +600,7 @@ class LogAndSummaryTests(unittest.TestCase):
     def test_dry_run_writes_no_log(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'state/dalftui/bootstrap.log'
-            run = bootstrap.Bootstrap(ROOT, dry_run=True, log_path=log)
+            run, _ = quietly(bootstrap.Bootstrap, ROOT, dry_run=True, log_path=log)
             _, output = quietly(run.report)
             self.assertIn('Would install: 0\nWould upgrade: 0\n', output)
             self.assertFalse(log.parent.exists())
@@ -650,37 +650,53 @@ class StepOutputTests(unittest.TestCase):
     def test_heading_then_one_line_per_kind_of_result(self):
         output = step_output(installed=['fzf', 'git'], upgraded=['uv (0.12.21 -> 0.12.23)'],
                              skipped=['bat', 'tmux', 'dalftui (local changes)'], failed=['code (sudo)', 'dvc'])
-        self.assertEqual(output, '\n▸ Packages\n  ✓ fzf, git installed\n  ✓ uv upgraded (0.12.21 -> 0.12.23)\n'
+        self.assertEqual(output, '\n▶ Packages\n  ✓ fzf, git installed\n  ✓ uv upgraded (0.12.21 -> 0.12.23)\n'
                                  '  · 2 up to date\n  · dalftui (local changes)\n  ✗ dvc failed\n'
                                  '  ✗ code failed (sudo)\n')
 
     def test_single_skipped_entry_and_empty_step(self):
-        self.assertEqual(step_output(skipped=['tmux']), '\n▸ Packages\n  · tmux up to date\n')
-        self.assertEqual(step_output(), '\n▸ Packages\n  · up to date\n')
+        self.assertEqual(step_output(skipped=['tmux']), '\n▶ Packages\n  · tmux up to date\n')
+        self.assertEqual(step_output(), '\n▶ Packages\n  · up to date\n')
 
     def test_dry_run_wording(self):
         self.assertEqual(step_output(dry_run=True, installed=['fzf'], upgraded=['git', 'tmux']),
-                         '\n▸ Packages\n  ✓ would install fzf\n  ✓ would upgrade git, tmux\n')
+                         '\n▶ Packages\n  ✓ would install fzf\n  ✓ would upgrade git, tmux\n')
 
     def test_configuration_step_wording(self):
-        self.assertEqual(step_output(installed=['install']), '\n▸ Packages\n  ✓ install ran\n')
-        self.assertEqual(step_output(dry_run=True, installed=['install']), '\n▸ Packages\n  ✓ would run install\n')
+        self.assertEqual(step_output(installed=['install']), '\n▶ Packages\n  ✓ install ran\n')
+        self.assertEqual(step_output(dry_run=True, installed=['install']), '\n▶ Packages\n  ✓ would run install\n')
 
     def test_colour_only_on_a_terminal_without_no_color_or_dumb_term(self):
         added = {'installed': ['fzf'], 'skipped': ['git'], 'failed': ['dvc']}
         output = step_output(stdout=Terminal(), **added)
-        self.assertEqual(output, '\n\033[1m▸ Packages\033[0m\n\033[32m  ✓ fzf installed\033[0m\n'
+        self.assertEqual(output, '\n\033[1;36m▶ Packages\033[0m\n\033[32m  ✓ fzf installed\033[0m\n'
                                  '\033[2m  · git up to date\033[0m\n\033[31m  ✗ dvc failed\033[0m\n')
         for env in ({'NO_COLOR': '1'}, {'TERM': 'dumb'}):
             with self.subTest(env=env):
                 self.assertNotIn('\033', step_output(stdout=Terminal(), env=env, **added))
         self.assertNotIn('\033', step_output(**added))
 
+    def test_summary_is_a_heading_with_counts_coloured_only_when_they_matter(self):
+        def report(stdout, **added):
+            with redirect_stdout(stdout), patch.dict(os.environ, {'TERM': 'xterm'}):
+                os.environ.pop('NO_COLOR', None)
+                run = bootstrap.Bootstrap(ROOT, dry_run=added.pop('dry_run', False))  # Colour is decided here.
+                for category, names in added.items():
+                    run.add(category, names)
+                status = run.report()
+            return status, stdout.getvalue()
+        status, output = report(Terminal(), installed=['fzf'], skipped=['git'], failed=['dvc'])
+        self.assertEqual((status, output), (1, '\n\033[1;36m▶ Summary\033[0m\n\033[32mInstalled: 1 (fzf)\033[0m\n'
+                                                'Upgraded: 0\n\033[2mSkipped: 1 (git)\033[0m\n\033[31mFailed: 1 (dvc)\033[0m\n'))
+        # Without a terminal, the lines CI checks are plain.
+        self.assertEqual(report(io.StringIO(), dry_run=True)[1], '\n▶ Summary (dry run: nothing was changed)\n'
+                                                                  'Would install: 0\nWould upgrade: 0\nSkipped: 0\nFailed: 0\n')
+
     def test_log_has_no_escapes(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / 'bootstrap.log'
             self.assertIn('\033[', step_output(stdout=Terminal(), log_path=log, installed=['fzf']))
-            self.assertEqual(log.read_text(encoding='utf-8'), '\n▸ Packages\n  ✓ fzf installed\n')
+            self.assertEqual(log.read_text(encoding='utf-8'), '\n▶ Packages\n  ✓ fzf installed\n')
 
     def test_command_echo_is_dim(self):
         with redirect_stdout(Terminal()) as output, patch.dict(os.environ, {'TERM': 'xterm'}):

@@ -343,11 +343,12 @@ class OutputTests(ScoopTestCase):
             self.assertFalse(bootstrap.virtual_terminal())
 
     def test_steps_have_headings_and_results(self):
-        run = self.scoop()
-        with redirect_stdout(io.StringIO()) as output, patch.dict(os.environ, {'LOCALAPPDATA': str(run.scoop)}):
+        with redirect_stdout(io.StringIO()) as output:
+            run = self.scoop()  # Symbols are chosen for the output in place when the run starts.
+        with redirect_stdout(output), patch.dict(os.environ, {'LOCALAPPDATA': str(run.scoop)}):
             with run.step('Windows Terminal'):
                 run.terminal()
-        self.assertEqual(output.getvalue(), '\n▸ Windows Terminal\n  · Windows Terminal (not found; install it '
+        self.assertEqual(output.getvalue(), f'\n{shared.SYMBOLS[0]} Windows Terminal\n  · Windows Terminal (not found; install it '
                                             'from the Microsoft Store and open it once)\n')
 
 
