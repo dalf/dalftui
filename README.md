@@ -149,11 +149,51 @@ integration tests, and GitHub Actions.
   session, it creates one. With one detached session, it reattaches. With one
   attached session, it creates another. With several, it asks which to use.
 
+## Installed software
+
+Bootstrap installs dalftui's requirements plus the author's personal tools.
+Review the package list for your platform:
+
+| Platform | Package list | Installed with |
+| --- | --- | --- |
+| Fedora | [packages/fedora.txt](packages/fedora.txt) | dnf |
+| Debian and Ubuntu | [packages/debian.txt](packages/debian.txt) | apt-get |
+| Windows | [packages/windows.txt](packages/windows.txt) | Scoop |
+| macOS | [packages/Brewfile](packages/Brewfile) | Homebrew (`brew bundle`) |
+
+Bootstrap and installation also handle the following:
+
+**Linux (Fedora, Debian, Ubuntu)**
+
+- **Oh My Posh, mise, uv:** official installers, then each tool's own updates.
+- **Hack Nerd Font:** Oh My Posh, desktop only.
+- **GitHub CLI repository:** added on every machine, including `--tmux-only`.
+- **VS Code and DVC repositories:** added for desktop packages; DVC is x86-64 only.
+
+`--tmux-only` skips `[desktop]` packages, the VS Code and DVC repositories, and the font.
+
+**Windows**
+
+- **Python:** uv downloads it when needed.
+- **OpenSSH:** Windows capability if missing; ssh-agent service configured.
+- **VC++ runtime:** Scoop download; elevated installer when needed.
+- **Hack Nerd Font:** Oh My Posh, if missing.
+
+Install [Windows Terminal separately](#windows-10-or-11), then open it once.
+
+**macOS**
+
+- **Python:** uv downloads it when needed.
+- **Hack Nerd Font:** Homebrew cask; Oh My Posh fallback if missing.
+
+Install Homebrew and uv before running bootstrap.
+
 ## Installation and update strategy
 
 **Use bootstrap for a full setup, and rerun it for full updates.** A successful
-bootstrap run installs or upgrades the listed tools and applies dalftui's
-configuration. You do not need to run the installer separately afterward.
+bootstrap run installs or upgrades the [software listed above](#installed-software)
+and applies dalftui's configuration. You do not need to run the installer
+separately afterward.
 
 | Platform or profile | Bootstrap command from an existing checkout | What it runs afterward |
 | --- | --- | --- |
@@ -167,14 +207,6 @@ desktop, dalftui installed on the Linux server, a connection made through the
 picker or `dssh` (plain `ssh` has no bridge), and an sshd allowing Unix-socket
 forwarding (Linux or macOS desktop) or remote TCP forwarding (Windows desktop).
 Add your SSH hosts with `Tag dalftui` ([example](#personal-configuration-and-backups)).
-
-Bootstrap includes the author's personal tool selection, beyond dalftui's
-minimum requirements. Review the appropriate list before using it:
-
-- [Fedora packages](packages/fedora.txt)
-- [Debian and Ubuntu packages](packages/debian.txt)
-- [Windows Scoop apps](packages/windows.txt)
-- [macOS Brewfile](packages/Brewfile)
 
 Bootstrap first runs `git pull --ff-only` when the checkout is clean. Check its
 final summary: a failed step does not stop later steps, and it exits nonzero
@@ -227,8 +259,9 @@ cd ~/code/dalftui
 ./bootstrap
 ```
 
-Bootstrap installs or upgrades the listed packages, Oh My Posh, mise, and uv.
-Desktop mode also sets up Microsoft's VS Code and DVC's package repositories. Installation
+Bootstrap adds GitHub CLI's package repository, then installs or upgrades the listed
+packages, Oh My Posh, mise, and uv. Desktop mode also adds Microsoft's VS Code
+repository and, on x86-64, DVC's. Installation
 then configures Alacritty, tmux, the prompt, and installs Hack Nerd Font. Open a new
 Alacritty window afterward.
 
@@ -253,8 +286,8 @@ cd ~/code/dalftui
 ./bootstrap --tmux-only
 ```
 
-On an existing checkout, skip the clone. This skips the `[desktop]` package
-section and the VS Code and DVC repository setup, configures tmux and the bash prompt,
+On an existing checkout, skip the clone. This still adds GitHub CLI's repository
+but skips the `[desktop]` package section and the VS Code and DVC repositories, configures tmux and the bash prompt,
 leaves Alacritty alone, and installs no font; the terminal you connect from
 needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the tmux-only profile; `./bootstrap`
 does not, so keep passing `--tmux-only`.
@@ -274,8 +307,20 @@ irm get.scoop.sh | iex
 scoop install git uv
 ```
 
-**Windows Terminal is not installed by bootstrap.** Install it separately if
-missing and open it once so setup can find its settings. The SSH picker needs
+**Windows Terminal is not installed by bootstrap.** Windows 11 22H2 and later
+include it. If it is missing, install it with WinGet:
+
+```powershell
+winget install --id Microsoft.WindowsTerminal --exact
+```
+
+Without WinGet, install it from the [Microsoft Store](https://aka.ms/terminal).
+
+Open Windows Terminal once before running bootstrap so setup can find its
+settings. If bootstrap already ran, rerun `.\install.cmd` from the checkout
+after opening Terminal.
+
+The SSH picker needs
 OpenSSH 9.4+ for `Tag dalftui`; providing a Windows OpenSSH client alone does
 not guarantee that version. Add the Remote - SSH extension to VS Code for
 remote folder opening.
@@ -426,6 +471,7 @@ SSH keys and credentials remain outside the repository.
 | Location | Responsibility |
 | --- | --- |
 | `config/` | Appearance, keybindings, and prompt theme |
+| [packages/](packages/) | Platform package lists used by bootstrap |
 | `bin/` | Public command launchers |
 | `dalftui/ssh.py` | Shared SSH and connection orchestration |
 | `dalftui/host_picker.py` | Shared picker layout, filtering, and navigation |
