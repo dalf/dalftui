@@ -11,12 +11,14 @@ opacity = 1.0
 background = "#000000"
 foreground = "#ffffff"
 
+# ANSI colors also serve as backgrounds and selection text in applications.
+# Keep blue dark for light text, and black readable on light backgrounds.
 [colors.normal]
-black = "#808080"
+black = "#000000"
 red = "#ff6b6b"
 green = "#a8e16b"
 yellow = "#ffd866"
-blue = "#82aaff"
+blue = "#2458a6"
 magenta = "#c792ea"
 cyan = "#89ddff"
 white = "#e6e6e6"
