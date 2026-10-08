@@ -59,6 +59,19 @@ def interactive():
         return False
 
 
+def virtual_terminal():
+    """Let the console show ANSI styles; Windows Terminal does already, conhost on Windows 10+ once asked."""
+    try:  # Windows-only windll loader is unavailable to Pylint running on Linux.
+        kernel32 = ctypes.windll.kernel32  # pylint: disable=no-member
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_ulong(0)
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(mode.value & 4 or kernel32.SetConsoleMode(handle, mode.value | 4))  # VIRTUAL_TERMINAL_PROCESSING
+    except (AttributeError, OSError):
+        return False
+
+
 def elevated():
     try:  # Windows-only windll loader is unavailable to Pylint running on Linux.
         return bool(ctypes.windll.shell32.IsUserAnAdmin())  # pylint: disable=no-member
@@ -69,6 +82,7 @@ def elevated():
 class Scoop(Bootstrap):
     def __init__(self, root=REPO, *, scoop=None, **kwargs):
         super().__init__(root, **kwargs)
+        self.color = self.color and virtual_terminal()
         self.scoop = Path(scoop or scoop_root())
         # Windows PowerShell, not scoop.cmd: that runs pwsh when present, and Scoop cannot update the pwsh it runs in.
         self.command = ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
@@ -245,12 +259,19 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     run = Scoop(dry_run=dry_run, log_path=state_directory() / 'bootstrap.log')
     run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
             f" {shlex.join(['bootstrap', *argv])} ==\n")
-    run.update_repo(list(argv))
     names = read_packages(PACKAGES / 'windows.txt')
-    run.buckets(names)
-    run.packages(names)
-    run.system(names)
-    run.git_ssh()
-    run.terminal()
-    run.install_cmd()
+    with run.step('Checkout'):
+        run.update_repo(list(argv))
+    with run.step('Scoop buckets'):
+        run.buckets(names)
+    with run.step('Packages'):
+        run.packages(names)
+    with run.step('OpenSSH and VC++ runtime'):
+        run.system(names)
+    with run.step('Git SSH client'):
+        run.git_ssh()
+    with run.step('Windows Terminal'):
+        run.terminal()
+    with run.step('Configuration (install.cmd)'):
+        run.install_cmd()
     return run.report()

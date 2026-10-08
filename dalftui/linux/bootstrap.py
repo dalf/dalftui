@@ -1,4 +1,5 @@
 """Install the packages and tools of a new Fedora, Debian, Ubuntu or macOS machine, then install dalftui. Safe to rerun."""
+from contextlib import contextmanager
 from datetime import datetime
 import json
 import os
@@ -41,6 +42,8 @@ BREWFILE = PACKAGES / 'Brewfile'
 BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
 BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 PULLED = 'DALFTUI_BOOTSTRAP_PULLED'  # Set before restarting with updated code; stops a loop.
+SYMBOLS, PLAIN_SYMBOLS = '▸✓✗·', '>+x-'  # Step heading, done, failed and skipped; the plain ones for other consoles.
+BOLD, GREEN, RED, DIM = '1', '32', '31', '2'  # ANSI styles, shown on a terminal only.
 
 
 def read_packages(path, *, tmux_only=False):
@@ -88,9 +91,19 @@ class Bootstrap:
             self.log = log_path.open('a', encoding='utf-8')
         self.summary = {'installed': [], 'upgraded': [], 'skipped': [], 'failed': []}
         self.sudo_ready = None
+        try:  # A StringIO has no encoding but holds any text.
+            SYMBOLS.encode(getattr(sys.stdout, 'encoding', None) or 'utf-8')
+            self.symbols = SYMBOLS
+        except (UnicodeEncodeError, LookupError):
+            self.symbols = PLAIN_SYMBOLS
+        self.color = (sys.stdout.isatty() and not os.environ.get('NO_COLOR')  # https://no-color.org
+                      and os.environ.get('TERM') != 'dumb')
 
-    def say(self, text):
-        print(text, end='', flush=True)
+    def say(self, text, style=None):
+        """Show text, styled on a terminal, and append it unstyled to the log."""
+        body = text.rstrip('\n')
+        print(f'\033[{style}m{body}\033[0m{text[len(body):]}' if style and self.color and body else text,
+              end='', flush=True)
         if self.log:
             self.log.write(text)
             self.log.flush()
@@ -98,13 +111,43 @@ class Bootstrap:
     def add(self, category, names):
         self.summary[category].extend(names)
 
+    @contextmanager
+    def step(self, title):
+        """Show a heading, then one result line for each kind of summary entry the step adds."""
+        self.say('\n')
+        self.say(f'{self.symbols[0]} {title}\n', BOLD)
+        before = {key: len(names) for key, names in self.summary.items()}
+        yield
+        lines = self.results({key: names[before[key]:] for key, names in self.summary.items()})
+        for text, style in lines or [(f'{self.symbols[3]} up to date', DIM)]:
+            self.say(f'  {text}\n', style)
+
+    def results(self, added):
+        """Plain entries share a line; an entry with a (detail) gets its own."""
+        _, done, failed, skipped = self.symbols
+        lines = []
+        for key, template, mark, style in (
+                ('installed', 'would install {}' if self.dry_run else '{} installed', done, GREEN),
+                ('upgraded', 'would upgrade {}' if self.dry_run else '{} upgraded', done, GREEN),
+                ('skipped', '{} up to date', skipped, DIM), ('failed', '{} failed', failed, RED)):
+            plain = [name for name in added[key] if ' (' not in name]
+            if plain:
+                names = str(len(plain)) if key == 'skipped' and len(plain) > 1 else ', '.join(plain)
+                text = f'{mark} {template.format(names)}'
+                text = text.replace('would install install', 'would run install').replace('install installed', 'install ran')
+                lines.append((text, style))
+            for name, _, detail in (entry.partition(' (') for entry in added[key] if ' (' in entry):
+                text = f'{name} ({detail}' if key == 'skipped' else f'{template.format(name)} ({detail}'
+                lines.append((f'{mark} {text}', style))
+        return lines
+
     def query(self, command):
         """Read-only command; its output is parsed, not shown."""
         return subprocess.run(command, capture_output=True, text=True, errors='replace', check=False)
 
     def run(self, command, *, log_output=True):
         """Run a command, showing its output and appending it to the log."""
-        self.say(f'$ {shlex.join(command)}\n')
+        self.say(f'$ {shlex.join(command)}\n', DIM)
         if not log_output:  # Progress bars stay on the terminal only.
             return subprocess.run(command, stdin=subprocess.DEVNULL, check=False)
         output = []
@@ -118,7 +161,7 @@ class Bootstrap:
     def sudo(self):
         """Ask for the password once and keep the credentials fresh until exit."""
         if self.sudo_ready is None:
-            self.say('$ sudo -v\n')
+            self.say('$ sudo -v\n', DIM)
             self.sudo_ready = subprocess.run(['sudo', '-v'], check=False).returncode == 0
             if self.sudo_ready:
                 threading.Thread(target=keep_sudo, daemon=True).start()
@@ -302,7 +345,6 @@ class Bootstrap:
         if after == before:
             self.add('skipped', [name])
         else:
-            self.say(f'{name} {before} -> {after}\n')
             self.add('upgraded', [f'{name} ({before} -> {after})'])
 
     def install(self, *, tmux_only):
@@ -411,20 +453,25 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     run = Bootstrap(dry_run=dry_run, log_path=state_directory() / 'bootstrap.log', apt=system == 'debian')
     run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
             f" {shlex.join(['bootstrap', *argv])} ==\n")
-    run.update_repo(list(argv))
+    with run.step('Checkout'):
+        run.update_repo(list(argv))
     packages = read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only)
     if not tmux_only:
-        run.vscode_repo()
-        if platform.machine() == 'x86_64':
-            run.dvc_repo()
-        else:
-            packages.remove('dvc')
-            run.add('skipped', ['DVC repository and dvc (x86-64 only)'])
-    run.packages(packages)
-    run.oh_my_posh()
-    run.mise()
-    run.uv()
-    run.install(tmux_only=tmux_only)
+        with run.step('Repositories'):
+            run.vscode_repo()
+            if platform.machine() == 'x86_64':
+                run.dvc_repo()
+            else:
+                packages.remove('dvc')
+                run.add('skipped', ['DVC repository and dvc (x86-64 only)'])
+    with run.step('Packages'):
+        run.packages(packages)
+    with run.step('User tools (oh-my-posh, mise, uv)'):
+        run.oh_my_posh()
+        run.mise()
+        run.uv()
+    with run.step('Configuration (./install)'):
+        run.install(tmux_only=tmux_only)
     return run.report()
 
 
@@ -444,7 +491,10 @@ def macos(*, dry_run, tmux_only, argv):
     run = Brew(brew=brew, dry_run=dry_run, log_path=state_directory() / 'bootstrap.log')
     run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
             f" {shlex.join(['bootstrap', *argv])} ==\n")
-    run.update_repo(list(argv))
-    run.packages(run.entries())
-    run.install(tmux_only=False)
+    with run.step('Checkout'):
+        run.update_repo(list(argv))
+    with run.step('Packages (Brewfile)'):
+        run.packages(run.entries())
+    with run.step('Configuration (./install)'):
+        run.install(tmux_only=False)
     return run.report()

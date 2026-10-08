@@ -320,6 +320,37 @@ class InstallStepTests(ScoopTestCase):
         self.assertEqual(run.summary['skipped'], ['install.cmd (not run in a dry run)'])
 
 
+class OutputTests(ScoopTestCase):
+    def test_colour_needs_virtual_terminal_processing(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled), redirect_stdout(Terminal()), \
+                    patch.dict(os.environ, {'TERM': 'xterm-256color'}), \
+                    patch.object(bootstrap, 'virtual_terminal', return_value=enabled):
+                os.environ.pop('NO_COLOR', None)
+                self.assertEqual(self.scoop().color, enabled)
+
+    def test_virtual_terminal_is_enabled_on_the_console(self):
+        with patch.object(bootstrap.ctypes, 'windll', create=True) as windll:
+            kernel32 = windll.kernel32
+            kernel32.GetConsoleMode.return_value = 1
+            kernel32.SetConsoleMode.return_value = 1
+            self.assertTrue(bootstrap.virtual_terminal())
+            self.assertEqual(kernel32.SetConsoleMode.call_args.args[1], 4)  # The mocked mode starts at 0.
+            kernel32.GetConsoleMode.return_value = 0  # Redirected output: no console.
+            self.assertFalse(bootstrap.virtual_terminal())
+
+    def test_steps_have_headings_and_results(self):
+        run = self.scoop()
+        with redirect_stdout(io.StringIO()) as output, patch.dict(os.environ, {'LOCALAPPDATA': str(run.scoop)}):
+            with run.step('Windows Terminal'):
+                run.terminal()
+        self.assertEqual(output.getvalue(), '\n▸ Windows Terminal\n  · Windows Terminal (not found; install it '
+                                            'from the Microsoft Store and open it once)\n')
+
+
 class StartTests(unittest.TestCase):
     def start(self, **kwargs):
         with patch.object(bootstrap, 'Scoop') as run, patch('sys.stderr', io.StringIO()) as error:

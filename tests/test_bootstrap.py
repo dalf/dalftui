@@ -624,5 +624,75 @@ class LogAndSummaryTests(unittest.TestCase):
             self.assertEqual(bootstrap.state_directory(), Path.home() / '.local/state/dalftui')
 
 
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def step_output(*, dry_run=False, stdout=None, env=(), log_path=None, **added):
+    """The output of one step that adds the given summary entries, from a Bootstrap made while it is stdout."""
+    stdout = stdout or io.StringIO()
+    with patch.dict(os.environ, dict(env)), redirect_stdout(stdout):
+        for name in ('NO_COLOR', 'TERM'):
+            if name not in dict(env):
+                os.environ.pop(name, None)
+        run = bootstrap.Bootstrap(ROOT, dry_run=dry_run, log_path=log_path)
+        with run.step('Packages'):
+            for category, names in added.items():
+                run.add(category, names)
+    if run.log:
+        run.log.close()
+    stdout.flush()
+    return stdout.getvalue() if isinstance(stdout, io.StringIO) else stdout.buffer.getvalue().decode('cp1252')
+
+
+class StepOutputTests(unittest.TestCase):
+    def test_heading_then_one_line_per_kind_of_result(self):
+        output = step_output(installed=['fzf', 'git'], upgraded=['uv (0.12.21 -> 0.12.23)'],
+                             skipped=['bat', 'tmux', 'dalftui (local changes)'], failed=['code (sudo)', 'dvc'])
+        self.assertEqual(output, '\n▸ Packages\n  ✓ fzf, git installed\n  ✓ uv upgraded (0.12.21 -> 0.12.23)\n'
+                                 '  · 2 up to date\n  · dalftui (local changes)\n  ✗ dvc failed\n'
+                                 '  ✗ code failed (sudo)\n')
+
+    def test_single_skipped_entry_and_empty_step(self):
+        self.assertEqual(step_output(skipped=['tmux']), '\n▸ Packages\n  · tmux up to date\n')
+        self.assertEqual(step_output(), '\n▸ Packages\n  · up to date\n')
+
+    def test_dry_run_wording(self):
+        self.assertEqual(step_output(dry_run=True, installed=['fzf'], upgraded=['git', 'tmux']),
+                         '\n▸ Packages\n  ✓ would install fzf\n  ✓ would upgrade git, tmux\n')
+
+    def test_configuration_step_wording(self):
+        self.assertEqual(step_output(installed=['install']), '\n▸ Packages\n  ✓ install ran\n')
+        self.assertEqual(step_output(dry_run=True, installed=['install']), '\n▸ Packages\n  ✓ would run install\n')
+
+    def test_colour_only_on_a_terminal_without_no_color_or_dumb_term(self):
+        added = {'installed': ['fzf'], 'skipped': ['git'], 'failed': ['dvc']}
+        output = step_output(stdout=Terminal(), **added)
+        self.assertEqual(output, '\n\033[1m▸ Packages\033[0m\n\033[32m  ✓ fzf installed\033[0m\n'
+                                 '\033[2m  · git up to date\033[0m\n\033[31m  ✗ dvc failed\033[0m\n')
+        for env in ({'NO_COLOR': '1'}, {'TERM': 'dumb'}):
+            with self.subTest(env=env):
+                self.assertNotIn('\033', step_output(stdout=Terminal(), env=env, **added))
+        self.assertNotIn('\033', step_output(**added))
+
+    def test_log_has_no_escapes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'bootstrap.log'
+            self.assertIn('\033[', step_output(stdout=Terminal(), log_path=log, installed=['fzf']))
+            self.assertEqual(log.read_text(encoding='utf-8'), '\n▸ Packages\n  ✓ fzf installed\n')
+
+    def test_command_echo_is_dim(self):
+        with redirect_stdout(Terminal()) as output, patch.dict(os.environ, {'TERM': 'xterm'}):
+            os.environ.pop('NO_COLOR', None)
+            bootstrap.Bootstrap(ROOT).run([sys.executable, '-c', 'print("out")'])
+        self.assertTrue(output.getvalue().startswith(f'\033[2m$ {sys.executable} -c \'print("out")\'\033[0m\nout\n'))
+
+    def test_plain_symbols_when_the_console_cannot_encode_them(self):
+        stdout = io.TextIOWrapper(io.BytesIO(), encoding='cp1252')
+        self.assertEqual(step_output(stdout=stdout, installed=['fzf'], skipped=['git'], failed=['dvc']),
+                         '\n> Packages\n  + fzf installed\n  - git up to date\n  x dvc failed\n')
+
+
 if __name__ == '__main__':
     unittest.main()
