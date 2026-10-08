@@ -138,7 +138,11 @@ Each run, in order (a failed step does not stop the next ones):
    [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
    and `/etc/yum.repos.d/vscode.repo`, or `/etc/apt/sources.list.d/vscode.sources`
    on apt) when that file is missing. A `code` package installed from a download
-   is then upgraded from the repository.
+   is then upgraded from the repository. It adds [DVC's repository](https://dvc.org/doc/install/linux)
+   the same way (`/etc/yum.repos.d/dvc.repo` or `/etc/apt/sources.list.d/dvc.sources`)
+   on x86-64 only; elsewhere it skips both the repository and the `dvc` package.
+   DVC's signing key expires 2027-03-04; if DVC rotates it, delete that file and
+   rerun bootstrap.
 3. Installs each missing package from
    [packages/fedora.txt](../packages/fedora.txt) or
    [packages/debian.txt](../packages/debian.txt) with its own `dnf install` or
@@ -157,7 +161,7 @@ Each run, in order (a failed step does not stop the next ones):
    with 1 when anything failed.
 
 The package lists have one package per line; `#` starts a comment. The
-packages after `[desktop]` (OpenSSH, Alacritty, VS Code and fido2-tools) are skipped with
+packages after `[desktop]` (OpenSSH, Alacritty, VS Code, DVC and fido2-tools) are skipped with
 `--tmux-only`. On apt, bat's command is `batcat`, and yq is not installed:
 Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 

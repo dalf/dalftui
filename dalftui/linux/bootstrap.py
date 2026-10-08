@@ -28,6 +28,15 @@ VSCODE_KEYRING = Path('/usr/share/keyrings/microsoft.asc')
 VSCODE_SOURCES = Path('/etc/apt/sources.list.d/vscode.sources')
 VSCODE_SOURCES_TEXT = ('Types: deb\nURIs: https://packages.microsoft.com/repos/code\nSuites: stable\nComponents: main\n'
                        f'Architectures: amd64,arm64,armhf\nSigned-By: {VSCODE_KEYRING}\n')
+# DVC's documented setup: https://dvc.org/doc/install/linux; packages are x86-64 only. The key expires 2027-03-04.
+DVC_APT_KEY = 'https://dvc.org/deb/iterative.asc'
+DVC_RPM_KEY = 'https://dvc.org/rpm/iterative.asc'
+DVC_REPO = Path('/etc/yum.repos.d/dvc.repo')
+DVC_REPO_TEXT = f'[dvc]\nname=DVC\nbaseurl=https://dvc.org/rpm/\nenabled=1\ngpgcheck=1\ngpgkey={DVC_RPM_KEY}\n'
+DVC_KEYRING = Path('/usr/share/keyrings/iterative.asc')
+DVC_SOURCES = Path('/etc/apt/sources.list.d/dvc.sources')
+DVC_SOURCES_TEXT = ('Types: deb\nURIs: https://dvc.org/deb/\nSuites: stable\nComponents: main\n'
+                    f'Architectures: amd64\nSigned-By: {DVC_KEYRING}\n')
 BREWFILE = PACKAGES / 'Brewfile'
 BREW_PATHS = ('/opt/homebrew/bin/brew', '/usr/local/bin/brew')  # Apple Silicon, Intel
 BREW_INSTALLER = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
@@ -219,31 +228,44 @@ class Bootstrap:
 
     def vscode_repo(self):
         """Add Microsoft's VS Code repository once, so dnf or apt installs and upgrades the code package."""
-        # vscode.list: an older apt setup; a second source with another Signed-By makes apt fail.
-        existing = (VSCODE_SOURCES, VSCODE_SOURCES.with_suffix('.list')) if self.apt else (VSCODE_REPO,)
-        if any(path.exists() for path in existing):
-            self.add('skipped', ['VS Code repository'])
+        if self.apt:
+            self.repository('VS Code repository', VSCODE_KEY, VSCODE_SOURCES, VSCODE_SOURCES_TEXT, VSCODE_KEYRING)
+        else:
+            self.repository('VS Code repository', VSCODE_KEY, VSCODE_REPO, VSCODE_REPO_TEXT)
+
+    def dvc_repo(self):
+        """Add DVC's repository once, so dnf or apt installs and upgrades the dvc package."""
+        if self.apt:
+            self.repository('DVC repository', DVC_APT_KEY, DVC_SOURCES, DVC_SOURCES_TEXT, DVC_KEYRING)
+        else:
+            self.repository('DVC repository', DVC_RPM_KEY, DVC_REPO, DVC_REPO_TEXT)
+
+    def repository(self, name, key, path, text, keyring=None):
+        """Write a repository file once; apt gets the key in `keyring`, dnf imports it with rpm."""
+        # A .list: an older apt setup; a second source with another Signed-By makes apt fail.
+        if path.exists() or (self.apt and path.with_suffix('.list').exists()):
+            self.add('skipped', [name])
             return
         if self.dry_run:
-            self.add('installed', ['VS Code repository'])
+            self.add('installed', [name])
             return
         if not self.sudo():
-            self.add('failed', ['VS Code repository (sudo)'])
+            self.add('failed', [f'{name} (sudo)'])
             return
 
         def write(path, text):
             return self.run(['sudo', 'sh', '-c', f'printf %s {shlex.quote(text)} > {path}']).returncode
         if self.apt:  # Fetched in Python: a minimal Debian has no curl yet.
             try:
-                with urllib.request.urlopen(VSCODE_KEY, timeout=60) as response:
-                    key = response.read().decode('ascii')
+                with urllib.request.urlopen(key, timeout=60) as response:
+                    armored = response.read().decode('ascii')
             except (OSError, ValueError) as error:
-                self.say(f'VS Code key: {error}\n')
-                key = None
-            failed = not key or write(VSCODE_KEYRING, key) or write(VSCODE_SOURCES, VSCODE_SOURCES_TEXT)
+                self.say(f'{name} key: {error}\n')
+                armored = None
+            failed = not armored or write(keyring, armored) or write(path, text)
         else:
-            failed = self.run(['sudo', 'rpm', '--import', VSCODE_KEY]).returncode or write(VSCODE_REPO, VSCODE_REPO_TEXT)
-        self.add('failed' if failed else 'installed', ['VS Code repository'])
+            failed = self.run(['sudo', 'rpm', '--import', key]).returncode or write(path, text)
+        self.add('failed' if failed else 'installed', [name])
 
     def oh_my_posh(self):
         directory = shlex.quote(str(Path.home() / '.local/bin'))
@@ -390,9 +412,15 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
     run.say(f"\n== dalftui bootstrap {datetime.now().isoformat(timespec='seconds')}"
             f" {shlex.join(['bootstrap', *argv])} ==\n")
     run.update_repo(list(argv))
+    packages = read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only)
     if not tmux_only:
         run.vscode_repo()
-    run.packages(read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only))
+        if platform.machine() == 'x86_64':
+            run.dvc_repo()
+        else:
+            packages.remove('dvc')
+            run.add('skipped', ['DVC repository and dvc (x86-64 only)'])
+    run.packages(packages)
     run.oh_my_posh()
     run.mise()
     run.uv()

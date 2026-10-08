@@ -146,7 +146,7 @@ class PackageListTests(unittest.TestCase):
                 desktop = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt')
                 for name in ('python3', 'git', 'tmux', 'less', 'fontconfig', 'curl', 'unzip'):
                     self.assertIn(name, server)
-                self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'fido2-tools'})
+                self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'dvc', 'fido2-tools'})
         # Debian's yq is a different program from the mikefarah/yq that Fedora installs.
         self.assertNotIn('yq', bootstrap.read_packages(bootstrap.PACKAGES / 'debian.txt'))
 
@@ -300,6 +300,25 @@ class StartTests(unittest.TestCase):
             self.assertIn(message, error.getvalue())
             run.assert_not_called()
 
+    def test_dvc_is_skipped_off_x86_64(self):
+        for machine, dvc in (('x86_64', True), ('aarch64', False)):
+            with self.subTest(machine=machine), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(bootstrap.os, 'geteuid', return_value=1000), \
+                    patch.object(bootstrap.sys, 'platform', 'linux'), \
+                    patch.object(bootstrap, 'family', return_value='fedora'), \
+                    patch.object(bootstrap.shutil, 'which', return_value='/usr/bin/sudo'), \
+                    patch.object(bootstrap, 'state_directory', return_value=Path(directory)), \
+                    patch.object(bootstrap.platform, 'machine', return_value=machine), \
+                    patch.dict(os.environ, {'PATH': os.environ.get('PATH', '')}), \
+                    patch.object(bootstrap, 'Bootstrap') as bootstrap_class:
+                bootstrap.bootstrap()
+            run = bootstrap_class.return_value
+            run.vscode_repo.assert_called_once_with()
+            self.assertEqual(run.dvc_repo.called, dvc)
+            self.assertEqual('dvc' in run.packages.call_args.args[0], dvc)
+            skipped = [call.args for call in run.add.call_args_list]
+            self.assertEqual(skipped, [] if dvc else [('skipped', ['DVC repository and dvc (x86-64 only)'])])
+
     def test_macos_refuses_root_without_mentioning_sudo(self):
         with patch.object(bootstrap.os, 'geteuid', return_value=0), patch.object(bootstrap.sys, 'platform', 'darwin'), \
                 patch('sys.stderr', io.StringIO()) as error:
@@ -390,63 +409,80 @@ class UserToolTests(unittest.TestCase):
                 self.assertEqual(len(run.summary[category]), 1)
 
 
-class VSCodeRepositoryTests(unittest.TestCase):
-    def add_repo(self, *, exists, dry_run=False):
+# Each repository step: method, summary name, file stem, rpm key, apt key and keyring.
+REPOSITORIES = (
+    ('vscode_repo', 'VS Code repository', 'vscode', 'VSCODE_KEY', 'VSCODE_KEY', '/usr/share/keyrings/microsoft.asc'),
+    ('dvc_repo', 'DVC repository', 'dvc', 'DVC_RPM_KEY', 'DVC_APT_KEY', '/usr/share/keyrings/iterative.asc'),
+)
+
+
+class RepositoryStepTests(unittest.TestCase):
+    def add_repo(self, method, stem, *, exists, dry_run=False):
         with tempfile.TemporaryDirectory() as directory:
-            repo = Path(directory) / 'vscode.repo'
+            repo = Path(directory) / f'{stem}.repo'
             if exists:
-                repo.write_text('[code]\n', encoding='utf-8')
+                repo.write_text('[repo]\n', encoding='utf-8')
             run = FakeBootstrap({}, dry_run=dry_run)
-            with patch.object(bootstrap, 'VSCODE_REPO', repo):
-                quietly(run.vscode_repo)
+            with patch.object(bootstrap, f'{stem.upper()}_REPO', repo):
+                quietly(getattr(run, method))
         return run, repo
 
     def test_missing_repository_is_added_with_the_key(self):
-        run, repo = self.add_repo(exists=False)
-        self.assertEqual(run.commands[:2], [['sudo', '-v'], ['sudo', 'rpm', '--import', bootstrap.VSCODE_KEY]])
-        self.assertEqual(run.commands[2][:3], ['sudo', 'sh', '-c'])
-        self.assertIn(f'> {repo}', run.commands[2][3])
+        for method, name, stem, key, _, _ in REPOSITORIES:
+            with self.subTest(method=method):
+                run, repo = self.add_repo(method, stem, exists=False)
+                self.assertEqual(run.commands[:2], [['sudo', '-v'], ['sudo', 'rpm', '--import', getattr(bootstrap, key)]])
+                self.assertEqual(run.commands[2][:3], ['sudo', 'sh', '-c'])
+                self.assertIn(f'> {repo}', run.commands[2][3])
+                self.assertEqual(run.summary['installed'], [name])
         self.assertIn('baseurl=https://packages.microsoft.com/yumrepos/vscode\n', bootstrap.VSCODE_REPO_TEXT)
-        self.assertEqual(run.summary['installed'], ['VS Code repository'])
+        self.assertIn('baseurl=https://dvc.org/rpm/\n', bootstrap.DVC_REPO_TEXT)
+        self.assertIn('gpgcheck=1\ngpgkey=https://dvc.org/rpm/iterative.asc\n', bootstrap.DVC_REPO_TEXT)
 
     def test_existing_repository_and_dry_run_change_nothing(self):
-        for exists, dry_run, category in ((True, False, 'skipped'), (False, True, 'installed')):
-            with self.subTest(exists=exists, dry_run=dry_run):
-                run, _ = self.add_repo(exists=exists, dry_run=dry_run)
-                self.assertEqual(run.commands, [])
-                self.assertEqual(run.summary[category], ['VS Code repository'])
+        for method, name, stem, _, _, _ in REPOSITORIES:
+            for exists, dry_run, category in ((True, False, 'skipped'), (False, True, 'installed')):
+                with self.subTest(method=method, exists=exists, dry_run=dry_run):
+                    run, _ = self.add_repo(method, stem, exists=exists, dry_run=dry_run)
+                    self.assertEqual(run.commands, [])
+                    self.assertEqual(run.summary[category], [name])
 
 
-class AptVSCodeRepositoryTests(unittest.TestCase):
-    def add_repo(self, *, existing=None):
+class AptRepositoryStepTests(unittest.TestCase):
+    def add_repo(self, method, stem, *, existing=None):
         with tempfile.TemporaryDirectory() as directory:
-            sources = Path(directory) / 'vscode.sources'
+            sources = Path(directory) / f'{stem}.sources'
             if existing:
                 (Path(directory) / existing).write_text('deb ...\n', encoding='utf-8')
             run = FakeBootstrap({}, apt=True)
             response = io.BytesIO(b'-----BEGIN PGP PUBLIC KEY BLOCK-----\n')
-            with patch.object(bootstrap, 'VSCODE_SOURCES', sources), \
+            with patch.object(bootstrap, f'{stem.upper()}_SOURCES', sources), \
                     patch.object(bootstrap.urllib.request, 'urlopen', return_value=response) as urlopen:
-                quietly(run.vscode_repo)
+                quietly(getattr(run, method))
         return run, sources, urlopen
 
     def test_missing_repository_writes_the_key_and_sources(self):
-        run, sources, urlopen = self.add_repo()
-        urlopen.assert_called_once_with(bootstrap.VSCODE_KEY, timeout=60)
-        self.assertEqual(run.commands[0], ['sudo', '-v'])
-        self.assertIn('BEGIN PGP', run.commands[1][3])
-        self.assertIn(f'> {bootstrap.VSCODE_KEYRING}', run.commands[1][3])
-        self.assertIn(f'> {sources}', run.commands[2][3])
-        self.assertIn('Signed-By: /usr/share/keyrings/microsoft.asc\n', bootstrap.VSCODE_SOURCES_TEXT)
-        self.assertEqual(run.summary['installed'], ['VS Code repository'])
+        for method, name, stem, _, key, keyring in REPOSITORIES:
+            with self.subTest(method=method):
+                run, sources, urlopen = self.add_repo(method, stem)
+                urlopen.assert_called_once_with(getattr(bootstrap, key), timeout=60)
+                self.assertEqual(run.commands[0], ['sudo', '-v'])
+                self.assertIn('BEGIN PGP', run.commands[1][3])
+                self.assertIn(f'> {keyring}', run.commands[1][3])
+                self.assertIn(f'> {sources}', run.commands[2][3])
+                self.assertIn(f'Signed-By: {keyring}\n', getattr(bootstrap, f'{stem.upper()}_SOURCES_TEXT'))
+                self.assertEqual(run.summary['installed'], [name])
+        self.assertEqual(bootstrap.DVC_SOURCES_TEXT, 'Types: deb\nURIs: https://dvc.org/deb/\nSuites: stable\n'
+                         'Components: main\nArchitectures: amd64\nSigned-By: /usr/share/keyrings/iterative.asc\n')
 
     def test_existing_sources_or_older_list_change_nothing(self):
-        for existing in ('vscode.sources', 'vscode.list'):
-            with self.subTest(existing=existing):
-                run, _, urlopen = self.add_repo(existing=existing)
-                self.assertEqual(run.commands, [])
-                urlopen.assert_not_called()
-                self.assertEqual(run.summary['skipped'], ['VS Code repository'])
+        for method, name, stem, _, _, _ in REPOSITORIES:
+            for existing in (f'{stem}.sources', f'{stem}.list'):
+                with self.subTest(existing=existing):
+                    run, _, urlopen = self.add_repo(method, stem, existing=existing)
+                    self.assertEqual(run.commands, [])
+                    urlopen.assert_not_called()
+                    self.assertEqual(run.summary['skipped'], [name])
 
 
 class RepositoryTests(unittest.TestCase):

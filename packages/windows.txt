@@ -27,6 +27,7 @@ fzf
 gh
 sqlite             # provides the sqlite3 command
 zip
+dvc
 extras/mc
 extras/notepadplusplus
 extras/vcredist2022

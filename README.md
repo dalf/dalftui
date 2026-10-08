@@ -228,7 +228,7 @@ cd ~/code/dalftui
 ```
 
 Bootstrap installs or upgrades the listed packages, Oh My Posh, mise, and uv.
-Desktop mode also sets up Microsoft's VS Code package repository. Installation
+Desktop mode also sets up Microsoft's VS Code and DVC's package repositories. Installation
 then configures Alacritty, tmux, the prompt, and installs Hack Nerd Font. Open a new
 Alacritty window afterward.
 
@@ -254,7 +254,7 @@ cd ~/code/dalftui
 ```
 
 On an existing checkout, skip the clone. This skips the `[desktop]` package
-section and VS Code repository setup, configures tmux and the bash prompt,
+section and the VS Code and DVC repository setup, configures tmux and the bash prompt,
 leaves Alacritty alone, and installs no font; the terminal you connect from
 needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the tmux-only profile; `./bootstrap`
 does not, so keep passing `--tmux-only`.

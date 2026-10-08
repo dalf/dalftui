@@ -37,4 +37,5 @@ zsh
 openssh-client     # the SSH picker; requires 9.4+ (Debian 12 has 9.2)
 alacritty          # desktop install requires 0.14+ (Debian 13 only)
 code               # VS Code, from Microsoft's repository that bootstrap adds
+dvc                # from DVC's repository that bootstrap adds; x86-64 only
 fido2-tools

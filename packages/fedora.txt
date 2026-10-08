@@ -37,4 +37,5 @@ zsh
 openssh-clients    # the SSH picker; requires 9.4+
 alacritty          # desktop install requires 0.14+
 code               # VS Code, from Microsoft's repository that bootstrap adds
+dvc                # from DVC's repository that bootstrap adds; x86-64 only
 fido2-tools
