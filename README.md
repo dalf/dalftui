@@ -105,7 +105,8 @@ The Oh My Posh prompt is shared by bash, zsh and PowerShell. It shows
 `user@host` only over SSH, the path, the Python environment, Git branch and
 changes, run time over 2 s, and failed exit codes. The window title is
 `repo@branch` in Git, otherwise the path; on Windows it starts with 🛡️ when
-elevated. The prompt also activates mise when it is installed.
+elevated. Git conflicts appear as a red `!N` count of unresolved files, separately
+from the `~N` modified count. The prompt also activates mise when it is installed.
 
 On Windows, the PowerShell profile also adds a few Unix-like commands and the
 `dssh` command (open the SSH picker, or `dssh HOST` to connect directly), and setup
