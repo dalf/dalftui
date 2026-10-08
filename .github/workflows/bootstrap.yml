@@ -102,6 +102,8 @@ jobs:
         run: |
           sudo -u tester -H fido2-token -V
           sudo -u tester -H dvc --version
+          sudo -u tester -H aws --version
+          sudo -u tester -H rclone version
 
   windows:
     runs-on: windows-latest
@@ -193,7 +195,7 @@ jobs:
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
           $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
-          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less', 'dvc') {
+          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less', 'dvc', 'aws', 'rclone') {
               $path = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
               "$tool ..."
               $version = @($null | & $tool --version)[0]
@@ -245,11 +247,11 @@ jobs:
           set -eo pipefail
           tmux -V
           fido2-token -V
-          for tool in git oh-my-posh uv mise lsd bat rg fzf jq yq btop wget gh htop nano code dvc; do
+          for tool in git oh-my-posh uv mise lsd bat rg fzf jq yq btop wget gh htop nano code dvc aws rclone; do
             "$tool" --version | head -n 1
           done
           # mc --version needs a terminal; 7zz has no --version.
-          for tool in tmux git uv mc 7zz socat fido2-token code; do command -v "$tool" | grep "^$(brew --prefix)/bin/"; done
+          for tool in tmux git uv mc 7zz socat fido2-token code aws rclone; do command -v "$tool" | grep "^$(brew --prefix)/bin/"; done
           test -f ~/Library/Fonts/HackNerdFont-Regular.ttf
           test -L ~/.config/dalftui
           /usr/bin/python3 ./install | grep 'Already installed'

@@ -27,6 +27,8 @@ brew "nano"                 # macOS's nano is pico
 brew "socat"
 brew "libfido2"             # fido2-token and the other FIDO2 tools
 brew "dvc"
+brew "awscli"
+brew "rclone"
 
 # Desktop
 cask "visual-studio-code"   # VS Code updates itself; links the code command

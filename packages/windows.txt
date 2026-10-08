@@ -28,6 +28,8 @@ gh
 sqlite             # provides the sqlite3 command
 zip
 dvc
+aws                # AWS CLI v2
+rclone
 extras/mc
 extras/notepadplusplus
 extras/vcredist2022

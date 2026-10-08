@@ -161,7 +161,7 @@ Each run, in order (a failed step does not stop the next ones):
    with 1 when anything failed.
 
 The package lists have one package per line; `#` starts a comment. The
-packages after `[desktop]` (OpenSSH, Alacritty, VS Code, DVC and fido2-tools) are skipped with
+packages after `[desktop]` (OpenSSH, Alacritty, VS Code, DVC, AWS CLI, rclone and fido2-tools) are skipped with
 `--tmux-only`. On apt, bat's command is `batcat`, and yq is not installed:
 Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 

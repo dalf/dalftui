@@ -140,13 +140,13 @@ class PackageListTests(unittest.TestCase):
             bootstrap.read_packages(self.path)
 
     def test_repository_lists_are_valid_and_have_install_requirements(self):
-        for family, ssh in (('fedora', 'openssh-clients'), ('debian', 'openssh-client')):
+        for family, ssh, aws in (('fedora', 'openssh-clients', 'awscli2'), ('debian', 'openssh-client', 'awscli')):
             with self.subTest(family=family):
                 server = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt', tmux_only=True)
                 desktop = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt')
                 for name in ('python3', 'git', 'tmux', 'less', 'fontconfig', 'curl', 'unzip'):
                     self.assertIn(name, server)
-                self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'dvc', 'fido2-tools'})
+                self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'dvc', aws, 'rclone', 'fido2-tools'})
         # Debian's yq is a different program from the mikefarah/yq that Fedora installs.
         self.assertNotIn('yq', bootstrap.read_packages(bootstrap.PACKAGES / 'debian.txt'))
 
