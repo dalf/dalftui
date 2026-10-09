@@ -86,7 +86,7 @@ command layout and a supported protocol declaration; they do not need identical
 Git revisions. Installations with the previous root command layout, without a
 readable protocol declaration, or declaring an unsupported version keep normal
 tmux login but skip the VS Code bridge. The launcher suggests updating dalftui
-from [GitHub](https://github.com/dalf/dalftui) on that server. It does not download
+from [GitHub](https://github.com/dalf/dalftui) on the older machine. It does not download
 or deploy the desktop checkout. Servers without tmux or without dalftui still
 connect silently, as described in [tmux.md](tmux.md#session-policy).
 
