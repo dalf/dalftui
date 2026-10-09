@@ -490,6 +490,22 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(vscode.read_message(connection), {'ok': True, 'protocol_version': 1})
         self.assertEqual(self.launch.call_args.args[:2], (folder, 'fixed-host'))
 
+    def test_new_folders_are_limited_per_period_but_repeats_always_open(self):
+        bridge = self.bridge()
+        def request(folder):
+            connection = self.connect(bridge)
+            vscode.send_message(connection, {'folder': folder, 'token': bridge.token})
+            return vscode.read_message(connection)
+        now = 1000.0
+        with patch.object(vscode.time, 'monotonic', lambda: now):
+            for index in range(vscode.MAX_NEW_FOLDERS):
+                self.assertTrue(request(f'/project/{index}').get('ok'))
+            self.assertIn('new folders', request('/project/extra')['error'])
+            self.assertTrue(request('/project/0').get('ok'))
+            self.assertEqual(self.launch.call_count, vscode.MAX_NEW_FOLDERS + 1)
+            now += vscode.NEW_FOLDER_PERIOD
+            self.assertTrue(request('/project/extra').get('ok'))
+
     @unittest.skipIf(os.name == 'nt', 'Private Unix sockets are the Linux transport')
     def test_unix_shutdown_interrupts_readers_and_removes_private_directory(self):
         bridge = self.bridge(transport='unix', request_timeout=30)

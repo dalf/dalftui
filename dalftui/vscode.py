@@ -25,6 +25,9 @@ RESPONSE_TIMEOUT = 3
 LAUNCH_TIMEOUT = 15
 CLIENT_TIMEOUT = 20
 MAX_CONNECTIONS = 8
+# A runaway remote loop stops after this many new folders; repeats always open.
+MAX_NEW_FOLDERS = 10
+NEW_FOLDER_PERIOD = 600
 WINDOWS = sys.platform == 'win32'
 
 
@@ -117,6 +120,7 @@ class EditorBridge:
             self.lock = threading.Lock()
             self.connections = set()
             self.processes = set()
+            self.opened = {}
             self.pending = queue.Queue(maxsize=self.max_connections)
             self.workers = []
             for _ in range(self.max_connections):
@@ -172,6 +176,7 @@ class EditorBridge:
             operation = parse_request(message)
             if self.stopped.is_set():
                 return
+            self.admit(operation.folder)
             launch(operation.folder, self.destination, self.env, runner=self.run_editor)
             response = success_message()
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
@@ -183,6 +188,18 @@ class EditorBridge:
                 send_message(connection, response)
             except (OSError, ValueError):
                 pass
+
+    def admit(self, folder):
+        now = time.monotonic()
+        with self.lock:
+            self.opened = {key: opened for key, opened in self.opened.items()
+                           if now - opened < NEW_FOLDER_PERIOD}
+            if folder in self.opened:
+                return
+            if len(self.opened) >= MAX_NEW_FOLDERS:
+                raise RuntimeError(f'This connection requested {MAX_NEW_FOLDERS} new folders in the last '
+                                   f'{NEW_FOLDER_PERIOD // 60} minutes. Wait, or reconnect to reset.')
+            self.opened[folder] = now
 
     def run_editor(self, command, *, env, timeout, **_kwargs):
         """Start under the shutdown lock; wait outside it so accepts stay independent."""

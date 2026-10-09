@@ -319,6 +319,13 @@ class FrozenPeerTests(unittest.TestCase):
                     legacy.request(f'tcp:127.0.0.1:{bridge.local_port}',
                                    legacy.FOLDER, bridge.token)
 
+    def test_old_remote_client_reads_current_laptop_folder_limit(self):
+        with patch.object(vscode, 'launch'), patch.object(vscode, 'MAX_NEW_FOLDERS', 0):
+            with vscode.EditorBridge('server', transport='tcp') as bridge:
+                with self.assertRaisesRegex(RuntimeError, 'new folders'):
+                    legacy.request(f'tcp:127.0.0.1:{bridge.local_port}',
+                                   legacy.FOLDER, bridge.token)
+
     def test_old_remote_client_uses_current_configured_windows_editor(self):
         with tempfile.TemporaryDirectory(prefix='dalftui-historical-windows-') as directory:
             root = Path(directory).resolve()
