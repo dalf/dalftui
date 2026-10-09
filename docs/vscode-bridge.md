@@ -32,7 +32,7 @@ the bridge; reconnect with the picker, or run
 `python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
 
-Both Unix and TCP bridges require a fresh, random 32-byte token for every SSH
+Both Unix and TCP desktop listeners require a fresh, random 32-byte token for every SSH
 window. The token travels over SSH stdin, never in SSH command arguments or
 terminal titles. Before requesting forwarding, a separate SSH setup connection
 creates an unpredictable remote directory with mode 0700 and an exclusive
@@ -107,100 +107,19 @@ accepts v2 metadata with the same message semantics. Unsupported declared
 versions are rejected before launching VS Code. Recognizing an old wire message
 does not make an old root-layout or undeclared installation eligible for setup.
 
-## TCP bridge (Windows and `--bridge tcp`)
+## Windows desktops and `--bridge tcp`
 
-Windows connections to servers with a compatible dalftui bridge installed use
-a token-authenticated TCP bridge forwarded through SSH. dalftui binds the **desktop listener** to
-`127.0.0.1`. It explicitly requests a
-**remote SSH listener** with
-`-R 127.0.0.1:REMOTE_PORT:127.0.0.1:LOCAL_PORT`, but that listener's effective
-bind address also depends on the SSH server's policy. The Linux VM must permit
-remote TCP forwarding (`AllowTcpForwarding yes` or `remote`) and have an
-effective server-side `GatewayPorts` setting of **`no` or `clientspecified`**
-for loopback-only operation:
+Windows desktops listen for bridge requests on `127.0.0.1` TCP instead of a
+Unix socket; `--bridge tcp` selects the same listener on Linux or macOS. The
+server side is the same private Unix socket: dalftui forwards it with
+`-R REMOTE_DIRECTORY/editor.sock:127.0.0.1:LOCAL_PORT`, so the server must allow
+Unix socket forwarding. OpenSSH requires both
+`AllowStreamLocalForwarding` and `AllowTcpForwarding` set to `yes` or `remote`.
+No remote TCP port is opened, so server-side `GatewayPorts` does not apply.
 
-- `GatewayPorts no` (the OpenSSH default) restricts remote TCP forwards to
-  loopback. Prefer this when client-selected public forwards are unnecessary.
-- `GatewayPorts clientspecified` honors the client's requested address, so
-  dalftui's explicit `127.0.0.1` request also keeps the remote listener on loopback.
-- `GatewayPorts yes` forces wildcard binding even when dalftui requests
-  `127.0.0.1`. Other machines may then reach the forwarded port, depending on
-  routing and firewall rules.
-
-See OpenSSH's [`GatewayPorts` documentation](https://man.openbsd.org/sshd_config#GatewayPorts).
-These requirements apply to Windows's default TCP transport and Linux
-connections using `--bridge tcp`. Linux's default private Unix socket transport
-is unaffected by `GatewayPorts`.
-
-The token is sent through SSH stdin to a private file, then consumed when
-attaching; it is not included in remote command-line arguments. Setup uses an
-additional SSH connection, so password authentication may prompt twice. SSH
-keys and an agent avoid repeated prompts. The launcher chooses a remote
-forwarding port for each connection; if SSH reports that port is occupied,
-run the connection command again.
-
-Token authentication still prevents unauthorized editor launches. The request
-deadlines and concurrency limits described above bound slow-reader handling,
-but wider network reachability increases exposure to connection flooding.
-This conditional exposure does not imply an authentication bypass or establish
-that any particular server is exposed.
-
-Adding client-side `ssh -o GatewayPorts=no` does not override the server's
-remote-forwarding policy. `ExitOnForwardFailure=yes` confirms that forwarding
-succeeded, not that the listener is loopback-only. A firewall can restrict
-reachability, but does not establish the listener's bind address.
-
-To verify loopback-only TCP forwarding on the VM:
-
-1. Have the server administrator inspect the effective configuration for the
-   actual connection, including `Include` files and applicable `Match` rules.
-   For example, [`sshd -T -C`](https://man.openbsd.org/sshd#T) prints the effective
-   policy without starting or restarting a server:
-
-   ```sh
-   sudo /usr/sbin/sshd -T \
-     -C user=alice,addr=198.51.100.25,host=desktop.example.org,laddr=192.0.2.10,lport=22 \
-     | grep '^gatewayports '
-   ```
-
-   Replace the examples with the login user, client source address and resolved
-   hostname as seen by sshd (the jump host's details when using a jump host),
-   and the server address and SSH port. Use the running service's configuration
-   path (`-f` if nondefault) and any command-line policy overrides (`-o`).
-   Root/sudo access is usually needed to read protected configuration, included
-   files, and host keys for this check. Checking only one configuration file
-   cannot establish the effective policy. Expect `gatewayports no` or
-   `gatewayports clientspecified`; the next check verifies the live listener.
-
-2. While a dalftui TCP connection is active, list the tmux clients on the VM.
-   Choose the PID belonging to that connection's terminal and read its endpoint,
-   then inspect the remote port's listening address:
-
-   ```sh
-   tmux list-clients -F '#{client_pid} #{client_tty}'
-   tr '\0' '\n' < /proc/CLIENT_PID/environ | grep '^DALFTUI_EDITOR_SOCKET='
-   ss -ltn 'sport = :REMOTE_PORT'
-   ```
-
-   Replace `CLIENT_PID` with that PID and `REMOTE_PORT` with the number in
-   `tcp:127.0.0.1:REMOTE_PORT`. A pane's shell environment can retain an older
-   connection's endpoint, so use the selected tmux client's environment.
-   Inspect every result's **Local Address:Port** column. `127.0.0.1` and `::1`
-   are loopback addresses; `0.0.0.0`, `::` (often shown as `[::]`), and `*` are
-   wildcard addresses, not loopback. A specific non-loopback address also fails
-   this check. The endpoint string records dalftui's request, not the actual
-   binding. Listing addresses with `ss -ltn` normally needs no elevated
-   privileges; `sudo ss -ltnp` may be needed to identify the owning sshd process.
-
-### Update the server
-
-Update and reload dalftui on the VM before connecting from Windows:
-
-```sh
-cd ~/code/dalftui
-git pull --ff-only
-./install
-```
+Older Windows desktops forwarded a remote loopback TCP port and pass a
+`tcp:127.0.0.1:PORT` endpoint; current servers still accept it. Older servers
+already accept the Unix socket endpoint.
 
 ## Open a remote folder without dalftui
 

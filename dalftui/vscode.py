@@ -81,16 +81,12 @@ class EditorBridge:
         self.remote_token_file = self.remote_directory + '/token'
         # A separate, non-secret claim lets cleanup refuse a pre-existing directory.
         self.remote_owner_file = self.remote_directory + '/' + secrets.token_hex(16) + '.owner'
-        if self.transport == 'tcp':
-            self.remote_port = 49152 + secrets.randbelow(16384)
-            self.remote_socket = f'tcp:127.0.0.1:{self.remote_port}'
-        else:
-            self.remote_socket = self.remote_directory + '/editor.sock'
+        self.remote_socket = self.remote_directory + '/editor.sock'
 
     @property
     def forward_spec(self):
         if self.transport == 'tcp':
-            return f'127.0.0.1:{self.remote_port}:127.0.0.1:{self.local_port}'
+            return f'{self.remote_socket}:127.0.0.1:{self.local_port}'
         return f'{self.remote_socket}:{self.local_socket}'
 
     def __enter__(self):
