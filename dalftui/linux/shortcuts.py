@@ -189,7 +189,7 @@ def render(tmux_only=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--tmux-only', action='store_true', help='Show the server guide')
+    parser.add_argument('--tmux-only', action='store_true', help='Show the server and macOS guide')
     parser.add_argument('--print', action='store_true', help='Print without opening the pager')
     args = parser.parse_args()
     content = render(tmux_only=args.tmux_only)

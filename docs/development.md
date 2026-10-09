@@ -216,7 +216,7 @@ line-length and size heuristics, and recognizes the checkout's import/bootstrap
 and resource-lifecycle patterns. Error and warning checks such as undefined names,
 bad calls, unused imports, and unsafe defaults remain enabled. Output contains
 diagnostics without reports or scores; any enabled diagnostic fails the task.
-Both CI workflows run this same check before functionality tests. Use
+Linux and Windows CI run this same check before functionality tests. Use
 `mise run pylint` or `mise run lint` to run it separately.
 
 On Windows, the task exempts only the exact Unix API names listed in
@@ -268,10 +268,7 @@ Run the launcher, Terminal, and shared bridge suites:
 mise run test:windows
 ```
 
-This runs `test_windows*.py` discovery, selecting
-[tests/test_windows_launcher.py](../tests/test_windows_launcher.py)
-and [tests/test_windows_terminal.py](../tests/test_windows_terminal.py), followed by
-`test_bridge*.py` discovery.
+This runs `test_windows*.py` discovery, followed by `test_bridge*.py` discovery.
 Run the shared bridge lifecycle and historical compatibility suites separately:
 
 ```sh
@@ -283,7 +280,8 @@ and [tests/test_bridge_protocol.py](../tests/test_bridge_protocol.py). Together,
 the Windows and bridge selections cover native Windows CI's Python tests;
 platform and dependency skips still apply. Linux-targeted startup and remote
 bootstrap coverage lives in
-[tests/test_remote_bootstrap.py](../tests/test_remote_bootstrap.py) and runs with
+[tests/test_remote_bootstrap.py](../tests/test_remote_bootstrap.py) and
+[tests/test_ops_mode.py](../tests/test_ops_mode.py) and runs with
 full Linux discovery.
 
 Check the PowerShell setup and profile integration separately:
@@ -305,5 +303,5 @@ and recovery, shutdown races, and interruption of readers and editor CLI waits.
 A harmless native executable probe verifies that a project-local `Code.exe` is not run;
 another verifies the configured `Code.exe` + `cli.js` argument list and encoded
 local and remote folder URIs. Linux runs the cross-platform suite and simulated
-Windows launch tests. GUI launches and interactive SSH connections remain
-mocked; no automated test opens the VS Code GUI or an SSH connection.
+Windows launch tests. Apart from the opt-in tests above, GUI launches and SSH
+connections remain mocked; no automated test opens the VS Code GUI.

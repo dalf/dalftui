@@ -50,7 +50,7 @@ not establish compatibility when their meaning or bootstrap behavior changes.
   `dalftui/windows/`. Placement describes the target environment, not which
   operating systems may import portable helpers.
 - [dalftui/linux/remote_bootstrap.py](dalftui/linux/remote_bootstrap.py) is portable
-  Python generating Linux-server shell programs, also used by Windows desktops.
+  Python generating Linux-server shell programs, also used by Windows and macOS desktops.
   [dalftui/linux/tmux-start.sh](dalftui/linux/tmux-start.sh) owns the canonical
   startup policy. `bin/tmux-start.sh` forwards local startup; remote execution
   embeds the canonical policy directly.
@@ -75,7 +75,7 @@ Keep installation entrypoints at the root: `install` is the Linux installer;
 `install.cmd` invokes the Windows installer `install.ps1` with a process-scoped
 execution-policy bypass; `bootstrap.cmd` runs `bootstrap` with the Python uv finds, as one
 parenthesized block, because bootstrap's `git pull` can rewrite it while cmd runs it. Runtime and maintenance launchers belong in `bin/`:
-`reload`, `shortcuts.py`, `ssh_picker.py`, `vscode.py`, `terminal_settings.py`,
+`reload`, `shortcuts.py`, `ssh_picker.py`, `vscode.py`, `terminal_settings.py`, `tmux_label.py`,
 `profile.ps1`, and `tmux-start.sh`. They forward to implementations
 under `dalftui/` and resolve the checkout independently of the working directory.
 Python launchers resolve symlinks before finding the checkout.
@@ -113,7 +113,7 @@ This invokes Pylint 4.1.2 through uv, using the existing platform Python and
 [.pylintrc](.pylintrc). It checks the package, Python entrypoints (including
 `install` and `bin/reload`), standalone bridge contract, and tests; vendored code and
 frozen historical fixtures are excluded. Documentation and size/layout rules
-are relaxed while correctness checks remain enabled. Both CI workflows use this
+are relaxed while correctness checks remain enabled. Linux and Windows CI use this
 task. Fix useful diagnostics; keep any additional suppression narrow and explain
 it. `mise run lint` is an alias for the same task.
 

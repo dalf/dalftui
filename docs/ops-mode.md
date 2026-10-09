@@ -4,7 +4,7 @@
 
 Two read-only checks are built in: **packages** (Debian/Ubuntu APT status) and
 **system** (the detailed server overview described below).
-Add your own checks to `~/.ssh/dalftui-checks.json` on either client platform
+Add your own checks to `~/.ssh/dalftui-checks.json` on any client platform
 (`$HOME\.ssh\dalftui-checks.json` in PowerShell):
 
 ```json
@@ -41,7 +41,7 @@ while browsing or filtering hosts.
 
 ## Ops mode
 
-Ops mode supports Debian and Ubuntu servers from Windows and Linux clients.
+Ops mode supports Debian and Ubuntu servers from Windows, Linux and macOS clients.
 It creates a separate `dalftui-ops-PID` tmux session with this layout and focuses
 the bottom pane:
 
@@ -119,8 +119,9 @@ python3 bin/ssh_picker.py --connect sibils-api --ops
 ```
 
 On Windows, replace `python3` with `uv run --no-project --python ">=3.11"`. On Linux the desktop picker
-opens the selected connection action in a new Alacritty window; `--pick` and
-Windows use the current terminal. Plain mode skips dalftui's tmux policy; your
+opens the selected connection action in a new Alacritty window (on macOS, a new
+Terminal.app or iTerm2 window); `--pick` and Windows use the current terminal.
+Plain mode skips dalftui's tmux policy; your
 own shell startup files still run. Editor integration follows the same installed
 remote compatibility checks as a normal connection.
 

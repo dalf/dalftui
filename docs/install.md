@@ -266,8 +266,9 @@ and that a tmux server started from a zsh login shell finds uv.
 
 ## macOS
 
-For Terminal.app or iTerm2 with zsh. Requirements: uv, tmux 3.2+, Git, `less` and
-Oh My Posh. Git and `less` come with macOS; get the rest from Homebrew, or run
+For Terminal.app or iTerm2 with zsh. Requirements: uv, tmux 3.2+, Git, `less`,
+Oh My Posh, and OpenSSH 9.4+ for Ctrl+B, then h. Git and `less` come with macOS;
+get the rest from Homebrew, or run
 the bootstrap above, and make sure `brew shellenv` runs in your shell setup:
 
 ```sh
@@ -311,10 +312,11 @@ Keys and terminals:
 - **Ctrl+B, then h** chooses an SSH host and opens it in a new Terminal.app window,
   or iTerm2 when this tmux client is iTerm2. The first time, iTerm2 asks whether to
   run the generated file; it may open a tab instead of a window. F2 is not bound.
-- **F3** opens local VS Code only and needs its `code` command on the PATH of the
+- **F3** opens local VS Code and needs its `code` command on the PATH of the
   shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
-  *Shell Command: Install 'code' command in PATH*).
-  Relaying to the editor of a client connected over SSH is not supported on a Mac.
+  *Shell Command: Install 'code' command in PATH*). In a window opened with
+  Ctrl+B, then h, F3 on the server opens the remote folder in this Mac's VS Code.
+  A Mac cannot be the server end of the bridge.
 - **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
   Cmd+C copies.
 - **Ctrl+B, then Ctrl+arrow** (resize pane): by default macOS takes all four

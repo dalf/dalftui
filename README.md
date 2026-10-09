@@ -15,7 +15,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
 | **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
-| **VS Code (F3)** | local and remote folders | server end of the bridge | local and remote folders | local folders only |
+| **VS Code (F3)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
 
 The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
 contains *windows*, displayed like tabs; each window contains one or more
@@ -44,7 +44,7 @@ All shortcuts are tmux keys: they work in any terminal, including over SSH.
 | --- | --- | --- |
 | Shortcut guide | `Ctrl+B` `F1` | |
 | Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
-| Open folder in VS Code | `Ctrl+B` `F3` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection; macOS opens local folders only |
+| Open folder in VS Code | `Ctrl+B` `F3` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
 | New tab | `Ctrl+B` `c` | |
 | Previous / next tab | `Ctrl+B` `p` / `n` | |
 | Rename tab | `Ctrl+B` `,` | |
@@ -370,7 +370,8 @@ refused by the macOS bootstrap.
 macOS support has been exercised on CI; interactive keys and selection are
 documented as untested in real terminals. Local VS Code opening uses `code`
 (CI-tested only with a stand-in). Remote editor forwarding from a Mac desktop is
-untested, and macOS is not a supported server target for the bridge.
+CI-tested through a real SSH forward, not in real terminals; macOS is not a
+supported server target for the bridge.
 
 ## Applying repository changes without upgrading tools
 

@@ -14,7 +14,7 @@ sys.dont_write_bytecode = True
 ACTION_ID = 'User.DalftuiSshPicker'
 EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 PROMPT_FONT = 'Hack Nerd Font'
-# Also applied by the Linux desktop installer.
+# Also applied by ./install on Linux desktops and macOS.
 VSCODE_SETTINGS = {'terminal.integrated.fontFamily': PROMPT_FONT, 'terminal.integrated.fontSize': 12}
 # Windows Terminal's own PowerShell 7 profile, and a dalftui-owned elevated copy.
 PWSH_GUID = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'

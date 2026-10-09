@@ -409,7 +409,7 @@ function Invoke-DalftuiWindowsSetup {
           [switch]$Uninstall, [switch]$DryRun)
     $ErrorActionPreference = 'Stop'
     if (-not (Test-DalftuiWindowsPlatform)) {
-        throw 'This setup script targets Windows. On Linux, use ./install.'
+        throw 'This setup script targets Windows. On Linux or macOS, use ./install.'
     }
     if ($Uninstall) {
         Invoke-DalftuiWindowsUninstall -TargetProfile $TargetProfile -Checkout $Checkout `

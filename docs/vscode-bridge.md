@@ -5,7 +5,8 @@
 Press **Ctrl+B, then F3** in a tmux pane to open its directory in a new local
 VS Code window. Install VS Code's `code` command on your desktop.
 
-In an SSH window opened through **Ctrl+B, then F2** to a server with a compatible
+In an SSH window opened through the picker (**Ctrl+B, then F2**; **Ctrl+B, then h**
+on macOS) to a server with a compatible
 dalftui bridge installed, the same shortcut opens the remote pane's directory
 in local VS Code using Microsoft's **Remote - SSH** extension. VS Code uses
 the same SSH host alias and login as the picker, so your

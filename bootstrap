@@ -22,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='Show what would change without changing anything')
     parser.add_argument('--server', action='store_true',
-                        help='Skip the [desktop] packages and the VS Code repository, and pass --server to ./install')
+                        help='Skip the [desktop] packages and the VS Code and DVC repositories, and pass --server to ./install')
     args = parser.parse_args()
     return bootstrap(dry_run=args.dry_run, server=args.server, argv=sys.argv[1:])
 

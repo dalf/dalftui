@@ -33,8 +33,8 @@ add the destination to your config or cached host list.
 
 Use **F4–F7** directly on the highlighted host; there is no intermediate actions
 menu. The shortcut labels stay visible and wrap onto extra lines on narrow
-terminals, with the host grid resizing to fit. The same shortcuts work on Windows
-and Linux:
+terminals, with the host grid resizing to fit. The same shortcuts work on Windows,
+Linux and macOS:
 
 | Key | Action |
 | --- | --- |
@@ -92,7 +92,7 @@ use the cache. Missing, unreadable, or corrupt caches fall back to discovery;
 failed SSH evaluations are never cached. SSH connections still read live settings.
 
 The cache lives at `%LOCALAPPDATA%\dalftui\hosts-cache.json` on Windows, or
-`$XDG_CACHE_HOME/dalftui/hosts-cache.json` on Linux (defaulting to
+`$XDG_CACHE_HOME/dalftui/hosts-cache.json` on Linux and macOS (defaulting to
 `~/.cache/dalftui/hosts-cache.json`). To force a rebuild, run
 `mise run ssh:list -- --refresh-hosts`, or add `--refresh-hosts` when launching
 `bin/ssh_picker.py --pick`.
