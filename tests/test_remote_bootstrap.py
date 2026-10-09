@@ -84,6 +84,7 @@ class SshAutoTests(unittest.TestCase):
         bridge.remote_directory = str(self.directory / 'credentials')
         bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
         bridge.remote_token_file = bridge.remote_directory + '/token'
+        bridge.remote_socket = bridge.remote_directory + '/editor.sock'
 
         def local_ssh(command, **kwargs):
             self.assertNotIn('-R', command)

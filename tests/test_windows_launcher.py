@@ -180,8 +180,7 @@ with patch.object(sys, 'platform', 'win32'), \
                                  remote_directory="/tmp/credentials' $cash ; é",
                                  remote_owner_file="/tmp/credentials' $cash ; é/claim.owner",
                                  remote_token_file="/tmp/credentials' $cash ; é/token",
-                                 remote_socket=('/tmp/editor.sock' if transport == 'unix'
-                                                else 'tcp:127.0.0.1:49152'),
+                                 remote_socket="/tmp/credentials' $cash ; é/editor.sock",
                                  forward_spec='forward-probe')
         assert remote_bootstrap.prepare_credentials_script(bridge, check_installation=True)
         assert remote_bootstrap.cleanup_script(bridge)
@@ -758,7 +757,8 @@ raise SystemExit(status)
             self.assertIn('umask 077', run.call_args.args[0][-1])
             command = picker.ssh_command('vm-alias', 'alice', bridge)
             self.assertNotIn(bridge.token, ' '.join(command))
-            self.assertEqual(command[command.index('-R') + 1], bridge.forward_spec)
+            self.assertEqual(command[command.index('-R') + 1],
+                             f'{bridge.remote_directory}/editor.sock:127.0.0.1:{bridge.local_port}')
             self.assertIn(bridge.remote_token_file, command[-1])
             self.assertIn('ExitOnForwardFailure=yes', command)
 

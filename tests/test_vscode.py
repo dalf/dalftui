@@ -372,8 +372,8 @@ class RemoteCredentialsTests(unittest.TestCase):
         bridge.remote_directory = str(self.directory / Path(bridge.remote_directory).name)
         bridge.remote_owner_file = bridge.remote_directory + '/' + Path(bridge.remote_owner_file).name
         bridge.remote_token_file = bridge.remote_directory + '/token'
+        bridge.remote_socket = bridge.remote_directory + '/editor.sock'
         if transport == 'unix':
-            bridge.remote_socket = bridge.remote_directory + '/editor.sock'
             bridge.local_socket = '/tmp/test-local.sock'
         else:
             bridge.local_port = 12345
@@ -416,10 +416,9 @@ class RemoteCredentialsTests(unittest.TestCase):
                     self.assertEqual(stat.S_IMODE(Path(filename).stat().st_mode), 0o600)
                     self.assertEqual(Path(filename).stat().st_uid, os.getuid())
                 self.assertEqual(Path(bridge.remote_token_file).read_text(encoding='utf-8'), bridge.token + '\n')
-                if transport == 'unix':
-                    # Simulate sshd's bind locally before executing the command.
-                    with socket.socket(socket.AF_UNIX) as forwarded:
-                        forwarded.bind(bridge.remote_socket)
+                # Simulate sshd's bind locally before executing the command.
+                with socket.socket(socket.AF_UNIX) as forwarded:
+                    forwarded.bind(bridge.remote_socket)
                 result = self.attach(bridge, TEST_TMUX_STATUS='23', SHELL='/usr/bin/fish')
                 self.assertEqual(result.returncode, 23, result.stderr)
                 attachment = json.loads(Path(self.env['TEST_ATTACH']).read_text(encoding='utf-8'))
@@ -435,9 +434,8 @@ class RemoteCredentialsTests(unittest.TestCase):
                 with self.subTest(transport=transport, selection=selection):
                     bridge = self.bridge(transport)
                     self.prepare(bridge)
-                    if transport == 'unix':
-                        with socket.socket(socket.AF_UNIX) as forwarded:
-                            forwarded.bind(bridge.remote_socket)
+                    with socket.socket(socket.AF_UNIX) as forwarded:
+                        forwarded.bind(bridge.remote_socket)
                     result = self.real_run(
                         shlex.split(picker.ssh_command('server', bridge=bridge)[-1]),
                         env=dict(self.env, TEST_SESSION_ROWS='$5 0\n$9 1\n'),

@@ -206,7 +206,7 @@ separately afterward.
 Remote folder opening also requires VS Code's Remote - SSH extension on the
 desktop, dalftui installed on the Linux server, a connection made through the
 picker or `dssh` (plain `ssh` has no bridge), and an sshd allowing Unix-socket
-forwarding (Linux or macOS desktop) or remote TCP forwarding (Windows desktop).
+forwarding.
 Add your SSH hosts with `Tag dalftui` ([example](#personal-configuration-and-backups)).
 
 Bootstrap first runs `git pull --ff-only` when the checkout is clean. Check its

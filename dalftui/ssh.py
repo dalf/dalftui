@@ -488,7 +488,8 @@ def main():
     parser.add_argument('--refresh-hosts', action='store_true',
                         help='Recompute the picker host list instead of using its cache')
     parser.add_argument('--bridge', choices=('unix', 'tcp'),
-                        help='Editor bridge transport (default: TCP on Windows, Unix socket on Linux)')
+                        help='Desktop editor bridge listener; the server side is always a '
+                             'private Unix socket (default: TCP on Windows, Unix socket elsewhere)')
     args = parser.parse_args()
     if sys.version_info < (3, 11):
         parser.error('Python 3.11 or newer is required.')

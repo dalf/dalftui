@@ -44,6 +44,33 @@ bootstrap_v2 = importlib.util.module_from_spec(bootstrap_v2_spec)
 bootstrap_v2_spec.loader.exec_module(bootstrap_v2)
 
 
+def sshd_remote_forward(test, bridge):
+    """Model sshd serving the bridge's -R forward from its remote Unix socket."""
+    path, port = bridge.forward_spec.split(':127.0.0.1:')
+    test.assertEqual((path, int(port)), (bridge.remote_socket, bridge.local_port))
+    listener = socket.socket(socket.AF_UNIX)
+    test.addCleanup(listener.close)
+    listener.bind(path)
+    listener.listen(1)
+
+    def pump(source, target):
+        while data := source.recv(65536):
+            target.sendall(data)
+        target.shutdown(socket.SHUT_WR)
+
+    def serve():
+        remote = listener.accept()[0]
+        with remote, socket.create_connection(('127.0.0.1', int(port))) as local:
+            back = threading.Thread(target=pump, args=(local, remote))
+            back.start()
+            pump(remote, local)
+            back.join()
+
+    worker = threading.Thread(target=serve, daemon=True)
+    worker.start()
+    test.addCleanup(worker.join, 5)
+
+
 @unittest.skipIf(sys.platform == 'win32', 'Remote bootstrap executes in a POSIX shell')
 class BootstrapCompatibilityTests(unittest.TestCase):
     def setUp(self):
@@ -73,8 +100,7 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         return SimpleNamespace(transport=transport, remote_directory=str(directory),
                                remote_owner_file=str(directory / 'claim.owner'),
                                remote_token_file=str(directory / 'token'),
-                               remote_socket=(str(directory / 'editor.sock') if transport == 'unix'
-                                              else 'tcp:127.0.0.1:49152'))
+                               remote_socket=str(directory / 'editor.sock'))
 
     def install_historical(self, *, version=1):
         checkout = self.directory / 'historical root checkout'
@@ -192,11 +218,12 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 bridge.remote_directory = str(self.directory / (name + '-credentials'))
                 bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
                 bridge.remote_token_file = bridge.remote_directory + '/token'
-                # Substitute the SSH forward with this disposable listener.
-                bridge.remote_socket = f'tcp:127.0.0.1:{bridge.local_port}'
+                bridge.remote_socket = bridge.remote_directory + '/editor.sock'
                 prepared = self.run_script(remote_bootstrap.prepare_credentials_script(
                     bridge, check_installation=True), token=bridge.token + '\n')
                 self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                # The Windows-style desktop listener is TCP; the server side is a Unix socket.
+                sshd_remote_forward(self, bridge)
                 report = self.directory / (name + '-report')
                 command_log = self.directory / (name + '-tmux-commands')
                 self.env['TEST_SYSTEM_REPORT'] = str(report)
@@ -311,6 +338,18 @@ class FrozenPeerTests(unittest.TestCase):
                 self.assertEqual(args[0], legacy.FOLDER)
                 self.assertEqual(args[1], 'alice@fixed-server')
                 self.assertIs(kwargs['runner'].__self__, bridge)
+
+    @unittest.skipIf(os.name == 'nt', 'The server side is a POSIX Unix socket')
+    def test_old_remote_client_reaches_tcp_laptop_through_remote_unix_socket(self):
+        with (tempfile.TemporaryDirectory(prefix='dalftui-remote-') as directory,
+              patch.object(vscode, 'launch') as launch,
+              vscode.EditorBridge('alice@fixed-server', transport='tcp') as bridge):
+            bridge.remote_socket = directory + '/editor.sock'
+            self.assertEqual(frozen_v2.parse_endpoint(bridge.remote_socket),
+                             ('unix', bridge.remote_socket))
+            sshd_remote_forward(self, bridge)
+            legacy.request(bridge.remote_socket, legacy.FOLDER, bridge.token)
+            self.assertEqual(launch.call_args.args[:2], (legacy.FOLDER, 'alice@fixed-server'))
 
     def test_old_remote_client_reads_current_laptop_error(self):
         with patch.object(vscode, 'launch', side_effect=RuntimeError('Editor unavailable.')):

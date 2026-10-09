@@ -31,11 +31,10 @@ esac
 
 def _editor_resources(bridge):
     """Shell helpers for this bridge's private remote resources (Linux server)."""
-    socket_file = bridge.remote_socket if bridge.transport == 'unix' else ''
     return (f'editor_directory={shlex.quote(bridge.remote_directory)}\n'
             f'editor_owner={shlex.quote(bridge.remote_owner_file)}\n'
             f'editor_token={shlex.quote(bridge.remote_token_file)}\n'
-            f'editor_socket={shlex.quote(socket_file)}\n' + """
+            f'editor_socket={shlex.quote(bridge.remote_socket)}\n' + """
 editor_directory_valid() {
     [ ! -L "$editor_directory" ] && [ -d "$editor_directory" ] &&
     [ "$(stat -c '%u:%a' -- "$editor_directory")" = "$(id -u):700" ]
@@ -50,7 +49,7 @@ editor_owned() {
 cleanup_editor_resources() {
     if editor_owned; then
         rm -f -- "$editor_token"
-        if [ -n "$editor_socket" ]; then rm -f -- "$editor_socket"; fi
+        rm -f -- "$editor_socket"
         rm -f -- "$editor_owner"
         rmdir -- "$editor_directory" 2>/dev/null
     fi
