@@ -1,7 +1,5 @@
 # Secrets & keys guide
 
-Oct 8, 2026 · @Alex
-
 Every secret has one home: your hardware for proving who you are, Bitwarden for what must be remembered or shared, and the machine itself only for keys made for that machine. A lost laptop then means revoking its keys, never restoring files.
 
 ## The rule
@@ -58,7 +56,7 @@ Bitwarden holds what you must **remember** (one master password) and what the te
 | Enterprise | $6/user/month, billed annually | Not needed |
 
 - **Discount:** pricing pages list none. A Bitwarden blog says sales handles pricing for "nonprofits/educational institutions". Ask sales before buying.
-- **Collections** (suggested): `Infrastructure` (MinIO root user, server console/IPMI, DNS registrar; admins only) and `Shared services` (team accounts for shared web services; all members). Do **not** put personal S3 keys, SSH private keys or GitHub tokens there.
+- **Collections** (suggested): `Infrastructure` (admin credentials; admins only) and `Shared services` (team accounts for shared web services; all members). Do **not** put personal S3 keys, SSH private keys or GitHub tokens there.
 - **Emergency access** comes with Teams. Each member names a trusted contact, picks **View** or **Takeover** and sets a wait time. Takeover replaces the master password and removes two-step login.
 - Bitwarden suggests a second **Owner**; have at least two, so the team never depends on one person.
 
@@ -174,7 +172,9 @@ gh auth status          # shows where the token is stored
 
 The prefix tells you what a token is: `gho_` = gh login, `github_pat_` = fine-grained, `ghp_` = classic personal token (avoid). To cut off gh everywhere at once: *Settings → Applications → Authorized OAuth Apps → GitHub CLI → Revoke*. `gh auth logout` only deletes the local copy.
 
-### S3 (s3.text-analytics.ch)
+### S3 (s3.lan.text-analytics.ch)
+
+The endpoint is the team's internal one, `http://s3.lan.text-analytics.ch:9000`, reachable on the LAN or the VPN, as on the team's [S3 page](https://infra.text-analytics.ch/devdoc/services/s3/). From the internet, `https://s3.text-analytics.ch` serves only the public `pub-*` buckets.
 
 **Admin, once per person:** create a normal user (not an admin) and give it a policy that covers only the team buckets.
 
@@ -198,24 +198,24 @@ Users can create their own keys in the web console under **Access Keys**, or wit
 
 | OS | Store it (paste the JSON when asked) | `credential_process =` |
 | --- | --- | --- |
-| macOS | `security add-generic-password -s s3.text-analytics.ch -a laptop -U -w` | `/usr/bin/security find-generic-password -s s3.text-analytics.ch -a laptop -w` |
-| Linux desktop | `secret-tool store --label=S3 service s3.text-analytics.ch account laptop` | `/usr/bin/secret-tool lookup service s3.text-analytics.ch account laptop` |
-| Windows | `uv tool install keyring`, then `keyring set s3.text-analytics.ch laptop` | `"C:\Users\alice\.local\bin\keyring.exe" get s3.text-analytics.ch laptop` (run `uv tool dir --bin` to find the real folder) |
+| macOS | `security add-generic-password -s s3.lan.text-analytics.ch -a laptop -U -w` | `/usr/bin/security find-generic-password -s s3.lan.text-analytics.ch -a laptop -w` |
+| Linux desktop | `secret-tool store --label=S3 service s3.lan.text-analytics.ch account laptop` | `/usr/bin/secret-tool lookup service s3.lan.text-analytics.ch account laptop` |
+| Windows | `uv tool install keyring`, then `keyring set s3.lan.text-analytics.ch laptop` | `"C:\Users\alice\.local\bin\keyring.exe" get s3.lan.text-analytics.ch laptop` (run `uv tool dir --bin` to find the real folder) |
 | Server | put `[tas]` with both keys in `~/.aws/credentials`, then run `chmod 600` on it | (none) |
 
 In `~/.aws/config`, write full paths. Do not use `~`, `$HOME` or `%USERPROFILE%`:
 
 ```ini
 [profile tas]
-endpoint_url = https://s3.text-analytics.ch
+endpoint_url = http://s3.lan.text-analytics.ch:9000
 region = us-east-1
-credential_process = /usr/bin/security find-generic-password -s s3.text-analytics.ch -a laptop -w
+credential_process = /usr/bin/security find-generic-password -s s3.lan.text-analytics.ch -a laptop -w
 ```
 
 DVC (everyone uses the same profile name, so you can commit this):
 
 ```sh
-dvc remote modify storage endpointurl https://s3.text-analytics.ch
+dvc remote modify storage endpointurl http://s3.lan.text-analytics.ch:9000
 dvc remote modify storage profile tas
 ```
 
@@ -227,7 +227,7 @@ type = s3
 provider = Minio
 env_auth = true
 profile = tas
-endpoint = https://s3.text-analytics.ch
+endpoint = http://s3.lan.text-analytics.ch:9000
 ```
 
 Test it: `aws --profile tas s3 ls`.
@@ -287,7 +287,7 @@ Keys stored in hardware (Secure Enclave, TPM, YubiKey) cannot be copied off a st
 
 ## Sources
 
-Pages opened while writing this guide (October 2026). Not yet tested by the team: the built-in macOS Secure Enclave commands, the Windows `keyring` helper, rclone with `credential_process`, and whether MinIO AIStor Free has every `mc admin accesskey` option shown.
+Pages opened while writing this guide (October 2026). Not yet tested by the team: the built-in macOS Secure Enclave commands, the Windows `keyring` helper, rclone with `credential_process`, and whether our MinIO edition has every `mc admin accesskey` option shown.
 
 - [Bitwarden - Set up two-step login](https://bitwarden.com/help/setup-two-step-login/)
 - [Bitwarden - Two-step login via FIDO2 WebAuthn](https://bitwarden.com/help/setup-two-step-login-fido/)
@@ -340,7 +340,6 @@ Pages opened while writing this guide (October 2026). Not yet tested by the team
 - [AIStor: mc admin user disable](https://docs.min.io/aistor/reference/cli/admin/mc-admin-user/mc-admin-user-disable/)
 - [AIStor: mc admin policy attach](https://docs.min.io/enterprise/aistor-object-store/reference/cli/admin/mc-admin-policy/mc-admin-policy-attach/)
 - [AIStor: mc admin policy create](https://docs.min.io/enterprise/aistor-object-store/reference/cli/admin/mc-admin-policy/mc-admin-policy-create/)
-- [MinIO blog: AIStor Free, Enterprise Lite and Enterprise tiers](https://www.min.io/blog/introducing-new-subscription-tiers-for-minio-aistor-free-enterprise-lite-and-enterprise)
 - [AWS CLI v2: Sourcing credentials with an external process](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sourcing-external.html)
 - [security(1)](https://keith.github.io/xcode-man-pages/security.1.html)
 - [secret-tool(1)](https://man.archlinux.org/man/secret-tool.1.en)
