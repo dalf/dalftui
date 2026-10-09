@@ -100,7 +100,7 @@ jobs:
           root=$(tmux -L ci show -gv @dalftui_root)
           tmux -L ci run-shell "uv run --no-project --python '>=3.11' '$root/bin/vscode.py' --pane '%0' --client 1 --client-tty x"
           grep -q -- '--folder-uri' "$fake/code.log"
-          uv run --no-project --python '>=3.11' "$root/bin/shortcuts.py" --tmux-only --print > "$fake/guide"
+          tmux -L ci run-shell "uv run --no-project --python '>=3.11' '$root/bin/shortcuts.py' --tmux-only --print > '$fake/guide'"
           if grep Alacritty "$fake/guide"; then exit 1; fi
           grep -q 'Cmd+C' "$fake/guide"
           grep -q 'Ctrl+B → h' "$fake/guide"
