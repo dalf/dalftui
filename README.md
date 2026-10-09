@@ -7,14 +7,15 @@ shortcuts, appearance, SSH access, and VS Code integration.
 
 ## What it does
 
-| Layer | Tool | Role |
-| --- | --- | --- |
-| Terminal window | Alacritty on Linux; Windows Terminal on Windows; Terminal.app or iTerm2 on macOS | Displays text and handles keyboard input and the clipboard |
-| Sessions, tabs, and splits | tmux on Linux and macOS, including Linux SSH servers | Organizes terminals and keeps programs running after detaching |
-| Command shell | bash on Linux, PowerShell on Windows, zsh on macOS | Runs commands |
-| Prompt | Oh My Posh | Shows the directory, Git state, environments, command duration, and failures |
-| Remote access | OpenSSH plus dalftui's host picker | Selects servers and starts remote sessions |
-| Editor integration | VS Code plus dalftui's bridge | Opens the active terminal pane's folder in VS Code |
+| | Linux desktop | Linux server | Windows 10/11 | macOS |
+| --- | --- | --- | --- | --- |
+| **Set up with** | `./bootstrap` | `./bootstrap --server` | `.\bootstrap.cmd` | `./bootstrap` |
+| **Terminal window**: text, keyboard, clipboard | Alacritty | the terminal you connect from | Windows Terminal (installed separately) | Terminal.app or iTerm2 |
+| **tmux**: tabs, splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
+| **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
+| **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
+| **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | no |
+| **VS Code (F3)** | local and remote folders | server end of the bridge | local and remote folders | local folders only |
 
 The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
 contains *windows*, displayed like tabs; each window contains one or more
@@ -171,8 +172,6 @@ Bootstrap and installation also handle the following:
 - **GitHub CLI repository:** added on every machine, including `--server`.
 - **VS Code and DVC repositories:** added for desktop packages; DVC is x86-64 only.
 
-`--server` skips `[desktop]` packages, the VS Code and DVC repositories, and the font.
-
 **Windows**
 
 - **Python:** uv downloads it when needed.
@@ -195,13 +194,6 @@ Install Homebrew and uv before running bootstrap.
 bootstrap run installs or upgrades the [software listed above](#installed-software)
 and applies dalftui's configuration. You do not need to run the installer
 separately afterward.
-
-| Platform or profile | Bootstrap command from an existing checkout | What it runs afterward |
-| --- | --- | --- |
-| Linux desktop | `./bootstrap` | `./install` |
-| Linux server | `./bootstrap --server` | `./install --server` |
-| Windows | `.\bootstrap.cmd` | `install.cmd`; open a new PowerShell session afterward |
-| macOS | `./bootstrap` | `./install` in macOS mode |
 
 Remote folder opening also requires VS Code's Remote - SSH extension on the
 desktop, dalftui installed on the Linux server, a connection made through the
