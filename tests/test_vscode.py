@@ -153,7 +153,7 @@ class EditorTests(DisposableSetup):
                          ['--new-window', '--folder-uri', Path(folder).as_uri()])
 
     def test_installed_editor_entrypoint_opens_local_folder_outside_checkout(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         env = dict(self.editor_env)
         env.pop('PYTHONPATH', None)
         folder = self.directory / "project's $cash ; é"

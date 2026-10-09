@@ -241,9 +241,9 @@ class Scoop(Bootstrap):
         self.add('installed' if 'PowerShell profile configured:' in result.stdout else 'skipped', ['install'])
 
 
-def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
-    if tmux_only:
-        print('Bootstrap failed: --tmux-only is Linux-only.', file=sys.stderr)
+def bootstrap(*, dry_run=False, server=False, argv=()):
+    if server:
+        print('Bootstrap failed: --server is Linux-only.', file=sys.stderr)
         return 1
     if elevated():  # Scoop installs per user and refuses an administrator.
         print('Bootstrap failed: run bootstrap from a non-elevated PowerShell; Scoop installs per user.',

@@ -67,7 +67,7 @@ until Enter is pressed. A plain shell has no tmux shortcuts, persistence, or
 remote **Ctrl+B, then F3** integration. SSH windows override Alacritty's local
 startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
-Install `--tmux-only` on each server where you want the shared configuration.
+Install `--server` on each server where you want the shared configuration.
 Without it, remote tmux uses the server's existing configuration and bindings. Shift+drag
 selection works either way; the plain-drag reminder and OSC 52 clipboard writes
 need the shared configuration.

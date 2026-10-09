@@ -122,7 +122,7 @@ class GitLabelTests(unittest.TestCase):
 @unittest.skipIf(os.name == 'nt', 'tmux clients require a POSIX terminal')
 @unittest.skipUnless(shutil.which('git'), 'Git is required')
 class TmuxLabelTests(install_tests.TmuxFixture):
-    profile = 'tmux-only'
+    profile = 'server'
 
     def setUp(self):
         super().setUp()

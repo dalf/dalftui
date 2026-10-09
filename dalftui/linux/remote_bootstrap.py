@@ -10,7 +10,7 @@ import shlex
 from bridge_protocol import SOCKET_ENV, SUPPORTED_PROTOCOL_VERSIONS, TOKEN_BYTES, TOKEN_ENV
 from . import ops
 
-# The installer links the checkout here in both desktop and tmux-only modes.
+# The installer links the checkout here in both desktop and server modes.
 # Status 3 means there is no remote editor integration to prepare.
 # Status 4 means an installed integration cannot declare a supported protocol.
 _INSTALLATION_CHECK = """command -v tmux >/dev/null 2>&1 || exit 3

@@ -11,7 +11,7 @@ import test_install as install_tests
 
 @unittest.skipIf(os.name == 'nt', 'Attached clients require a POSIX terminal')
 class TmuxColorTests(install_tests.TmuxFixture):
-    profile = 'tmux-only'
+    profile = 'server'
 
     def attach(self, *, rgb=False):
         master, slave = os.openpty()

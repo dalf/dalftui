@@ -19,7 +19,7 @@ class UvDependencyTests(unittest.TestCase):
     def test_every_profile_requires_uv_with_an_install_hint(self):
         def which(name):
             return None if name == 'uv' else '/test/bin'
-        for profile, hint in [('tmux-only', './bootstrap'), ('desktop', './bootstrap'),
+        for profile, hint in [('server', './bootstrap'), ('desktop', './bootstrap'),
                               ('macos', 'brew install tmux oh-my-posh uv')]:
             with self.subTest(profile=profile):
                 platform = 'darwin' if profile == 'macos' else 'linux'
@@ -51,7 +51,7 @@ class DesktopUvTests(UvBindingFixture):
 
 
 class ServerUvTests(UvBindingFixture):
-    profile = 'tmux-only'
+    profile = 'server'
 
     def test_server_guide_uses_uv_and_the_bridge_keeps_python3(self):
         commands = self.commands('prefix')

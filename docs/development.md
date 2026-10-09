@@ -3,7 +3,7 @@
 ## Repository
 
 On a new machine, clone your repository to a stable path and run `./install`,
-adding `--tmux-only` when installing on a server. For a local checkout without a remote, create an empty remote
+adding `--server` when installing on a server. For a local checkout without a remote, create an empty remote
 repository and connect it once:
 
 ```sh
@@ -173,7 +173,7 @@ platform. They accept the existing scripts' options after `--`:
 
 ```sh
 mise run install:linux -- --dry-run
-mise run install:linux -- --tmux-only --dry-run
+mise run install:linux -- --server --dry-run
 mise run reload:linux -- --socket /path/to/socket
 ```
 

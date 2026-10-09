@@ -33,11 +33,11 @@ jobs:
           - image: debian:12
             prereq: apt-get update && apt-get install -y python3 git sudo
             tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
-            flags: --tmux-only
+            flags: --server
           - image: ubuntu:24.04
             prereq: apt-get update && apt-get install -y python3 git sudo
             tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
-            flags: --tmux-only
+            flags: --server
     steps:
       - name: Install the documented prerequisites
         run: ${{ matrix.prereq }}
@@ -290,6 +290,6 @@ jobs:
           useradd -m tester
           cp -a "$GITHUB_WORKSPACE" /home/tester/dalftui
           chown -R tester: /home/tester/dalftui
-          if sudo -u tester -H /home/tester/dalftui/bootstrap --tmux-only 2> error.txt; then exit 1; fi
+          if sudo -u tester -H /home/tester/dalftui/bootstrap --server 2> error.txt; then exit 1; fi
           cat error.txt
           grep 'Python 3.11 or newer is required' error.txt

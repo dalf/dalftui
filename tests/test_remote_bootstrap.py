@@ -61,7 +61,7 @@ class SshAutoTests(unittest.TestCase):
         paths = setup.Paths(self.home, config or self.home / '.config',
                             self.home / '.local/state')
         with redirect_stdout(io.StringIO()):
-            setup.install(paths, checkout, profile='tmux-only')
+            setup.install(paths, checkout, profile='server')
 
     def install_test_checkout(self, protocol_version=None):
         # Use independent files: the real installation symlinks to ROOT, which

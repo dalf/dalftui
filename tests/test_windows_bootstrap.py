@@ -359,8 +359,8 @@ class StartTests(unittest.TestCase):
         run.assert_not_called()
         return error.getvalue()
 
-    def test_refuses_tmux_only(self):
-        self.assertIn('--tmux-only is Linux-only', self.start(tmux_only=True))
+    def test_refuses_server(self):
+        self.assertIn('--server is Linux-only', self.start(server=True))
 
     def test_refuses_an_elevated_run(self):
         with patch.object(bootstrap.ctypes, 'windll', create=True) as windll:

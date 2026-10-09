@@ -168,10 +168,10 @@ Bootstrap and installation also handle the following:
 
 - **Oh My Posh, mise, uv:** official installers, then each tool's own updates.
 - **Hack Nerd Font:** Oh My Posh, desktop only.
-- **GitHub CLI repository:** added on every machine, including `--tmux-only`.
+- **GitHub CLI repository:** added on every machine, including `--server`.
 - **VS Code and DVC repositories:** added for desktop packages; DVC is x86-64 only.
 
-`--tmux-only` skips `[desktop]` packages, the VS Code and DVC repositories, and the font.
+`--server` skips `[desktop]` packages, the VS Code and DVC repositories, and the font.
 
 **Windows**
 
@@ -199,7 +199,7 @@ separately afterward.
 | Platform or profile | Bootstrap command from an existing checkout | What it runs afterward |
 | --- | --- | --- |
 | Linux desktop | `./bootstrap` | `./install` |
-| Linux server or tmux-only | `./bootstrap --tmux-only` | `./install --tmux-only` |
+| Linux server | `./bootstrap --server` | `./install --server` |
 | Windows | `.\bootstrap.cmd` | `install.cmd`; open a new PowerShell session afterward |
 | macOS | `./bootstrap` | `./install` in macOS mode |
 
@@ -221,7 +221,7 @@ Windows installer options (`-VSCodePath`, `-ProfilePath`, `-TerminalSettingsPath
 
 The desktop requirements include Alacritty 0.14+, tmux 3.2+, and OpenSSH 9.4+
 for the tagged host picker. The documented bootstrap coverage includes Fedora
-44 and Debian 13. Debian 12 and Ubuntu 24.04 need the tmux-only path below
+44 and Debian 13. Debian 12 and Ubuntu 24.04 need the server path below
 because their packaged desktop tools do not meet all requirements. Ubuntu
 22.04 is refused because its Python is 3.10.
 
@@ -266,7 +266,7 @@ repository and, on x86-64, DVC's. Installation
 then configures Alacritty, tmux, the prompt, and installs Hack Nerd Font. Open a new
 Alacritty window afterward.
 
-### Linux server or tmux-only setup
+### Linux server setup
 
 Use this on a Linux server, or when you want tmux and the prompt without the
 Alacritty desktop setup. Python 3.11+, Git, and sudo must exist first. On
@@ -283,15 +283,15 @@ then run:
 ```sh
 git clone https://github.com/dalf/dalftui.git ~/code/dalftui
 cd ~/code/dalftui
-./bootstrap --tmux-only --dry-run
-./bootstrap --tmux-only
+./bootstrap --server --dry-run
+./bootstrap --server
 ```
 
 On an existing checkout, skip the clone. This still adds GitHub CLI's repository
 but skips the `[desktop]` package section and the VS Code and DVC repositories, configures tmux and the bash prompt,
 leaves Alacritty alone, and installs no font; the terminal you connect from
-needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the tmux-only profile; `./bootstrap`
-does not, so keep passing `--tmux-only`.
+needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the server profile; `./bootstrap`
+does not, so keep passing `--server`.
 
 Remote tmux startup itself does not require a dalftui installation. Install on
 the server when you want its tmux theme, shortcuts, prompt, and the remote half
@@ -372,7 +372,7 @@ installation and reload. It configures tmux and the zsh prompt, installs Hack
 Nerd Font, and sets VS Code's terminal font. Select Hack Nerd Font yourself in
 Terminal.app or iTerm2. If Apple's Python is too old, `bootstrap`, `install`,
 and `bin/reload` rerun themselves through uv; the other launchers always use
-uv. Run bootstrap as your normal user; `--tmux-only` is
+uv. Run bootstrap as your normal user; `--server` is
 refused by the macOS bootstrap.
 
 macOS support has been exercised on CI; interactive keys and selection are

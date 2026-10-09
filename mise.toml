@@ -53,7 +53,7 @@ env = { PSModulePath = "" }
 run = "{{ vars.powershell }} -NoProfile -File ./tests/test_windows_setup.ps1"
 
 [tasks."install:linux"]
-description = "Install Linux configuration (accepts --dry-run and --tmux-only)"
+description = "Install Linux configuration (accepts --dry-run and --server)"
 raw_args = true
 run = "./install"
 

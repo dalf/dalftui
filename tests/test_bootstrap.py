@@ -132,7 +132,7 @@ class PackageListTests(unittest.TestCase):
     def test_comments_and_desktop_section(self):
         self.path.write_text('# heading\ngit  # comment\n\ntmux\n[desktop]\nalacritty\n', encoding='utf-8')
         self.assertEqual(bootstrap.read_packages(self.path), ['git', 'tmux', 'alacritty'])
-        self.assertEqual(bootstrap.read_packages(self.path, tmux_only=True), ['git', 'tmux'])
+        self.assertEqual(bootstrap.read_packages(self.path, server=True), ['git', 'tmux'])
 
     def test_unknown_section_is_an_error(self):
         self.path.write_text('git\n[server]\ntmux\n', encoding='utf-8')
@@ -142,7 +142,7 @@ class PackageListTests(unittest.TestCase):
     def test_repository_lists_are_valid_and_have_install_requirements(self):
         for family, ssh, aws in (('fedora', 'openssh-clients', 'awscli2'), ('debian', 'openssh-client', 'awscli')):
             with self.subTest(family=family):
-                server = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt', tmux_only=True)
+                server = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt', server=True)
                 desktop = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt')
                 for name in ('python3', 'git', 'tmux', 'less', 'fontconfig', 'curl', 'unzip'):
                     self.assertIn(name, server)
@@ -289,14 +289,14 @@ class StartTests(unittest.TestCase):
         self.assertIn('needs Fedora, Debian or Ubuntu', error.getvalue())
         run.assert_not_called()
 
-    def test_macos_needs_homebrew_and_refuses_tmux_only(self):
-        for tmux_only, message in ((False, 'install Homebrew first: /bin/bash -c'), (True, '--tmux-only is Linux-only')):
-            with self.subTest(tmux_only=tmux_only), patch.object(bootstrap.os, 'geteuid', return_value=501), \
+    def test_macos_needs_homebrew_and_refuses_server(self):
+        for server, message in ((False, 'install Homebrew first: /bin/bash -c'), (True, '--server is Linux-only')):
+            with self.subTest(server=server), patch.object(bootstrap.os, 'geteuid', return_value=501), \
                     patch.object(bootstrap.sys, 'platform', 'darwin'), \
                     patch.object(bootstrap.shutil, 'which', return_value=None), \
                     patch.object(bootstrap, 'BREW_PATHS', ()), \
                     patch.object(bootstrap, 'Brew') as run, patch('sys.stderr', io.StringIO()) as error:
-                self.assertEqual(bootstrap.bootstrap(tmux_only=tmux_only), 1)
+                self.assertEqual(bootstrap.bootstrap(server=server), 1)
             self.assertIn(message, error.getvalue())
             run.assert_not_called()
 
@@ -320,7 +320,7 @@ class StartTests(unittest.TestCase):
             skipped = [call.args for call in run.add.call_args_list]
             self.assertEqual(skipped, [] if dvc else [('skipped', ['DVC repository and dvc (x86-64 only)'])])
 
-    def test_tmux_only_adds_only_the_github_cli_repository(self):
+    def test_server_adds_only_the_github_cli_repository(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(bootstrap.os, 'geteuid', return_value=1000), \
                 patch.object(bootstrap.sys, 'platform', 'linux'), \
@@ -329,7 +329,7 @@ class StartTests(unittest.TestCase):
                 patch.object(bootstrap, 'state_directory', return_value=Path(directory)), \
                 patch.dict(os.environ, {'PATH': os.environ.get('PATH', '')}), \
                 patch.object(bootstrap, 'Bootstrap') as bootstrap_class:
-            bootstrap.bootstrap(tmux_only=True)
+            bootstrap.bootstrap(server=True)
         run = bootstrap_class.return_value
         run.gh_repo.assert_called_once_with()
         run.vscode_repo.assert_not_called()
@@ -539,7 +539,7 @@ class RepositoryTests(unittest.TestCase):
                 patch.object(bootstrap.os, 'execv') as execv, \
                 patch.dict(os.environ, {}, clear=False):
             os.environ.pop(bootstrap.PULLED, None)
-            quietly(run.update_repo, ['--tmux-only'])
+            quietly(run.update_repo, ['--server'])
             pulled = os.environ.get(bootstrap.PULLED)
         return run, execv, pulled
 
@@ -565,7 +565,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_changed_head_restarts_with_the_same_arguments(self):
         run, execv, pulled = self.update(self.git_answers(heads=('a' * 40, 'b' * 40)))
-        execv.assert_called_once_with(sys.executable, [sys.executable, str(run.root / 'bootstrap'), '--tmux-only'])
+        execv.assert_called_once_with(sys.executable, [sys.executable, str(run.root / 'bootstrap'), '--server'])
         self.assertEqual(pulled, 'aaaaaaa..bbbbbbb')
 
     def test_restarted_run_reports_the_update_without_pulling_again(self):
@@ -578,7 +578,7 @@ class RepositoryTests(unittest.TestCase):
 
 
 class InstallStepTests(unittest.TestCase):
-    def install(self, output, *, tmux_only=False, dry_run=False, returncode=0, pending=()):
+    def install(self, output, *, server=False, dry_run=False, returncode=0, pending=()):
         run = FakeBootstrap({}, dry_run=dry_run)
         run.summary['installed'].extend(pending)
 
@@ -586,12 +586,12 @@ class InstallStepTests(unittest.TestCase):
             run.commands.append(command)
             return done(command, returncode if command[1].endswith('install') else 0, output)
         with patch.object(run, 'run', side_effect=record):
-            quietly(run.install, tmux_only=tmux_only)
+            quietly(run.install, server=server)
         return run
 
-    def test_passes_tmux_only(self):  # ./install reloads tmux itself.
-        run = self.install('Installed (tmux-only): ...\n', tmux_only=True)
-        self.assertEqual(run.commands, [[sys.executable, str(ROOT / 'install'), '--tmux-only']])
+    def test_passes_server(self):  # ./install reloads tmux itself.
+        run = self.install('Installed (server): ...\n', server=True)
+        self.assertEqual(run.commands, [[sys.executable, str(ROOT / 'install'), '--server']])
         self.assertEqual(run.summary['installed'], ['install'])
 
     def test_desktop_keeps_the_installed_profile_and_reports_no_change(self):

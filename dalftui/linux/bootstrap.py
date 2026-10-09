@@ -58,13 +58,13 @@ SYMBOLS, PLAIN_SYMBOLS = ('►' if os.name == 'nt' else '▶') + '✓✗·', '>+
 HEADING, GREEN, RED, DIM = '1;36', '32', '31', '2'  # ANSI styles (bold cyan headings), shown on a terminal only.
 
 
-def read_packages(path, *, tmux_only=False):
-    """One package per line, # comments; lines after [desktop] are skipped with --tmux-only."""
+def read_packages(path, *, server=False):
+    """One package per line, # comments; lines after [desktop] are skipped with --server."""
     packages = []
     for line in Path(path).read_text(encoding='utf-8').splitlines():
         line = line.split('#', 1)[0].strip()
         if line == '[desktop]':
-            if tmux_only:
+            if server:
                 break
         elif line.startswith('['):
             raise ValueError(f'Unknown section in {path}: {line}')
@@ -366,8 +366,8 @@ class Bootstrap:
         else:
             self.add('upgraded', [f'{name} ({before} -> {after})'])
 
-    def install(self, *, tmux_only):
-        command = [sys.executable, str(self.root / 'install')] + (['--tmux-only'] if tmux_only else [])
+    def install(self, *, server):
+        command = [sys.executable, str(self.root / 'install')] + (['--server'] if server else [])
         if self.dry_run:
             if self.summary['installed']:
                 self.add('skipped', ['install (would run after the missing tools are installed)'])
@@ -456,13 +456,13 @@ def keep_sudo():
                        stderr=subprocess.DEVNULL, check=False)
 
 
-def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
+def bootstrap(*, dry_run=False, server=False, argv=()):
     if os.geteuid() == 0:  # Packages need root, but the configuration belongs to the user.
         print('Bootstrap failed: run ./bootstrap as your user'
               + ('.' if sys.platform == 'darwin' else '; it asks for sudo itself.'), file=sys.stderr)
         return 1
     if sys.platform == 'darwin':
-        return macos(dry_run=dry_run, tmux_only=tmux_only, argv=argv)
+        return macos(dry_run=dry_run, server=server, argv=argv)
     system = family()
     if system is None or not shutil.which('sudo'):
         print('Bootstrap failed: this needs Fedora, Debian or Ubuntu with sudo.', file=sys.stderr)
@@ -476,10 +476,10 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
             f" {shlex.join(['bootstrap', *argv])} ==\n")
     with run.step('Checkout'):
         run.update_repo(list(argv))
-    packages = read_packages(PACKAGES / f'{system}.txt', tmux_only=tmux_only)
+    packages = read_packages(PACKAGES / f'{system}.txt', server=server)
     with run.step('Repositories'):
         run.gh_repo()
-        if not tmux_only:
+        if not server:
             run.vscode_repo()
             if platform.machine() == 'x86_64':
                 run.dvc_repo()
@@ -493,13 +493,13 @@ def bootstrap(*, dry_run=False, tmux_only=False, argv=()):
         run.mise()
         run.uv()
     with run.step('Configuration (./install)'):
-        run.install(tmux_only=tmux_only)
+        run.install(server=server)
     return run.report()
 
 
-def macos(*, dry_run, tmux_only, argv):
-    if tmux_only:
-        print('Bootstrap failed: --tmux-only is Linux-only.', file=sys.stderr)
+def macos(*, dry_run, server, argv):
+    if server:
+        print('Bootstrap failed: --server is Linux-only.', file=sys.stderr)
         return 1
     brew = shutil.which('brew') or next((path for path in BREW_PATHS if os.access(path, os.X_OK)), None)
     if not brew:
@@ -518,5 +518,5 @@ def macos(*, dry_run, tmux_only, argv):
     with run.step('Packages (Brewfile)'):
         run.packages(run.entries())
     with run.step('Configuration (./install)'):
-        run.install(tmux_only=False)
+        run.install(server=False)
     return run.report()

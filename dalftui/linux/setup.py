@@ -18,7 +18,7 @@ from ..windows.terminal_settings import PROMPT_FONT, removed_vscode_settings, vs
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
-PROFILES = ('desktop', 'tmux-only', 'macos')
+PROFILES = ('desktop', 'server', 'macos')
 # Alacritty is not used on macOS; a new Mac installation uses Terminal.app or iTerm2.
 DEFAULT_PROFILE = 'macos' if sys.platform == 'darwin' else 'desktop'
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'

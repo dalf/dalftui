@@ -14,7 +14,7 @@ from test_install import ROOT, TmuxFixture, setup  # pylint: disable=wrong-impor
 
 @unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
 class InstallReloadTests(TmuxFixture):
-    profile = 'tmux-only'
+    profile = 'server'
 
     def run_install(self, *flags):
         loader = SourceFileLoader('installer_entry', str(ROOT / 'install'))
@@ -32,7 +32,7 @@ class InstallReloadTests(TmuxFixture):
         status, output = self.run_install('--socket', str(self.socket))
         self.assertEqual(status, 0, output)
         self.assertIn('tmux configuration reloaded', output)
-        self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'tmux-only')
+        self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'server')
 
     def test_dry_run_does_not_reload(self):
         self.start()

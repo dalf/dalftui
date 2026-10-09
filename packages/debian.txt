@@ -1,5 +1,5 @@
 # Packages that ./bootstrap installs and upgrades with apt on Debian and Ubuntu.
-# One package per line; lines after [desktop] are skipped with --tmux-only.
+# One package per line; lines after [desktop] are skipped with --server.
 
 # dalftui requirements
 python3            # runs install, bootstrap and bin/reload

@@ -60,14 +60,14 @@ installation in its current mode. It can also reconnect the configuration link i
 move the checkout. Keep the checkout outside the managed `~/.config/dalftui`
 path; the installer refuses to replace an existing directory there.
 
-## Linux server (`--tmux-only`)
+## Linux server (`--server`)
 
 Clone this repository to a stable directory on the server, then run:
 
 ```sh
 cd ~/code/dalftui
-./install --tmux-only --dry-run
-./install --tmux-only
+./install --server --dry-run
+./install --server
 ```
 
 Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh 29.12+**. Alacritty
@@ -96,7 +96,7 @@ where the local tmux handles **Ctrl+B** first.
 The installation mode is recorded in the private `~/.tmux.conf` loader and
 survives Git updates. Both `./bin/reload` and a repeated `./install` recognize it,
 so you do not need to repeat the flag after installation. Use `./install --desktop`
-or `./install --tmux-only` to explicitly switch modes. Mode changes back up the
+or `./install --server` to explicitly switch modes. Mode changes back up the
 previous loader and preserve personal overrides. Older desktop loaders are
 recognized and safely migrated on the next installation.
 
@@ -120,14 +120,14 @@ sudo dnf install -y python3 git && git clone https://github.com/dalf/dalftui ~/c
 On Debian or Ubuntu (a server):
 
 ```sh
-sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --tmux-only
+sudo apt-get update && sudo apt-get install -y python3 git && git clone https://github.com/dalf/dalftui ~/code/dalftui && ~/code/dalftui/bootstrap --server
 ```
 
 Debian installed with a root password gives your user no sudo: run
 `su -c "apt-get install -y sudo && usermod -aG sudo $USER"`, then log out and
 back in. The desktop mode needs Alacritty 0.14+,
 so it works on Fedora and Debian 13; on Debian 12 and Ubuntu 24.04 the packages
-install but `./install` then fails, so use `--tmux-only` there. Ubuntu 22.04 is
+install but `./install` then fails, so use `--server` there. Ubuntu 22.04 is
 refused: its Python is 3.10.
 
 Each run, in order (a failed step does not stop the next ones):
@@ -139,7 +139,7 @@ Each run, in order (a failed step does not stop the next ones):
    [GitHub CLI's repository](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
    (its key and `/etc/yum.repos.d/gh-cli.repo`, or `/etc/apt/sources.list.d/github-cli.sources`
    on apt) when that file, or the `github-cli.list` from GitHub's instructions, is missing; the
-   distribution's `gh` is old or broken and is upgraded from it. Unless `--tmux-only`, it adds Microsoft's
+   distribution's `gh` is old or broken and is upgraded from it. Unless `--server`, it adds Microsoft's
    [VS Code repository](https://code.visualstudio.com/docs/setup/linux) (its key
    and `/etc/yum.repos.d/vscode.repo`, or `/etc/apt/sources.list.d/vscode.sources`
    on apt) when that file is missing. A `code` package installed from a download
@@ -160,14 +160,14 @@ Each run, in order (a failed step does not stop the next ones):
    into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`,
    `mise self-update --yes --no-plugins` and `uv self update`. A copy that the user cannot write,
    such as an rpm, is left alone.
-5. Runs `./install` (with `--tmux-only` when given; otherwise the existing
+5. Runs `./install` (with `--server` when given; otherwise the existing
    profile, or desktop on a new machine), which also reloads.
 6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
    with 1 when anything failed.
 
 The package lists have one package per line; `#` starts a comment. The
 packages after `[desktop]` (OpenSSH, Alacritty, VS Code, DVC, AWS CLI, rclone and fido2-tools) are skipped with
-`--tmux-only`. On apt, bat's command is `batcat`, and yq is not installed:
+`--server`. On apt, bat's command is `batcat`, and yq is not installed:
 Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 
 `--dry-run` changes nothing and writes no bootstrap log (`dnf` may refresh its
@@ -176,7 +176,7 @@ and previews `./install` once nothing is missing. Real runs append their command
 `~/.local/state/dalftui/bootstrap.log` (or under `XDG_STATE_HOME`).
 
 GitHub CI runs the bootstrap twice in fresh Fedora 44 and Debian 13 containers
-(desktop) and Debian 12 and Ubuntu 24.04 containers (`--tmux-only`), weekly and
+(desktop) and Debian 12 and Ubuntu 24.04 containers (`--server`), weekly and
 when the bootstrap changes, and checks that the second run changes nothing. It
 also checks that Ubuntu 22.04 is refused.
 
@@ -255,7 +255,7 @@ upgrades the outdated listed ones; other formulae are not upgraded. VS Code
 updates itself, so Homebrew leaves it alone. Installed versions decide the
 summary, which is the same as on Linux, and so is the log. A dry run changes
 nothing and compares with `brew outdated` as of the last `brew update`. A root
-run and `--tmux-only` are refused.
+run and `--server` are refused.
 
 The Brewfile also installs the VS Code cask, which provides the `code` command,
 and Hack Nerd Font into `~/Library/Fonts`.
@@ -277,7 +277,7 @@ brew install tmux oh-my-posh uv
 ```
 
 On a Mac, `./install` uses the `macos` mode; `--desktop` (Alacritty) is refused
-and `--tmux-only` still works (`./install --macos` switches back). Compared with
+and `--server` still works (`./install --macos` switches back). Compared with
 the server mode, it also:
 
 - appends the marked prompt line pair sourcing `config/prompt.zsh` to `~/.zshrc`
@@ -292,7 +292,7 @@ the server mode, it also:
   terminal attached there); in iTerm2 it needs *Applications in terminal may
   access clipboard*.
 
-Every profile, including `--tmux-only` on a Mac or a Linux SSH server, keeps
+Every profile, including `--server` on a Mac or a Linux SSH server, keeps
 older Terminal.app clients in 256 colors. tmux detects iTerm2's 24-bit color
 support automatically and, from tmux 3.6, also uses a client's
 `COLORTERM=truecolor` setting. The dalftui SSH launcher supplies a per-attachment

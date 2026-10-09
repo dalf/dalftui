@@ -32,14 +32,14 @@ class DependencyTests(unittest.TestCase):
                 result = subprocess.CompletedProcess(['tmux', '-V'], 0, f'tmux {version}\n', '')
                 with patch.object(setup.shutil, 'which', return_value='/test/bin'):
                     with patch.object(setup.subprocess, 'run', return_value=result):
-                        setup.dependencies('tmux-only')
+                        setup.dependencies('server')
 
     def test_server_rejects_older_tmux_and_reports_its_version(self):
         result = subprocess.CompletedProcess(['tmux', '-V'], 0, 'tmux 3.1c\n', '')
         with patch.object(setup.shutil, 'which', return_value='/test/bin'):
             with patch.object(setup.subprocess, 'run', return_value=result):
                 with self.assertRaisesRegex(RuntimeError, r'tmux 3\.2.*Detected 3\.1'):
-                    setup.dependencies('tmux-only')
+                    setup.dependencies('server')
 
     def test_both_profiles_require_oh_my_posh(self):
         def which(name):
@@ -260,7 +260,7 @@ class PromptTests(DisposableSetup):
         self.assertEqual(self.paths.bashrc.stat().st_mtime_ns, before)
 
     def test_missing_bashrc_is_created(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.assertIn(setup.PROMPT_MARKER, self.paths.bashrc.read_text())
 
     def test_symlinked_bashrc_is_replaced_and_its_target_left_alone(self):
@@ -270,7 +270,7 @@ class PromptTests(DisposableSetup):
         store.chmod(0o555)
         self.addCleanup(store.chmod, 0o755)
         self.paths.bashrc.symlink_to(store / 'bashrc')
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.assertFalse(self.paths.bashrc.is_symlink())
         self.assertTrue(self.paths.bashrc.read_text().startswith('alias ll="ls -l"\n' + setup.PROMPT_MARKER))
         self.assertEqual((store / 'bashrc').read_text(), 'alias ll="ls -l"\n')
@@ -284,8 +284,8 @@ class PromptTests(DisposableSetup):
         self.assertEqual(self.paths.bashrc.read_text(), 'export EDITOR=vi\n')
         self.install_font.assert_called_once_with(True)
 
-    def test_tmux_only_gets_the_prompt_but_no_font(self):
-        self.install(profile='tmux-only')
+    def test_server_gets_the_prompt_but_no_font(self):
+        self.install(profile='server')
         self.assertIn(setup.PROMPT_MARKER, self.paths.bashrc.read_text())
         self.install_font.assert_not_called()
         self.install(profile='desktop')
@@ -293,7 +293,7 @@ class PromptTests(DisposableSetup):
         self.assertEqual(self.paths.bashrc.read_text().count(setup.PROMPT_MARKER), 1)
 
     def test_loader_runs_init_before_job_counts_in_interactive_shells(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         command_dir = self.directory / 'commands'
         command_dir.mkdir()
         # The real init defines an empty set_poshcontext; the loader must replace it.
@@ -401,7 +401,7 @@ class VSCodeTests(DisposableSetup):
         self.assertFalse(self.paths.tmux.exists())
 
     def test_servers_and_desktops_without_vscode_get_no_settings(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.vscode_present.return_value = False
         self.install(profile='desktop')
         self.assertFalse(self.paths.vscode_settings.exists())
@@ -445,7 +445,7 @@ class RelocationTests(DisposableSetup):
 
     def install_from_copied_checkout(self):
         environment, outside = self.command_environment()
-        result = subprocess.run([str(self.repo / 'install'), '--tmux-only'], cwd=outside,
+        result = subprocess.run([str(self.repo / 'install'), '--server'], cwd=outside,
                                 env=environment, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         return environment, outside
@@ -559,17 +559,17 @@ class ServerInstallationTests(DisposableSetup):
         files = {path: (path.read_bytes(), path.stat().st_mtime_ns)
                  for path in (self.paths.alacritty, local)}
         with patch.object(setup, 'load', side_effect=AssertionError('Alacritty was read')):
-            self.install(profile='tmux-only')
-        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+            self.install(profile='server')
+        self.assertEqual(setup.installed_profile(self.paths), 'server')
         self.assertEqual(files, {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files})
 
     def test_server_mode_and_overrides_survive_install_without_flags(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         local = self.paths.config_dir / 'tmux/local.conf'
         local.write_text('set -g history-limit 5678\n')
         before = {path: path.stat().st_mtime_ns for path in (local, self.paths.tmux)}
         self.assertIsNone(self.install())
-        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertEqual(setup.installed_profile(self.paths), 'server')
         self.assertEqual(before, {path: path.stat().st_mtime_ns for path in before})
         self.assertFalse(self.paths.alacritty.parent.exists())
 
@@ -588,7 +588,7 @@ class ServerInstallationTests(DisposableSetup):
         self.paths.tmux.write_text(self.paths.tmux.read_text() + 'set -g status off\n')
         before = self.paths.tmux.read_bytes()
         with self.assertRaisesRegex(ValueError, 'Managed loader was edited'):
-            self.install(profile='tmux-only')
+            self.install(profile='server')
         self.assertEqual(self.paths.tmux.read_bytes(), before)
 
     def test_cli_installs_and_repeats_with_no_alacritty_or_ssh_in_path(self):
@@ -610,17 +610,17 @@ class ServerInstallationTests(DisposableSetup):
             self.assertIsNone(shutil.which('alacritty'))
             self.assertIsNone(shutil.which('ssh'))
             with patch.object(setup.Paths, 'current', return_value=self.paths):
-                for flags in [['--tmux-only'], []]:
+                for flags in [['--server'], []]:
                     with patch.object(sys, 'argv', ['install', *flags, '--socket', str(self.directory / 'tmux.socket')]):
                         with redirect_stdout(io.StringIO()):
                             self.assertEqual(installer.main(), 0)
-        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertEqual(setup.installed_profile(self.paths), 'server')
         self.assertFalse(self.paths.alacritty.parent.exists())
 
     def test_server_dry_run_does_not_offer_alacritty_changes(self):
         output = io.StringIO()
         with redirect_stdout(output):
-            setup.install(self.paths, self.repo, profile='tmux-only', dry_run=True)
+            setup.install(self.paths, self.repo, profile='server', dry_run=True)
         self.assertNotIn('alacritty', output.getvalue().lower())
         self.assertFalse(self.paths.config_dir.exists())
 
@@ -646,7 +646,7 @@ class ServerInstallationTests(DisposableSetup):
 
 
 class ServerTmuxTests(TmuxFixture):
-    profile = 'tmux-only'
+    profile = 'server'
 
     def prefix_bindings(self):
         return {shlex.split(line)[3]: line
@@ -661,7 +661,7 @@ class ServerTmuxTests(TmuxFixture):
             self.do_reload()
         self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
         self.assertIn('#[fg=#8e24aa]⬤', self.tmux('display-message', '-p', '#{E:@claude_tab_active_strip}'))
-        self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'tmux-only')
+        self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'server')
         bindings = self.prefix_bindings()
         self.assertNotIn('F2', bindings)
         self.assertIn('bin/shortcuts.py --tmux-only', bindings['F1'])
@@ -696,7 +696,7 @@ class ServerTmuxTests(TmuxFixture):
         self.install(profile='desktop')
         self.do_reload()
         self.assertIn('bin/ssh_picker.py', self.prefix_bindings()['F2'])
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.do_reload()
         self.assertNotIn('F2', self.prefix_bindings())
         self.assertIn('--tmux-only', self.prefix_bindings()['F1'])
@@ -712,7 +712,7 @@ class ServerTmuxTests(TmuxFixture):
         local.write_text('set -g history-limit 8765\n')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-gv', 'history-limit'), '8765')
-        self.assertEqual(setup.installed_profile(self.paths), 'tmux-only')
+        self.assertEqual(setup.installed_profile(self.paths), 'server')
 
 
 class MacTests(DisposableSetup):
@@ -840,7 +840,7 @@ class MacTmuxTests(TmuxFixture):
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
         self.assertFalse(set(removed) & set(root))
         self.assertIn('Hold Fn', root['MouseDrag1Pane'])
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
         self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
@@ -894,7 +894,7 @@ class UninstallTests(DisposableSetup):
         self.assertEqual(setup.installed_profile(self.paths), 'desktop')
 
     def test_uninstall_without_earlier_files_removes_everything_created(self):
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.uninstall()
         self.assertEqual(self.paths.bashrc.read_text(), '')
         self.assertFalse(self.paths.tmux.exists())
@@ -929,11 +929,11 @@ class UninstallTests(DisposableSetup):
 
     def test_newest_original_is_restored_even_when_it_is_a_link(self):
         self.paths.tmux.write_text('OLD FILE\n')
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.uninstall()
         self.paths.tmux.unlink()
         self.paths.tmux.symlink_to('dotfiles/tmux.conf')
-        self.install(profile='tmux-only')
+        self.install(profile='server')
         self.uninstall()
         self.assertEqual(os.readlink(self.paths.tmux), 'dotfiles/tmux.conf')
 
@@ -989,7 +989,7 @@ class UninstallTests(DisposableSetup):
                             self.assertEqual(installer.main(), 0)
                     self.assertNotIn('reload', output.getvalue())
                     self.assertEqual(self.paths.root.is_symlink(), '--dry-run' in flags)
-                with patch.object(sys, 'argv', ['install', '--uninstall', '--tmux-only']):
+                with patch.object(sys, 'argv', ['install', '--uninstall', '--server']):
                     with redirect_stdout(io.StringIO()), patch('sys.stderr', io.StringIO()):
                         with self.assertRaises(SystemExit):
                             installer.main()

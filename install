@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--tmux-only', dest='profile', action='store_const', const='tmux-only',
+    mode.add_argument('--server', dest='profile', action='store_const', const='server',
                       help='Configure tmux for a server without requiring Alacritty or an SSH picker')
     mode.add_argument('--desktop', dest='profile', action='store_const', const='desktop',
                       help='Configure Alacritty and tmux (the default for a new Linux installation)')
