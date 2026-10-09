@@ -79,7 +79,7 @@ The recipient then stores the secret in its proper home (their own vault, the te
 
 ## SSH keys
 
-Rule: **one key per laptop, created in the laptop's own hardware**. Never copy key files between machines. Add each laptop's *public* key to GitHub and the servers. If you lose a laptop, delete its key everywhere. Step-by-step procedures for each setup (Windows, macOS, Linux; with or without Bitwarden or a YubiKey): [ssh-keys/](ssh-keys/README.md).
+Rule: **two keys per laptop, created in the laptop's own hardware**: `id_github` for GitHub and `id_text_analytics_ch` for the LAN servers. Never copy key files between machines. Add each laptop's *public* keys where they belong: `id_github.pub` to GitHub, `id_text_analytics_ch.pub` to the servers. If you lose a laptop, delete its keys everywhere. Step-by-step procedures for each setup (Windows, macOS, Linux; with or without Bitwarden or a YubiKey): [ssh-keys/](ssh-keys/README.md).
 
 | OS | Option | Key leaves device? | Per-use prompt | Synced? |
 | --- | --- | --- | --- | --- |
@@ -90,6 +90,8 @@ Rule: **one key per laptop, created in the laptop's own hardware**. Never copy k
 | Linux | **ssh-tpm-agent** (recommended) | No | PIN (optional) | No |
 | Any | `ed25519` file with passphrase | Yes, the file can be copied | Passphrase at load | No |
 | YubiKey | `ed25519-sk` resident key | No | Touch (+PIN) | You carry it |
+
+The short commands below create one key with a default name. For the two keys, use the step-by-step pages.
 
 **macOS 26 Tahoe**: Apple's ssh can use the Secure Enclave. Apple does not document this yet, so try it on one Mac before rolling it out:
 
@@ -132,7 +134,7 @@ export SSH_AUTH_SOCK="$(ssh-tpm-agent --print-socket)"   # add to ~/.bashrc
 
 No TPM: `ssh-keygen -t ed25519` with a strong passphrase.
 
-**YubiKey**: `ssh-keygen -t ed25519-sk -O resident -O verify-required`. Enroll two keys and keep one as a spare.
+**YubiKey**: `ssh-keygen -t ed25519-sk -O resident -O verify-required`. Enroll a second YubiKey and keep it as a spare.
 
 **GitHub and commit signing**: to use one key for both, upload it twice:
 
@@ -259,13 +261,13 @@ Turn on `ForwardAgent yes` only for hosts you trust. While you are connected, ro
 chmod 600 ~/.aws/credentials
 ```
 
-**authorized\_keys.** One line per person per device. The comment names both:
+**authorized\_keys.** One line per person per device. The comment is usually the person's email, as most [setup pages](ssh-keys/README.md) create it:
 
 ```
-ssh-ed25519 AAAA... alice@macbook-2025
+ssh-ed25519 AAAA... alice@example.org
 ```
 
-You can then delete one lost laptop's line and everything else keeps working.
+To remove one lost laptop's line, match its public key, not the comment. Everything else keeps working.
 
 ## Lost laptop or someone leaves
 
