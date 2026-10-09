@@ -27,7 +27,8 @@ its own server component when you first connect.
 
 The bridge follows the tmux client that pressed F3, including when several
 clients attach to the same session. Your SSH server must allow Unix socket
-forwarding (`AllowStreamLocalForwarding`). A plain `ssh host` connection lacks
+forwarding (`AllowStreamLocalForwarding`, and `AllowTcpForwarding` set to `yes` or
+`remote`). A plain `ssh host` connection lacks
 the bridge; reconnect with the picker, or run
 `python3 ~/code/dalftui/bin/ssh_picker.py --connect HOST` from your local terminal.
 If VS Code cannot open, tmux displays the error in its status line.
@@ -117,8 +118,7 @@ Windows desktops listen for bridge requests on `127.0.0.1` TCP instead of a
 Unix socket; `--bridge tcp` selects the same listener on Linux or macOS. The
 server side is the same private Unix socket: dalftui forwards it with
 `-R REMOTE_DIRECTORY/editor.sock:127.0.0.1:LOCAL_PORT`, so the server must allow
-Unix socket forwarding. OpenSSH requires both
-`AllowStreamLocalForwarding` and `AllowTcpForwarding` set to `yes` or `remote`.
+Unix socket forwarding as described above.
 No remote TCP port is opened, so server-side `GatewayPorts` does not apply.
 
 Older Windows desktops forwarded a remote loopback TCP port and pass a
