@@ -72,6 +72,10 @@ processes, and waits for the workers before removing the private socket director
 These bounds reduce slow-connection denial of service; they do not guarantee
 availability under sustained connection flooding.
 
+Each bridge opens at most ten different folders in ten minutes, so a runaway
+remote loop cannot flood the desktop with windows. A folder already opened in
+that period always opens again; reconnecting resets the count.
+
 ## Bridge version compatibility
 
 The desktop checks for `bin/vscode.py` and checks the remote protocol with
