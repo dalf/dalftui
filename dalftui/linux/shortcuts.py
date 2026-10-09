@@ -47,6 +47,7 @@ def render(tmux_only=False):
         "Tabs / tmux windows": [
             ("Ctrl+B → c", "New window"),
             ("Ctrl+B → p / n", "Previous / next window"),
+            ("Ctrl+B → 0-9", "Go to that window; Ctrl may stay held for 1-9 if the terminal reports Ctrl+digit"),
             ("Ctrl+B → ,", "Rename window"),
             ("Ctrl+B → &", "Close window (asks for confirmation)"),
         ],

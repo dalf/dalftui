@@ -7,6 +7,10 @@
 - **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
 
 Other shortcuts are standard tmux keys; see the [README](../README.md#shortcuts).
+After Ctrl+B, release it and press the next key. For windows 1 to 9, keeping
+Ctrl held also works when the terminal reports Ctrl+digit as a distinct key.
+Alacritty and Windows Terminal use Ctrl+0 to reset the font size, so release
+Ctrl for window 0; releasing Ctrl works everywhere.
 
 The guide reads Alacritty imports and local overrides, and shows live tmux
 bindings. The terminal font needs glyphs for the rounded Powerline caps (`` and
