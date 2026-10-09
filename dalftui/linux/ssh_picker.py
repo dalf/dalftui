@@ -1,4 +1,4 @@
-"""Linux desktop SSH picker and Alacritty window launching."""
+"""Desktop SSH picker and Alacritty, Terminal.app or iTerm2 window launching."""
 try:
     import curses
 except ImportError:
@@ -6,6 +6,7 @@ except ImportError:
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -86,13 +87,34 @@ def pick(screen, hosts, *, action='opens a new window'):
     return host_picker.pick(PickerScreen(screen), hosts, ssh.validate_picker_host, action=action,
                             details=ssh.connection_details, checks=ssh.saved_checks)
 
-def open_window(host):
+def open_mac_window(command, app):
+    """Run command in a new window of a macOS terminal app through a private .command file."""
+    directory = tempfile.mkdtemp(prefix='dalftui-ssh-')
+    script = Path(directory) / 'ssh.command'
+    # The new window's login shell runs the file, which removes itself before connecting.
+    script.write_text(f'#!/bin/sh\nrm -rf -- {shlex.quote(directory)}\nexec {shlex.join(command)}\n',
+                      encoding='utf-8')
+    script.chmod(0o700)
+    result = subprocess.run(['open', '-a', app, str(script)], stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, check=False)
+    if result.returncode:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise RuntimeError(result.stderr.strip() or f'Could not open {app}')
+
+
+def open_window(host, terminal_type=''):
     from .. import ssh
     from ..host_picker import HostAction
 
     selection = host
     if isinstance(selection, HostAction):
         host = selection.host
+    command = [sys.executable, str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host,
+               *ssh.action_arguments(selection)]
+    if sys.platform == 'darwin':
+        # tmux reports iTerm2's XTVERSION reply; Terminal.app sends none.
+        open_mac_window(command, 'iTerm' if terminal_type.startswith('iTerm2') else 'Terminal')
+        return
 
     alacritty = shutil.which('alacritty')
     if not alacritty:
@@ -105,9 +127,7 @@ def open_window(host):
     # JSON quoting also produces a TOML basic string for this printable host.
     title = json.dumps(f'SSH · {host}', ensure_ascii=False)
     args = [alacritty, '--option', f'window.title={title}', 'window.dynamic_title=true',
-            '-e', sys.executable,
-            str(ssh.CHECKOUT_ROOT / 'bin/ssh_picker.py'), '--connect', host,
-            *ssh.action_arguments(selection)]
+            '-e', *command]
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(args, env=env, start_new_session=True,
                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log)
@@ -120,7 +140,7 @@ def open_window(host):
             raise RuntimeError(log.read().decode(errors='replace').strip() or 'Could not open Alacritty')
 
 
-def run_picker(parser, *, refresh=False):
+def run_picker(parser, *, refresh=False, terminal_type=''):
     from .. import ssh
 
     if curses is None:
@@ -129,7 +149,7 @@ def run_picker(parser, *, refresh=False):
         hosts = ssh.target_hosts(refresh=True) if refresh else ssh.target_hosts()
         host = curses.wrapper(pick, hosts)
         if host:
-            open_window(host)
+            open_window(host, terminal_type)
     except (OSError, RuntimeError, curses.error) as error:
         print(f'Could not open SSH window: {error}', file=sys.stderr)
         try:

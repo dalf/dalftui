@@ -229,6 +229,8 @@ Tests use disposable directories, OpenSSH's configuration evaluator, and private
 tmux sockets. They do not open SSH connections or touch your live tmux sessions,
 except `tests/test_vscode_ssh.py`: with `DALFTUI_TEST_SSHD=1` (set by macOS CI), it
 starts an unprivileged loopback sshd and opens a remote folder through a real forward.
+`DALFTUI_TEST_MACOS_GUI=1` (also set by macOS CI) lets `tests/test_macos_ssh_window.py`
+open a real Terminal.app window.
 They cover backups, rollback, repeated installation, updates through the link,
 personal overrides, both shortcut guides, tag filtering, mode switching,
 reloads that preserve pane processes and Claude status, and the clipboard and

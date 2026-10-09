@@ -217,7 +217,7 @@ class DesktopPickerTests(unittest.TestCase):
                     self.assertEqual(picker.main(), 0)
                 hosts.assert_called_once_with()
                 if key == '\n':
-                    window.assert_called_once_with('server')
+                    window.assert_called_once_with('server', '')
                 else:
                     window.assert_not_called()
 

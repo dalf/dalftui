@@ -33,7 +33,7 @@ jobs:
         run: brew install tmux oh-my-posh coreutils
       # The generated Linux-server programs use GNU stat and timeout.
       - name: Verify macOS and shared functionality
-        run: DALFTUI_TEST_SSHD=1 PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH" mise run test:linux
+        run: DALFTUI_TEST_SSHD=1 DALFTUI_TEST_MACOS_GUI=1 PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH" mise run test:linux
       # Plain BSD userland and bash 3.2; HOME is disposable.
       - name: Install, use and uninstall in a temporary home
         shell: /bin/bash -euo pipefail {0}
@@ -64,6 +64,7 @@ jobs:
           test "$(tmux -L ci show -sv copy-command)" = pbcopy
           tmux -L ci list-keys -T prefix | grep ' F1 .*--tmux-only'
           if tmux -L ci list-keys -T prefix | grep ' F2 '; then exit 1; fi
+          tmux -L ci list-keys -T prefix | grep ' h .*bin/ssh_picker.py --terminal-type'
           tmux -L ci list-keys -T prefix | grep ' F3 .*uv run --no-project'
           if tmux -L ci show-messages | grep -i error; then exit 1; fi
           tmux -L ci send-keys -t t 'printf "dalftui-%s\n" clip' Enter
@@ -102,6 +103,7 @@ jobs:
           uv run --no-project --python '>=3.11' "$root/bin/shortcuts.py" --tmux-only --print > "$fake/guide"
           if grep Alacritty "$fake/guide"; then exit 1; fi
           grep -q 'Cmd+C' "$fake/guide"
+          grep -q 'Ctrl+B → h' "$fake/guide"
           tmux -L ci kill-server
 
           ./install --uninstall

@@ -308,7 +308,9 @@ Keys and terminals:
 
 - **Ctrl+B, then F1 / F3** open the guide and VS Code. Apple keyboards need Fn for
   F-keys unless they are set as standard function keys.
-- **Ctrl+B, then F2** (SSH picker) is not bound, as on a server.
+- **Ctrl+B, then h** chooses an SSH host and opens it in a new Terminal.app window,
+  or iTerm2 when this tmux client is iTerm2. The first time, iTerm2 asks whether to
+  run the generated file; it may open a tab instead of a window. F2 is not bound.
 - **F3** opens local VS Code only and needs its `code` command on the PATH of the
   shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
   *Shell Command: Install 'code' command in PATH*).

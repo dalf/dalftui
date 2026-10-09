@@ -18,7 +18,9 @@ credentials stay outside the repository. Git service entries such as GitHub
 and GitLab can remain untagged and stay out of the picker.
 
 In the picker, type to filter, use the arrows to select, and press **Enter** to
-connect. **Esc** cancels. OpenSSH resolves tags, so wildcard, `Match`, and included
+connect. **Esc** cancels. On macOS, **Ctrl+B, then h** opens the picker and Enter
+opens a Terminal.app window, or iTerm2 from an iTerm2 client; iTerm2 asks once to
+confirm running the file and may open a tab. OpenSSH resolves tags, so wildcard, `Match`, and included
 settings apply. Wildcard rules are not individual hosts. You can type a full
 hostname covered by a tagged wildcard rule and press Enter to connect.
 
@@ -100,7 +102,7 @@ The cache lives at `%LOCALAPPDATA%\dalftui\hosts-cache.json` on Windows, or
 A configured `User`, including one supplied through a wildcard or included
 configuration, is used automatically. Otherwise the new window asks for the
 login. A destination such as `user@host` already provides its username.
-On Linux and Windows, the launcher then sets the window or tab title to
+On Linux, macOS and Windows, the launcher then sets the window or tab title to
 `username@host-alias`, even when remote tmux supplies no title. Remote applications
 can still update it. Linux SSH windows enable Alacritty's dynamic titles for this
 window only; redirected command output contains no title escape sequences.

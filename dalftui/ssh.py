@@ -490,6 +490,8 @@ def main():
     parser.add_argument('--bridge', choices=('unix', 'tcp'),
                         help='Desktop editor bridge listener; the server side is always a '
                              'private Unix socket (default: TCP on Windows, Unix socket elsewhere)')
+    parser.add_argument('--terminal-type', default='',
+                        help='macOS: the tmux client terminal type; iTerm2 opens iTerm2, otherwise Terminal.app')
     args = parser.parse_args()
     if sys.version_info < (3, 11):
         parser.error('Python 3.11 or newer is required.')
@@ -517,7 +519,7 @@ def main():
             print(f'Could not choose an SSH host: {error}', file=sys.stderr)
             return 1
     from .linux import ssh_picker
-    return ssh_picker.run_picker(parser, **refresh_options)
+    return ssh_picker.run_picker(parser, **refresh_options, terminal_type=args.terminal_type)
 
 
 if __name__ == '__main__':

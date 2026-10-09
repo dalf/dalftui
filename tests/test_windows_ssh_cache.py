@@ -269,7 +269,7 @@ class HostCacheTests(unittest.TestCase):
                     if platform == 'win32':
                         choose.assert_called_once_with(refresh=True)
                     else:
-                        self.assertEqual(desktop.call_args.kwargs, {'refresh': True})
+                        self.assertEqual(desktop.call_args.kwargs, {'refresh': True, 'terminal_type': ''})
 
     def test_cache_survives_fresh_processes_without_running_ssh_on_second_open(self):
         program = '''import json, pathlib, subprocess, sys

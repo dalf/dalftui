@@ -17,6 +17,15 @@ TEXT = "\033[38;2;229;231;235m"
 MUTED = "\033[38;2;166;173;200m"
 
 
+def tmux_profile():
+    """Return the active dalftui tmux profile, or an empty string."""
+    try:
+        return subprocess.run(["tmux", "show-options", "-gqv", "@dalftui_profile"], capture_output=True,
+                              text=True, timeout=5, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def render(tmux_only=False):
     width = max(24, shutil.get_terminal_size((100, 30)).columns - 4)
     lines = []
@@ -97,7 +106,10 @@ def render(tmux_only=False):
         groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
         groups["Select / copy / paste"][3] = ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then Shift+drag")
         del groups["Alacritty terminal"]
-        del groups["SSH / servers"]
+        if tmux_profile() == "macos":
+            groups["SSH / servers"][0] = ("Ctrl+B → h", "Choose a host tagged dalftui; open a new Terminal.app or iTerm2 window with remote tmux")
+        else:
+            del groups["SSH / servers"]
     if tmux_only and sys.platform == "darwin":
         groups["Select / copy / paste"][:4] = [
             ("Fn+drag / Option+drag", "Select text in Terminal.app / iTerm2"),

@@ -641,7 +641,7 @@ class ServerInstallationTests(DisposableSetup):
         self.assertNotIn('Ctrl+Shift+F / Ctrl+Shift+B', content)
         self.assertNotIn('Copy selection / paste using your local terminal', content)
         self.assertNotIn('ALACRITTY CUSTOM BINDINGS', content)
-        self.assertNotIn('Ctrl+B → F2', content)
+        self.assertNotIn('SSH / SERVERS', content)
         self.assertNotIn('Cannot read Alacritty', content)
 
 
@@ -781,11 +781,12 @@ class MacTests(DisposableSetup):
             self.assertEqual(tmux_editor.client_environment(1), dict(os.environ))
 
     def test_guide_names_mac_keys_and_never_imports_tomllib(self):
-        with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
+        with patch.object(shortcuts.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, 'macos\n'), OSError('no server')]):
             content = shortcuts.render(tmux_only=True)
         self.assertIn('Cmd+C / Cmd+V', content)
         self.assertIn('Option+drag', content)
         self.assertIn('Ctrl+B → Fn+F1', content)
+        self.assertIn('Ctrl+B → h', content)
         self.assertNotIn('Alacritty', content)
         # The F1 popup may run an older python3; the server guide must not need tomllib.
         script = ('import sys; sys.path.insert(0, sys.argv[1]); import dalftui.linux.shortcuts as s\n'

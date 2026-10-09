@@ -14,7 +14,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | **tmux**: tabs, splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
-| **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | no |
+| **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
 | **VS Code (F3)** | local and remote folders | server end of the bridge | local and remote folders | local folders only |
 
 The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
@@ -38,12 +38,12 @@ The intended everyday workflow on a configured Linux desktop is (keys in
 `Ctrl+B` `c` means press `Ctrl+B`, release, then `c`.
 
 All shortcuts are tmux keys: they work in any terminal, including over SSH.
-`F1`–`F3`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
+`F1`–`F3`, macOS `h`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
 
 | Action | Keys | Notes |
 | --- | --- | --- |
 | Shortcut guide | `Ctrl+B` `F1` | |
-| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh` |
+| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
 | Open folder in VS Code | `Ctrl+B` `F3` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection; macOS opens local folders only |
 | New tab | `Ctrl+B` `c` | |
 | Previous / next tab | `Ctrl+B` `p` / `n` | |
