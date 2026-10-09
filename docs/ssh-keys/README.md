@@ -30,17 +30,19 @@ Each key has a comment: your email, given with `-C`. The pages use `john.doe@hes
 
 Each setup creates both keys.
 
-| Setup | Keys live in | Prompt each time you use them | Synced | Tested? | Page |
+| Setup | Keys live in | What you are asked | Synced | Tested? | Page |
 |---|---|---|---|---|---|
-| Windows, nothing extra | Windows Hello (TPM when the PC has one) | Windows PIN | No | **Yes** (Windows 11 VM, 2026-10-09) | [windows.md](windows.md) |
-| Windows + Bitwarden | Bitwarden vault | "Authorize" click | Yes | No | [windows-bitwarden.md](windows-bitwarden.md) |
-| Windows + YubiKey (Bitwarden optional, for passwords only) | YubiKey | YubiKey PIN + touch | Moves with the YubiKey | No | [windows-yubikey.md](windows-yubikey.md) |
-| macOS, nothing extra | Mac's Secure Enclave | Touch ID | No | No | [macos.md](macos.md) |
-| macOS + Bitwarden | Bitwarden vault | "Authorize" click | Yes | No | [macos-bitwarden.md](macos-bitwarden.md) |
-| macOS + YubiKey | YubiKey | YubiKey PIN + touch (GitHub key: touch only) | Moves with the YubiKey | No | [macos-yubikey.md](macos-yubikey.md) |
-| Linux, nothing extra | PC's TPM | TPM PIN (once per agent start) | No | **Yes** (Fedora 44 VM, 2026-10-09) | [linux.md](linux.md) |
-| Linux + Bitwarden | Bitwarden vault | "Authorize" click | Yes | No | [linux-bitwarden.md](linux-bitwarden.md) |
-| Linux + YubiKey | YubiKey | YubiKey PIN + touch | Moves with the YubiKey | No | [linux-yubikey.md](linux-yubikey.md) |
+| Windows, nothing extra | Windows Hello (TPM when the PC has one) | Windows PIN, every use | No | **Yes** (Windows 11 VM, 2026-10-09) | [windows.md](windows.md) |
+| Windows + Bitwarden | Bitwarden vault | "Authorize" click, every use (default setting) | Yes | No | [windows-bitwarden.md](windows-bitwarden.md) |
+| Windows + YubiKey (Bitwarden optional, for passwords only) | YubiKey | A touch, every use (no connection sharing on Windows) | Moves with the YubiKey | No | [windows-yubikey.md](windows-yubikey.md) |
+| macOS, nothing extra | Mac's Secure Enclave | Touch ID, every use (fallback: nothing) | No | No | [macos.md](macos.md) |
+| macOS + Bitwarden | Bitwarden vault | "Authorize" click, every use (default setting) | Yes | No | [macos-bitwarden.md](macos-bitwarden.md) |
+| macOS + YubiKey | YubiKey | A touch, then nothing for 10 minutes to the same host | Moves with the YubiKey | No | [macos-yubikey.md](macos-yubikey.md) |
+| Linux, nothing extra | PC's TPM | TPM PIN once per key per login, then nothing | No | **Yes** (Fedora 44 VM, 2026-10-09) | [linux.md](linux.md) |
+| Linux + Bitwarden | Bitwarden vault | "Authorize" click, every use (default setting) | Yes | No | [linux-bitwarden.md](linux-bitwarden.md) |
+| Linux + YubiKey | YubiKey | A touch, then nothing for 10 minutes to the same host | Moves with the YubiKey | No | [linux-yubikey.md](linux-yubikey.md) |
+
+Each page has a section "Day to day: what you are asked": what each command asks you, on your computer and from a VM.
 
 If your computer has no TPM chip or Windows Hello, [windows.md](windows.md), [macos.md](macos.md) and [linux.md](linux.md) each have a **fallback**: normal keys protected by a passphrase.
 
@@ -89,6 +91,30 @@ ssh -G github.com
 ```
 
 Look for `identityfile ~/.ssh/id_github` (or `id_github.pub`, if your setup page uses it) in the output. Then run `ssh -G monitoring.lan.text-analytics.ch` and look for `identityfile ~/.ssh/id_text_analytics_ch` and `forwardagent yes`. If you see an error instead, fix the line it names.
+
+## Automation and agents
+
+The keys on these pages are for **you, at the keyboard**. An AI coding agent (Claude Code, Codex, Copilot, Cursor…) or a script that works on its own for hours must not use them, nor your `gh` login token. Give it **its own credential**, limited to what it needs, and run it **apart from your account**.
+
+Why:
+
+- An agent that runs as your user can read what you can: `gh auth token` prints your GitHub token, which reaches every repository you can reach. Malware stole tokens this way in 2025 ([s1ngularity](https://www.wiz.io/blog/s1ngularity-supply-chain-attack), [Shai-Hulud](https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack)). Setting `GH_TOKEN` for the agent does not hide that token.
+- While an SSH connection is shared (the 10-minute window on the YubiKey pages), any program running as you can use it without a touch. Stretching that window to cover hours of agent work removes the protection of the hardware key.
+- An agent can be steered by what it reads (a web page, an issue, a file in a repository). Limit what it can reach, not only what it is told.
+
+What to do:
+
+1. **Run the agent apart from your account:** in a LAN VM you reach with `ssh -a` (no agent forwarding), in a separate user account, or in a container started without your `~/.ssh`, your `SSH_AUTH_SOCK` or your git credentials. A hosted agent (GitHub's Copilot agent, Claude Code on the web) is the simplest choice on any OS.
+2. **Give it its own GitHub credential:**
+   - A [fine-grained token](https://github.com/settings/personal-access-tokens/new): only the repositories it works on; permissions **Contents** and **Pull requests** read and write (Metadata read is added automatically); no Workflows or Administration permission; an expiry of 30 to 90 days. In the agent's environment: `export GH_TOKEN=github_pat_...` then `gh auth setup-git`.
+   - Or a [deploy key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys) for a single repository (a software SSH key that only reaches that repository; it never expires, so delete it when the work ends).
+   - For several people or many repositories, a [GitHub App](https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps) gives tokens that expire after one hour and commits under the app's own name.
+3. **Let GitHub limit the damage:** the agent pushes branches and opens pull requests; protect `main` with a rule that requires a pull request and blocks force-push and deletion. A pull request opened with your fine-grained token counts as yours, and you cannot approve your own pull request, so a second person reviews it, or the agent gets its own identity (a GitHub App or a separate account).
+4. **Keep a list** of where each agent credential lives, and delete it when the work is done.
+
+On your own computer, you can also narrow your `gh` token: `gh auth refresh --remove-scopes workflow` removes its right to change GitHub Actions workflows.
+
+Sources: [GitHub: personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens), [GitHub: Copilot agent risks and mitigations](https://docs.github.com/en/copilot/concepts/agents/cloud-agent/risks-and-mitigations), [Anthropic: Claude Code in self-hosted environments](https://code.claude.com/docs/en/self-hosted-environments-deploy), [Anthropic: devcontainer](https://code.claude.com/docs/en/devcontainer), [Simon Willison: the lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/).
 
 ## GitHub CLI (once per computer)
 

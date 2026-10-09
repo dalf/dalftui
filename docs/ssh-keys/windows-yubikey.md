@@ -9,7 +9,37 @@ First read the rules and install the GitHub CLI: see [the setup index](README.md
 - the SSH that comes with Windows, version 8.9 or later (check with `ssh -V`);
 - to sit at the PC itself.
 
-You create two keys on the YubiKey: `id_github` for GitHub and `id_text_analytics_ch` for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). The private keys stay on the YubiKey. The files with these names in `.ssh` are only handles: they are useless without the YubiKey and its PIN.
+You create two keys on the YubiKey: `id_github` for GitHub and `id_text_analytics_ch` for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). The private keys stay on the YubiKey. The files with these names in `.ssh` are only handles: they are useless without the YubiKey.
+
+## Day to day: what you are asked
+
+Each use of a key needs a **touch** of the YubiKey. The keys are created without `-O verify-required`, so OpenSSH does not ask for the PIN in daily use; the PIN is needed to create the keys and to download them to another PC. Windows handles the YubiKey through its own security-key windows and may still show a PIN prompt; not tested. Documented by Yubico, not tested.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This computer | `ssh monitoring` | The YubiKey blinks: touch it. |
+| This computer | `git pull` / `git push` / `git clone` with GitHub | A touch, once per command. |
+| This computer | `scp` to a VM | A touch. |
+| This computer | Open a VS Code Remote-SSH window, or reconnect after sleep | A touch, each time VS Code connects. |
+| This computer | Commit with SSH signing (if you set it up) | A touch, once per commit. |
+| This computer | First use after logging in or a reboot | Same as any other time: a touch. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Your YubiKey on this PC blinks: touch it here. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | The same, once per commit. |
+
+Good to know:
+
+- The touch proves that someone is at the YubiKey. Malware on this PC cannot use the keys without it.
+- One SSH connection is one touch. A `git pull` is one connection; a `git rebase` with signing asks once per commit.
+- The Windows SSH cannot share one connection between commands: Win32-OpenSSH lists the client `ControlMaster` among the features that "will not work on Windows yet". So each command needs its own touch, unlike on Linux and macOS.
+- Requests forwarded from a VM are answered on this PC, so you must be at it with the YubiKey plugged in.
+- Long-running AI agents or scripts should not use these keys at all: see [Automation and agents](README.md#automation-and-agents).
+
+When it doesn't work:
+
+- The YubiKey is unplugged: the key cannot sign. Plug it in and run the command again.
+- You do not touch it, or you are away when a VM asks: the command waits. Not tested: how long it waits before it fails.
+- Wrong PIN (when creating or downloading keys): after 3 in a row, unplug and replug the YubiKey. After 8, its FIDO2 function is blocked until a reset, which deletes these keys. Do not guess.
+- Keys created with an earlier version of this page (`-O verify-required`) keep asking the PIN at each use. To stop that, create new keys with the commands below and publish them again.
 
 ## Create the keys (once, on the first PC)
 
@@ -17,8 +47,8 @@ YubiKeys work with the SSH that comes with Windows. No download is needed. Repla
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.ssh" | Out-Null
-ssh-keygen -t ed25519-sk -O resident -O verify-required -O application=ssh:github -C "john.doe@hesge.ch" -f "$env:USERPROFILE\.ssh\id_github"
-ssh-keygen -t ed25519-sk -O resident -O verify-required -O application=ssh:text_analytics_ch -C "john.doe@hesge.ch" -f "$env:USERPROFILE\.ssh\id_text_analytics_ch"
+ssh-keygen -t ed25519-sk -O resident -O application=ssh:github -C "john.doe@hesge.ch" -f "$env:USERPROFILE\.ssh\id_github"
+ssh-keygen -t ed25519-sk -O resident -O application=ssh:text_analytics_ch -C "john.doe@hesge.ch" -f "$env:USERPROFILE\.ssh\id_text_analytics_ch"
 ```
 
 For **each** of the two keys:
@@ -27,7 +57,7 @@ For **each** of the two keys:
 - Insert the YubiKey, enter its **PIN**, and **touch** it when it blinks.
 - `Enter passphrase` (asked twice): press **Enter** both times. The secret stays on the YubiKey.
 
-`-O application=...` gives each key its own name on the YubiKey, so the second key cannot replace the first, and another PC can tell them apart.
+There is no `-O verify-required`: in daily use a touch is enough. `-O application=...` gives each key its own name on the YubiKey, so the second key cannot replace the first, and another PC can tell them apart.
 
 **On another PC**, you need the four handle files again: `id_github`, `id_github.pub`, `id_text_analytics_ch` and `id_text_analytics_ch.pub`. Never overwrite files that already exist in `.ssh`: they may point to another key.
 
@@ -58,7 +88,7 @@ For **each** of the two keys:
 
 ## SSH agent
 
-The agent lets the LAN servers use your keys: from a VM, `git` reaches GitHub through your PC. The PIN and a touch are still needed every time a key is used.
+The agent lets the LAN servers use your keys: from a VM, `git` reaches GitHub through your PC. A touch is still needed every time a key is used.
 
 1. In an **administrator** PowerShell (as shipped, the service is Stopped and Disabled):
 
@@ -132,7 +162,7 @@ Expected: two lines, `256 SHA256:... (ED25519-SK)`.
 ssh-keygen -Y sign -f "$env:USERPROFILE\.ssh\id_github" -n file "$env:USERPROFILE\.ssh\id_github.pub"
 ```
 
-It asks for the PIN and a touch. Expected: `Write signature to ...id_github.pub.sig`. Repeat with `id_text_analytics_ch` to check the second key.
+It asks for a touch. Expected: `Write signature to ...id_github.pub.sig`. Repeat with `id_text_analytics_ch` to check the second key.
 
 ## Publish the public keys (once, from any PC)
 
@@ -153,7 +183,7 @@ Get-Content "$env:USERPROFILE\.ssh\id_text_analytics_ch.pub" | ssh monitoring "u
 - The command removes write access for others from `~/.ssh` (SSH ignores the key otherwise) and starts the key on a new line. Empty lines in `authorized_keys` are harmless.
 - The first connection to a server asks `Are you sure you want to continue connecting (yes/no/[fingerprint])?`. Type **yes** only if the fingerprint shown matches the real one. For GitHub, compare with https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints. For a LAN VM, compare with the fingerprint the admin publishes, or ask the admin. If SSH later prints `REMOTE HOST IDENTIFICATION HAS CHANGED`, stop and tell the admin.
 
-Then test each key. Each command asks for the PIN and a touch.
+Then test each key. Each command asks for a touch.
 
 ```powershell
 ssh -T git@github.com
@@ -173,7 +203,7 @@ Test the forwarding, from the VM to GitHub:
 ssh -t monitoring ssh -T git@github.com
 ```
 
-It asks for the PIN and a touch twice: once for the VM, once for GitHub. Expected: `Hi <you>! ...`. VS Code Remote-SSH reads the same config. If the agent is missing in a VS Code terminal, or if you see `chan_shutdown_read: shutdown() failed ... Not a socket`, see the troubleshooting sections at the end of the [SSH page](https://infra.text-analytics.ch/devdoc/tools/ssh/).
+It asks for a touch twice: once for the VM, once for GitHub. Expected: `Hi <you>! ...`. VS Code Remote-SSH reads the same config. If the agent is missing in a VS Code terminal, or if you see `chan_shutdown_read: shutdown() failed ... Not a socket`, see the troubleshooting sections at the end of the [SSH page](https://infra.text-analytics.ch/devdoc/tools/ssh/).
 
 **Git:** repositories cloned with an `https://` URL keep using HTTPS; `git remote -v` shows it. If a GitHub organization uses single sign-on, authorize `id_github` for it at https://github.com/settings/keys (**Configure SSO**). To sign commits with `id_github`, follow [GitHub and commit signing](../secrets-and-keys.md#ssh-keys) and also run `git config --global gpg.ssh.program C:/Windows/System32/OpenSSH/ssh-keygen.exe`.
 

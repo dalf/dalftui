@@ -6,6 +6,31 @@ First read the rules and install the GitHub CLI: see [the setup index](README.md
 
 You create two keys: `id_github` for GitHub and `id_text_analytics_ch` for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). Both are created inside the TPM and cannot leave this computer.
 
+## Day to day: what you are asked
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This computer | First use of each key after logging in or a reboot | A small window asks `Enter passphrase for (john.doe@hesge.ch):`. Type the PIN. Once per key, until you log out. |
+| This computer | `ssh monitoring` | Nothing, once the PIN was typed for `id_text_analytics_ch`. |
+| This computer | `git pull` / `git push` / `git clone` with GitHub | Nothing, once the PIN was typed for `id_github`. |
+| This computer | `scp` / `rsync` to a VM | Nothing. |
+| This computer | Open a VS Code Remote-SSH window, or reconnect after sleep | Nothing. |
+| This computer | Commit with SSH signing (if you set it up) | Nothing. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Nothing. If you have not typed the PIN for `id_github` yet, the PIN window opens on this computer. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Nothing, same as above. |
+
+**Fallback (no TPM):** the same, except that the question is `Enter passphrase for key '/home/you/.ssh/id_github':` in the terminal, once per key per login session. A VM cannot use `id_github` until you have used it once on this computer: before that, GitHub refuses the login from the VM.
+
+Good to know:
+
+- The PIN unlocks the key inside the TPM. The agent keeps it unlocked until you log out, so anyone using your open session, or root on a VM you are connected to, can use the keys without the PIN.
+- Requests forwarded from a VM are answered on this computer. If a PIN window is needed, it opens here.
+
+When it doesn't work:
+
+- Wrong PIN: `agent refused operation`, then `Permission denied (publickey...)`. The TPM counts wrong PINs and locks the key for a while after too many, so do not guess.
+- No PIN window and no key: check that the agent runs, as in the agent section below.
+
 ## Install (once)
 
 Ubuntu 26.04:

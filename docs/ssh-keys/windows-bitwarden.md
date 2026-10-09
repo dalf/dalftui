@@ -6,6 +6,35 @@ First read the rules and install the GitHub CLI: see [the setup index](README.md
 
 You create two keys: one for GitHub and one for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). Bitwarden keeps both private keys. Your `.ssh` folder only holds the public keys `id_github.pub` and `id_text_analytics_ch.pub`.
 
+## Day to day: what you are asked
+
+Bitwarden's **Ask for authorization when using SSH agent** setting decides how often it asks. The table shows **Always**, the default: a **"Confirm SSH key usage"** window, where you click **Authorize**. With **Remember until vault is locked**, Bitwarden asks once per key and per server, then not again until the vault locks. With **Never**, it asks nothing while the vault is unlocked. Documented, not tested.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This computer | `ssh monitoring` | Bitwarden asks: click **Authorize**. |
+| This computer | `git pull` / `git push` / `git clone` with GitHub | Bitwarden asks, once per command: click **Authorize**. |
+| This computer | `scp` to a VM | Bitwarden asks: click **Authorize**. |
+| This computer | Open a VS Code Remote-SSH window, or reconnect after sleep | Bitwarden asks each time VS Code connects: click **Authorize**. |
+| This computer | Commit with SSH signing (if you set it up) | Bitwarden asks, once per commit: click **Authorize**. |
+| This computer | First use after logging in or a reboot | Bitwarden asks you to unlock the vault, then to authorize. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Bitwarden asks on this computer: click **Authorize** there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | The same, once per commit. |
+
+Good to know:
+
+- **Authorize** proves that you, at this PC, accept this use of the key. Anyone who can click it in your unlocked session can use the keys.
+- One SSH connection is one request. A `git pull` is one connection; a `git rebase` with signing asks once per commit.
+- Requests forwarded from a VM are answered on this PC, so you must be at it.
+
+When it doesn't work:
+
+- The vault is locked: Bitwarden comes to the front and asks you to unlock it. If you do not unlock it within 60 seconds, it shows `SSH key request timed out.` and refuses the request.
+- Bitwarden is closed: there is no agent, so SSH cannot use the keys. Start Bitwarden.
+- You are away when a VM asks: the command waits until you come back and answer.
+
+The Windows SSH cannot share one connection between commands to cut prompts: Win32-OpenSSH lists the client `ControlMaster` among the features that "will not work on Windows yet".
+
 ## Create the keys
 
 In an **administrator** PowerShell, install Bitwarden and turn off the Windows SSH agent so Bitwarden can take its place:
@@ -40,7 +69,7 @@ Get-Clipboard | Set-Content -Encoding ascii "$env:USERPROFILE\.ssh\id_text_analy
 In Bitwarden **Settings**:
 
 - **Enable SSH agent**: turn on.
-- **Ask for authorization when using SSH agent**: leave on.
+- **Ask for authorization when using SSH agent**: keep **Always**, the default.
 - **Start automatically on login**: turn on.
 
 ```powershell

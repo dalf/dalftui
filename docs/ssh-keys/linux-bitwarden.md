@@ -6,6 +6,34 @@ First read the rules and install the GitHub CLI: see [the setup index](README.md
 
 You create two keys: `id_github` for GitHub and `id_text_analytics_ch` for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). Both stay in the vault. On disk you keep only their public keys, `~/.ssh/id_github.pub` and `~/.ssh/id_text_analytics_ch.pub`.
 
+## Day to day: what you are asked
+
+With **Ask for authorization when using SSH agent** set to **Always**, the default. Documented by Bitwarden, not tested.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This computer | First use after logging in or a reboot | Bitwarden asks you to unlock the vault, then to click **Authorize**. |
+| This computer | `ssh monitoring` | Bitwarden asks you to click **Authorize**. |
+| This computer | `git pull` / `git push` / `git clone` with GitHub | Bitwarden asks you to click **Authorize**. |
+| This computer | `scp` / `rsync` to a VM | Bitwarden asks you to click **Authorize**. |
+| This computer | Open a VS Code Remote-SSH window, or reconnect after sleep | Bitwarden asks you to click **Authorize**. |
+| This computer | Commit with SSH signing (if you set it up) | Bitwarden asks you to click **Authorize**. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Bitwarden on this computer asks you to click **Authorize**. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Bitwarden on this computer asks you to click **Authorize**. |
+
+Good to know:
+
+- The click proves that you, at this computer, agreed to this use of the key. It is what stops root on a VM from using your keys silently.
+- One SSH connection is one request: a `git pull` is one, a rebase with signing is one per commit.
+- Requests forwarded from a VM appear on this computer, so you must be at it.
+- Bitwarden's help also names the choices **Remember until vault is locked** and **Never**. They ask less often, and weaken the protection above.
+
+When it doesn't work:
+
+- Vault locked: Bitwarden asks you to unlock it, then to authorize. If you do not unlock it within a minute, it shows `SSH key request timed out.` and refuses the request.
+- Bitwarden not running, or logged out: there is no agent, so SSH cannot use the keys.
+- You are away when a VM asks: nobody clicks **Authorize**, and the command on the VM does not get the key.
+
 ## Create the keys
 
 Install the app:
@@ -35,7 +63,7 @@ Bitwarden does not let you set the key comment, so the email does not appear in 
 In **Settings**:
 
 - turn on **Enable SSH agent**;
-- leave **Ask for authorization when using SSH agent** on;
+- keep **Ask for authorization when using SSH agent** set to **Always**, the default;
 - turn on **Start automatically on login**.
 
 The agent holds both keys whenever the vault is unlocked.

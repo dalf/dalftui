@@ -12,6 +12,68 @@ You create **two keys**: `~/.ssh/id_github` for GitHub and `~/.ssh/id_text_analy
 
 In this page, `<vm>` is a VM name such as `monitoring`. If your login on the VMs is not your Mac user name, write `<login>@<vm>` instead. `john.doe@hesge.ch` stands for your email.
 
+## Day to day: what you are asked
+
+What each option asks for when you use the keys. "On a LAN VM" means you are connected to the VM with `ssh` or VS Code, and the VM uses the GitHub key through your Mac.
+
+### Option 1: built-in Secure Enclave key
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This Mac | `ssh monitoring` | Touch ID: touch the sensor. |
+| This Mac | `git pull` / `git push` / `git clone` with GitHub | Touch ID: touch the sensor. |
+| This Mac | `scp` / `rsync` to a VM | Touch ID: touch the sensor. |
+| This Mac | Open a VS Code Remote-SSH window, or reconnect after sleep | Touch ID, once for each SSH connection VS Code opens. |
+| This Mac | Commit with SSH signing (if you set it up) | Touch ID, once per commit. |
+| This Mac | First use after logging in or a reboot | Nothing extra. Open Terminal once: it puts the keys in the agent, which the VMs need. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Touch ID on the Mac: touch the sensor there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Touch ID on the Mac, once per commit. |
+
+### Option 2: Secretive app
+
+With **Require authentication** ticked, each use asks Touch ID (or your Apple Watch), and Secretive shows a notification.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This Mac | `ssh monitoring` | Touch ID: touch the sensor. |
+| This Mac | `git pull` / `git push` / `git clone` with GitHub | Touch ID: touch the sensor. |
+| This Mac | `scp` / `rsync` to a VM | Touch ID: touch the sensor. |
+| This Mac | Open a VS Code Remote-SSH window, or reconnect after sleep | Touch ID, once for each SSH connection VS Code opens. |
+| This Mac | Commit with SSH signing (if you set it up) | Touch ID, once per commit. |
+| This Mac | First use after logging in or a reboot | Nothing extra: SecretAgent starts at login. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Touch ID on the Mac: touch the sensor there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Touch ID on the Mac, once per commit. |
+
+### Fallback: ed25519 keys with a passphrase in Keychain
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This Mac | `ssh monitoring` | Nothing: Keychain gives the passphrase. |
+| This Mac | `git pull` / `git push` / `git clone` with GitHub | Nothing. |
+| This Mac | `scp` / `rsync` to a VM | Nothing. |
+| This Mac | Open a VS Code Remote-SSH window, or reconnect after sleep | Nothing. |
+| This Mac | Commit with SSH signing (if you set it up) | Nothing. |
+| This Mac | First use after logging in or a reboot | Nothing. You type the passphrase only once, during setup. Open Terminal once: it puts the keys in the agent, which the VMs need. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Nothing. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Nothing. |
+
+Good to know:
+
+- Touch ID proves that someone is at the Mac now. The fallback passphrase only protects the key files: once the keys are in the agent, nothing is asked, so anyone using your unlocked Mac, or a VM you are connected to, can use them.
+- One SSH connection is one prompt. A `git pull` is one. A rebase that signs commits is one per commit.
+- A VM's request is shown on the Mac, so you must be at the Mac.
+- Secretive can leave a key unlocked for a set time, so later uses ask nothing until then.
+
+When it doesn't work:
+
+- The Mac is locked or asleep, or you are away: nobody answers Touch ID, and the command waits.
+- `git` on a VM says `Permission denied (publickey)` (Option 1 and fallback): the GitHub key is not in the agent yet. Open Terminal on the Mac once, then try again.
+- With Secretive, nothing works if SecretAgent is not running. Open Secretive to start it.
+
+Tip: SSH connection sharing lets later connections to the same VM reuse the first one, without a new prompt. VS Code's Remote-SSH docs suggest these lines (add them to the `Host *.lan.text-analytics.ch` block, then run `mkdir -p ~/.ssh/sockets`): `ControlMaster auto`, `ControlPath ~/.ssh/sockets/%r@%h-%p`, `ControlPersist 600`. It does not change the prompts for GitHub from a VM.
+
+Status of this section: not tested, no Mac was available. Touch ID at each use (Option 1) is not described in Apple documentation. Sources: https://github.com/maxgoedjen/secretive (README and release notes), https://developer.apple.com/library/archive/technotes/tn2449/_index.html, https://code.visualstudio.com/docs/remote/troubleshooting, https://man.openbsd.org/ssh_config.
+
 ## Before you start
 
 ```sh

@@ -8,6 +8,43 @@ You create **two keys**: `id_github` for GitHub and `id_text_analytics_ch` for o
 
 In this page, `<vm>` is a VM name such as `monitoring`. If your login on the VMs is not your Mac user name, write `<login>@<vm>` instead.
 
+## Day to day: what you are asked
+
+Bitwarden's setting **Ask for authorization when using SSH agent** decides how often it asks. The table is for **Always**: a "Confirm SSH key usage" window, where you click **Authorize**.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This Mac | `ssh monitoring` | Bitwarden asks: click **Authorize**. |
+| This Mac | `git pull` / `git push` / `git clone` with GitHub | Bitwarden asks: click **Authorize**. |
+| This Mac | `scp` / `rsync` to a VM | Bitwarden asks: click **Authorize**. |
+| This Mac | Open a VS Code Remote-SSH window, or reconnect after sleep | Bitwarden asks, once for each SSH connection VS Code opens. |
+| This Mac | Commit with SSH signing (if you set it up) | Bitwarden asks, once per commit. |
+| This Mac | First use after logging in or a reboot | Bitwarden must be running. It asks you to unlock the vault (master password, or Touch ID if turned on), then to authorize. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Bitwarden asks on the Mac: click **Authorize** there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Bitwarden asks on the Mac, once per commit. |
+
+The other choices:
+
+- **Remember until vault is locked**: one **Authorize** per key and per server (GitHub, each VM; a VM's use of the GitHub key counts apart), then nothing until the vault locks.
+- **Never**: nothing while the vault is unlocked.
+
+Good to know:
+
+- **Authorize** proves that someone at the Mac agreed to this use. Unlocking proves that person knows the master password (or has the Mac's Touch ID).
+- One SSH connection is one prompt. A `git pull` is one. A rebase that signs commits is one per commit.
+- A VM's request is shown on the Mac, so you must be at the Mac.
+- With **Never**, a VM you are connected to can use your keys without asking, while the vault is unlocked.
+
+When it doesn't work:
+
+- Bitwarden is closed: there is no agent, so the keys cannot be used. GitHub refuses, and a VM asks for its password. Start Bitwarden.
+- The vault is locked: Bitwarden shows "Please unlock your vault to approve the SSH key request." Unlock it within a minute, or Bitwarden shows "SSH key request timed out." and the command fails.
+- You are away, or the Mac is locked or asleep: nobody clicks **Authorize**, and the command waits.
+
+Tip: SSH connection sharing lets later connections to the same VM reuse the first one, without a new prompt. VS Code's Remote-SSH docs suggest these lines (add them to the `Host *.lan.text-analytics.ch` block, then run `mkdir -p ~/.ssh/sockets`): `ControlMaster auto`, `ControlPath ~/.ssh/sockets/%r@%h-%p`, `ControlPersist 600`. It does not change the prompts for GitHub from a VM.
+
+Status of this section: documented, not tested (no Mac was available). Sources: https://bitwarden.com/help/ssh-agent/, the Bitwarden desktop app's English texts (https://github.com/bitwarden/clients, `apps/desktop/src/locales/en/messages.json` and `apps/desktop/src/autofill/services/ssh-agent.service.ts`), https://code.visualstudio.com/docs/remote/troubleshooting, https://man.openbsd.org/ssh_config.
+
 ## Before you start
 
 ```sh

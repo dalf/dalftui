@@ -10,6 +10,34 @@ First read the rules and install the GitHub CLI: see [the setup index](README.md
 
 You create two keys on this PC: `id_github` for GitHub and `id_text_analytics_ch` for our LAN servers (`*.lan.text-analytics.ch`, the VMs on Hulk). Windows Hello keeps the private keys. The files in `.ssh` only point to them, so a copy of those files is useless on another PC. On a PC with a TPM chip, Windows Hello normally keeps keys in the TPM, but Windows can also keep them in software. We tested that the keys work; we did not check where Windows stored them.
 
+## Day to day: what you are asked
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This computer | `ssh monitoring` | A **"Sign in with a passkey"** window asks your Windows PIN. |
+| This computer | `git pull` / `git push` / `git clone` with GitHub | The same PIN window, once per command. |
+| This computer | `scp` to a VM | The same PIN window. |
+| This computer | Open a VS Code Remote-SSH window, or reconnect after sleep | The same PIN window, each time it connects (not tested). |
+| This computer | Commit with SSH signing (if you set it up) | The same PIN window, once per commit. |
+| This computer | First use after logging in or a reboot | Same as any other time: the PIN window. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | The PIN window opens on this computer: type the PIN there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | The same, once per commit (not tested). |
+
+**Fallback (ed25519 with a passphrase):** nothing is asked once `ssh-add` has loaded the keys. Not tested: whether they are still loaded after a reboot. If `ssh` asks `Enter passphrase for key ...`, type the passphrase; `AddKeysToAgent` loads the key again.
+
+Good to know:
+
+- The PIN proves that you are at this PC, now. Windows asks it for every signature, also through the agent: it never remembers it.
+- One SSH connection is one PIN. A `git pull` is one connection; a `git rebase` with signing asks once per commit.
+- Requests forwarded from a VM are answered on this PC, so you must be at it.
+
+When it doesn't work:
+
+- A VM gets `Permission denied (publickey)`: the key is not in the agent yet. Use it once on this PC (for example `ssh -T git@github.com`), then try again.
+- The PC is locked or you are away: nobody can type the PIN, so the command on the VM waits. Not tested: how long it waits before it fails.
+
+The Windows SSH cannot share one connection between commands to cut prompts: Win32-OpenSSH lists the client `ControlMaster` among the features that "will not work on Windows yet".
+
 ## Create the keys
 
 The SSH that comes with Windows (9.5p2) **cannot create** these keys. It fails with `Key enrollment failed: invalid format`. The block below downloads OpenSSH 10.0 Preview to a temporary folder, uses it to create both keys, then deletes it. Replace `john.doe@hesge.ch` with your email address.

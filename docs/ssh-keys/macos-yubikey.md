@@ -8,6 +8,37 @@ You create **two keys** on the YubiKey: `~/.ssh/id_github` for GitHub and `~/.ss
 
 In this page, `<vm>` is a VM name such as `monitoring`. If your login on the VMs is not your Mac user name, write `<login>@<vm>` instead. `john.doe@hesge.ch` stands for your email.
 
+## Day to day: what you are asked
+
+Each use of a key needs a **touch** of the YubiKey, no PIN. The PIN is asked only when you create the keys or download them to another Mac. The `~/.ssh/config` below also makes SSH keep each connection open for 10 minutes and reuse it, so one touch covers every command to the same host in that time.
+
+| Where you are | What you want to do | What happens |
+|---|---|---|
+| This Mac | `ssh monitoring` | The YubiKey blinks: touch it. Within the next 10 minutes, more `ssh`, `scp` or `rsync` to `monitoring` ask nothing. |
+| This Mac | `git pull` / `git push` / `git clone` with GitHub | Touch the YubiKey. More git commands with GitHub in the next 10 minutes ask nothing. |
+| This Mac | `scp` / `rsync` to a VM | Touch the YubiKey, unless a connection to that VM is already open. |
+| This Mac | Open a VS Code Remote-SSH window, or reconnect after sleep | Touch the YubiKey. |
+| This Mac | Commit with SSH signing (if you set it up) | Touch the YubiKey, once per commit. Connection sharing does not help here. |
+| This Mac | First use after logging in or a reboot | Nothing extra, if the YubiKey is plugged in. Open Terminal once: it starts the agent and adds the keys, which the VMs need. |
+| On a LAN VM (through ssh) | `git pull` / `git push` | Your Mac's YubiKey blinks: touch it there. |
+| On a LAN VM (through ssh) | Commit with SSH signing (if you set it up there) | Touch the YubiKey on the Mac, once per commit. |
+
+Good to know:
+
+- A touch proves that someone is at the YubiKey now. Malware on the Mac cannot use the keys without it.
+- One SSH connection is one touch. A shared connection stays open 10 minutes after its last use; during that time, any program running as you can use it without a touch. That is the price of fewer touches.
+- A VM's request makes the YubiKey on your Mac blink, so you must be at the Mac.
+- Long-running AI agents or scripts should not use these keys at all: see [Automation and agents](README.md#automation-and-agents).
+
+When it doesn't work:
+
+- The YubiKey is not plugged in: nothing blinks and the command fails. Plug it in and try again.
+- You do not touch it, or you are away when a VM asks: the command waits. Not tested: how long it waits before it fails.
+- `git` on a VM says `Permission denied (publickey)`: the GitHub key is not in the agent. Open Terminal on the Mac once, then try again.
+- Keys created with an earlier version of this page (server key with `-O verify-required`) keep asking the PIN. To stop that, create new keys and publish them again.
+
+Status of this section: documented, not tested (no Mac was available). Sources: https://developers.yubico.com/SSH/Securing_SSH_with_FIDO2.html, https://man.openbsd.org/ssh-keygen, https://man.openbsd.org/ssh_config.
+
 ## Before you start
 
 ```sh
@@ -25,7 +56,7 @@ ls -a ~/.ssh 2>/dev/null | grep -E '^id_(github|text_analytics_ch)'
 ```sh
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 ssh-keygen -t ed25519-sk -O resident -O application=ssh:github -f ~/.ssh/id_github -C "john.doe@hesge.ch"
-ssh-keygen -t ed25519-sk -O resident -O verify-required -O application=ssh:text_analytics_ch -f ~/.ssh/id_text_analytics_ch -C "john.doe@hesge.ch"
+ssh-keygen -t ed25519-sk -O resident -O application=ssh:text_analytics_ch -f ~/.ssh/id_text_analytics_ch -C "john.doe@hesge.ch"
 ```
 
 For each key:
@@ -37,7 +68,7 @@ For each key:
 
 The two `application` names keep the keys apart on the YubiKey. Without them, the second key would replace the first.
 
-The server key needs the PIN and a touch at each use. The GitHub key needs only a touch. The reason: a VM uses the GitHub key through the agent on your Mac, and that agent cannot ask for the PIN without an extra program. Someone who has both your YubiKey and this Mac's `~/.ssh/id_github` file can use the GitHub key without the PIN.
+Neither key has `-O verify-required`: in daily use a touch is enough, and the agent can hold both keys. Someone who has both your YubiKey and this Mac's handle files can use the keys without the PIN; keep the YubiKey with you.
 
 **On another Mac:** do "Before you start", then:
 
@@ -59,7 +90,7 @@ Then follow the agent and `~/.ssh/config` steps. The public keys are already on 
 
 ## SSH agent: Homebrew's
 
-Apple's agent cannot use security keys. This starts Homebrew's agent at login, if it is not running yet, and gives it the GitHub key:
+Apple's agent cannot use security keys. This starts Homebrew's agent at login, if it is not running yet, and gives it both keys:
 
 ```sh
 cat >> ~/.zprofile <<'EOF'
@@ -71,17 +102,19 @@ if [ $? -eq 2 ]; then
     rm -f "$SSH_AUTH_SOCK"
     "$B/ssh-agent" -a "$SSH_AUTH_SOCK" >/dev/null
 fi
-"$B/ssh-add" -q ~/.ssh/id_github 2>/dev/null
+"$B/ssh-add" -q ~/.ssh/id_github ~/.ssh/id_text_analytics_ch 2>/dev/null
 EOF
 ```
 
-Open a new terminal. `ssh-add -l` shows `256 SHA256:... john.doe@hesge.ch (ED25519-SK)`.
-
-The server key is not added to the agent, because the agent cannot ask for its PIN. `ssh` reads it from the YubiKey directly.
+Open a new terminal. `ssh-add -l` shows two lines `256 SHA256:... john.doe@hesge.ch (ED25519-SK)`.
 
 ## ~/.ssh/config
 
-This is the team's block with two changes. `IdentityAgent` points to Homebrew's agent, so that this agent is the one forwarded to the VMs. The server block has no `AddKeysToAgent`, for the PIN reason above.
+This is the team's block with two changes. `IdentityAgent` points to Homebrew's agent, so that this agent is the one forwarded to the VMs. The `Control...` lines keep each connection open 10 minutes and reuse it (one touch per host instead of per command); `ssh -O exit <host>` closes it early. Not tested against github.com. Create their private folder first:
+
+```sh
+mkdir -m 700 -p ~/.ssh/cm
+```
 
 If you have no `~/.ssh/config` yet, this creates it. It does not touch an existing file:
 
@@ -92,14 +125,21 @@ CanonicalDomains lan.text-analytics.ch
 CanonicalizeMaxDots 1
 
 Host *.lan.text-analytics.ch
+    AddKeysToAgent yes
     ForwardAgent yes
     IdentityAgent "~/.ssh/agent.sock"
     IdentityFile "~/.ssh/id_text_analytics_ch"
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%C
+    ControlPersist 10m
 
 Host github.com
     AddKeysToAgent yes
     IdentityAgent "~/.ssh/agent.sock"
     IdentityFile "~/.ssh/id_github"
+    ControlMaster auto
+    ControlPath ~/.ssh/cm/%C
+    ControlPersist 10m
 EOF
 ```
 
@@ -139,7 +179,7 @@ ssh-copy-id -i ~/.ssh/id_text_analytics_ch.pub <vm>
 ```
 
 - The first time, `ssh` shows the VM's fingerprint and asks `Are you sure you want to continue connecting`. Compare it with the fingerprint the team publishes for that VM, or ask the admin. Type **yes** only if they match.
-- If it asks for the PIN or a touch, give them.
+- If the YubiKey blinks, touch it.
 - `password:` type your VM password. Expected: `Number of key(s) added: 1`.
 
 ## Check
@@ -156,7 +196,7 @@ ssh -o IdentitiesOnly=yes -T git@github.com
 ssh -o IdentitiesOnly=yes -o PreferredAuthentications=publickey <vm> hostname
 ```
 
-Expected: `Enter PIN for ED25519-SK key ...` (type the PIN), a touch, then the VM's name. No password prompt.
+Expected: a touch, then the VM's name. No password prompt.
 
 ```sh
 ssh -t <vm> ssh -T git@github.com
