@@ -488,3 +488,5 @@ SSH keys and credentials remain outside the repository.
 - [VS Code bridge](docs/vscode-bridge.md)
 - [Manual configuration](docs/manual-configuration.md)
 - [Development guide](docs/development.md)
+
+MIT licensed; see [LICENSE](LICENSE). Vendored code keeps its own license.
