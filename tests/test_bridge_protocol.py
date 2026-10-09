@@ -215,7 +215,10 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         for name, mode, check in cases:
             with (self.subTest(mode=name), patch.object(vscode, 'launch') as launch,
                   vscode.EditorBridge('alice@historical-host', transport='tcp') as bridge):
-                bridge.remote_directory = str(self.directory / (name + '-credentials'))
+                # macOS limits Unix socket paths to 104 bytes; its temporary directory is long.
+                short = tempfile.mkdtemp(prefix='dalftui-', dir='/tmp')
+                self.addCleanup(shutil.rmtree, short, True)
+                bridge.remote_directory = short + '/credentials'
                 bridge.remote_owner_file = bridge.remote_directory + '/claim.owner'
                 bridge.remote_token_file = bridge.remote_directory + '/token'
                 bridge.remote_socket = bridge.remote_directory + '/editor.sock'
