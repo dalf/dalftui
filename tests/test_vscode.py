@@ -676,6 +676,22 @@ class EditorTmuxTests(TmuxFixture):
             self.assertEqual(self.press_f3(master),
                              ['--new-window', '--folder-uri', vscode.folder_uri(str(folder), 'windows-vm')])
 
+    def test_bridge_client_starting_the_server_keeps_credentials_out_of_panes(self):
+        pane_env = self.directory / 'pane.env'
+        env = dict(self.editor_env, DALFTUI_EDITOR_SOCKET='/nonexistent/editor.sock',
+                   DALFTUI_EDITOR_TOKEN='aa' * 32)
+        subprocess.run(['tmux', '-S', str(self.socket), '-f', str(self.paths.tmux),
+                        'new-session', '-d', '-s', 'verify', f'env > {pane_env}; sleep 600'],
+                       env=env, check=True, timeout=15)
+        self.addCleanup(subprocess.run, [*self.command, 'kill-server'], capture_output=True, env=self.env)
+        def bridge_lines(text):
+            return [line.split('=')[0] for line in text.splitlines() if line.startswith('DALFTUI_EDITOR_')]
+        self.assertEqual(bridge_lines(self.tmux('show-environment', '-g')), [])
+        until = time.monotonic() + 5
+        while not pane_env.exists() and time.monotonic() < until:
+            time.sleep(0.05)
+        self.assertEqual(bridge_lines(pane_env.read_text()), [])
+
 
 if __name__ == '__main__':
     unittest.main()
