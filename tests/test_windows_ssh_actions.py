@@ -216,7 +216,8 @@ class ActionDispatchTests(unittest.TestCase):
         for selection, options in ((host_picker.HostAction('prod', 'ops'), ['--ops']),
                                    (host_picker.HostAction('prod', 'plain'), ['--plain']),
                                    (host_picker.HostAction('prod', 'check', 'a check'), ['--check', 'a check'])):
-            with (self.subTest(selection=selection), patch.object(ssh_picker.shutil, 'which', return_value='/bin/alacritty'),
+            with (self.subTest(selection=selection), patch.object(ssh_picker.sys, 'platform', 'linux'),
+                  patch.object(ssh_picker.shutil, 'which', return_value='/bin/alacritty'),
                   patch.object(ssh_picker.subprocess, 'Popen') as launch):
                 launch.return_value.wait.side_effect = subprocess.TimeoutExpired('alacritty', 0.4)
                 ssh_picker.open_window(selection)

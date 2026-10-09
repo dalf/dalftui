@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import stat
@@ -113,8 +114,8 @@ class MacPickerKeyTests(install_tests.TmuxFixture):
         answer(2)
         answer(0.3, b'\x02')
         answer(10, b'h')
-        # Quotes and $ are dropped before the shell sees the value.
-        expected = self.tmux('list-clients', '-F', '#{client_termtype}').replace("'", '').replace('$', '')
+        # Only letters, digits, '-', '.' and spaces reach the shell; older tmux also escapes the reply.
+        expected = re.sub(r'[^-.0-9A-Za-z ]', '', self.tmux('list-clients', '-F', '#{client_termtype}'))
         self.assertEqual(json.loads(record.read_text()),
                          [str(self.repo), 'bin/ssh_picker.py', '--terminal-type', expected])
 

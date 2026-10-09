@@ -252,6 +252,7 @@ class DesktopWindowTests(unittest.TestCase):
         self.assertIn('The SSH picker requires Python curses support. Use --connect HOST to connect directly.',
                       output.getvalue())
 
+    @patch.object(ssh_picker.sys, 'platform', 'linux')
     def test_missing_alacritty_and_startup_failures(self):
         with patch.object(ssh_picker.shutil, 'which', return_value=None):
             with self.assertRaisesRegex(RuntimeError, 'Alacritty was not found in PATH'):
