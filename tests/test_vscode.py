@@ -1,4 +1,4 @@
-"""Verify editor routing, private sockets, and the Alacritty shortcut through tmux."""
+"""Verify editor routing, private sockets, and the editor shortcut through tmux."""
 from contextlib import redirect_stderr
 import hashlib
 import io

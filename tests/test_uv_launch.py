@@ -45,9 +45,11 @@ class UvBindingFixture(install_tests.TmuxFixture):
 class DesktopUvTests(UvBindingFixture):
     def test_desktop_keys_run_through_uv(self):
         commands = self.commands('prefix')
-        for key, script in [('F1', 'bin/shortcuts.py'), ('F2', 'bin/ssh_picker.py'), ('F3', '/bin/vscode.py')]:
+        for key, script in [('F1', 'bin/shortcuts.py'), ('F3', '/bin/vscode.py')]:
             self.assertTrue(commands[key].startswith('PATH="$PATH:$HOME/.local/bin" ' + UV_RUN), commands[key])
             self.assertIn(script, commands[key])
+        # F2 is a run-shell -C command; tmux expands $DALFTUI_PYTHON when the key runs.
+        self.assertIn('"$DALFTUI_PYTHON bin/ssh_picker.py --client-pid #{client_pid}"', commands['F2'])
 
 
 class ServerUvTests(UvBindingFixture):

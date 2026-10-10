@@ -18,7 +18,6 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import dalftui.linux.alacritty_config as alacritty_config
 import dalftui.linux.setup as setup
 import dalftui.linux.shortcuts as shortcuts
 from dalftui.linux import tmux_editor
@@ -52,7 +51,7 @@ class DependencyTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, 'Install the missing dependencies first: oh-my-posh'):
                         setup.dependencies(profile)
 
-    def test_macos_refuses_alacritty_and_suggests_homebrew(self):
+    def test_macos_refuses_the_desktop_mode_and_suggests_homebrew(self):
         with patch.object(setup.sys, 'platform', 'darwin'):
             with self.assertRaisesRegex(RuntimeError, 'desktop mode is Linux-only'):
                 setup.dependencies('desktop')
@@ -62,6 +61,21 @@ class DependencyTests(unittest.TestCase):
         with patch.object(setup.sys, 'platform', 'linux'):
             with self.assertRaisesRegex(RuntimeError, 'macOS only'):
                 setup.dependencies('macos')
+
+
+class KittyReloadTests(unittest.TestCase):
+    def test_this_users_kitty_processes_reload_and_none_running_is_not_an_error(self):
+        for status, expected in ((0, 'kitty configuration reloaded'), (1, 'kitty is not running')):
+            with self.subTest(status=status):
+                output = io.StringIO()
+                with patch.object(setup.subprocess, 'run', return_value=subprocess.CompletedProcess([], status, '', '')) as run, \
+                        redirect_stdout(output):
+                    setup.reload_kitty()
+                self.assertEqual(run.call_args.args[0], ['pkill', '-USR1', '-x', '-u', str(os.getuid()), 'kitty'])
+                self.assertIn(expected, output.getvalue())
+        with patch.object(setup.subprocess, 'run', return_value=subprocess.CompletedProcess([], 2, '', 'pkill: bad')):
+            with self.assertRaisesRegex(RuntimeError, 'pkill: bad'):
+                setup.reload_kitty()
 
 
 class DisposableSetup(unittest.TestCase):
@@ -79,6 +93,10 @@ class DisposableSetup(unittest.TestCase):
         font = patch.object(setup, 'install_font')
         self.install_font = font.start()
         self.addCleanup(font.stop)
+        # Never signal kitty windows on the test machine.
+        kitty = patch.object(setup, 'reload_kitty')
+        self.reload_kitty = kitty.start()
+        self.addCleanup(kitty.stop)
         # Ignore a VS Code installed on the test machine; VSCodeTests enable it.
         self.vscode_patch = patch.object(setup, 'vscode_present', return_value=False)
         self.vscode_present = self.vscode_patch.start()
@@ -98,9 +116,9 @@ class DisposableSetup(unittest.TestCase):
 
 class InstallationTests(DisposableSetup):
     def test_existing_files_are_backed_up_with_permissions_and_symlinks(self):
-        self.paths.alacritty.parent.mkdir(parents=True)
-        self.paths.alacritty.write_text('[font]\nsize = 12.0\n')
-        self.paths.alacritty.chmod(0o600)
+        self.paths.kitty.parent.mkdir(parents=True)
+        self.paths.kitty.write_text('font_size 12.0\n')
+        self.paths.kitty.chmod(0o600)
         self.paths.tmux.write_text('set -g mouse off\n')
         guide = self.paths.config_dir / 'tmux/shortcuts.py'
         guide.parent.mkdir()
@@ -108,10 +126,10 @@ class InstallationTests(DisposableSetup):
         backup = self.install()
         records = json.loads((backup / 'manifest.json').read_text())
         originals = {item['original']: item for item in records}
-        saved = backup / originals[str(self.paths.alacritty)]['backup']
-        self.assertEqual(saved.read_text(), '[font]\nsize = 12.0\n')
+        saved = backup / originals[str(self.paths.kitty)]['backup']
+        self.assertEqual(saved.read_text(), 'font_size 12.0\n')
         self.assertEqual(stat.S_IMODE(saved.stat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE(self.paths.alacritty.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.paths.kitty.stat().st_mode), 0o600)
         saved_guide = backup / originals[str(guide)]['backup']
         self.assertEqual(os.readlink(saved_guide), '/a/previous/guide.py')
         self.assertEqual(self.paths.root.resolve(), self.repo)
@@ -119,32 +137,37 @@ class InstallationTests(DisposableSetup):
 
     def test_repeat_install_preserves_local_settings_and_file_timestamps(self):
         self.install()
-        local = self.paths.config_dir / 'alacritty/local.toml'
-        local.write_text('[font]\nsize = 13.0\n')
+        local = self.paths.config_dir / 'kitty/local.conf'
+        local.write_text('font_size 13.0\n')
         local_tmux = self.paths.config_dir / 'tmux/local.conf'
         local_tmux.write_text('set -g history-limit 4321\n')
         before = {path: path.stat().st_mtime_ns for path in
-                  [self.paths.alacritty, self.paths.tmux, local, local_tmux]}
+                  [self.paths.kitty, self.paths.tmux, local, local_tmux]}
         self.assertIsNone(self.install())
         self.assertEqual(before, {path: path.stat().st_mtime_ns for path in before})
-        self.assertEqual(alacritty_config.load(self.paths.alacritty)['font']['size'], 13.0)
+        self.assertEqual(local.read_text(), 'font_size 13.0\n')
         self.assertEqual(local_tmux.read_text(), 'set -g history-limit 4321\n')
 
     def test_checkout_updates_are_visible_without_reinstall(self):
         self.install()
-        target = self.repo / 'config/alacritty.toml'
-        target.write_text(target.read_text().replace('size = 10.5', 'size = 12.5'))
-        self.assertEqual(alacritty_config.load(self.paths.alacritty)['font']['size'], 12.5)
+        target = self.repo / 'config/kitty.conf'
+        target.write_text(target.read_text().replace('font_size 10.5', 'font_size 12.5'))
+        self.assertIn(f'include {self.paths.root}/config/kitty.conf\n', self.paths.kitty.read_text())
+        self.assertIn('font_size 12.5\n', (self.paths.root / 'config/kitty.conf').read_text())
         self.assertEqual(self.paths.root.resolve(), self.repo)
 
-    def test_alacritty_starts_the_shared_tmux_session_policy(self):
+    def test_kitty_starts_the_shared_tmux_session_policy(self):
         self.install()
-        config = alacritty_config.load(self.paths.alacritty)
-        self.assertIs(config['selection']['save_to_clipboard'], True)
-        shell = config['terminal']['shell']
-        self.assertEqual(shell['program'], 'sh')
-        self.assertEqual(shell['args'][0], '-c')
-        self.assertIn('/dalftui/bin/tmux-start.sh', shell['args'][1])
+        self.assertEqual(self.paths.kitty.read_text().splitlines()[1:],
+                         [f'include {self.paths.root}/config/kitty.conf', 'globinclude local.conf'])
+        lines = (self.paths.root / 'config/kitty.conf').read_text().splitlines()
+        self.assertIn('copy_on_select clipboard', lines)
+        self.assertIn('allow_remote_control socket-only', lines)
+        self.assertIn('listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}', lines)
+        # kitty splits the shell setting like a POSIX shell, without expanding variables.
+        shell = shlex.split(next(line for line in lines if line.startswith('shell '))[len('shell '):])
+        self.assertEqual(shell[:2], ['sh', '-c'])
+        self.assertIn('/dalftui/bin/tmux-start.sh', shell[2])
         binary_dir = self.directory / 'bin'
         binary_dir.mkdir()
         command_log = self.directory / 'tmux-command'
@@ -157,7 +180,7 @@ class InstallationTests(DisposableSetup):
                    XDG_CONFIG_HOME=str(self.paths.config_dir),
                    PATH=str(binary_dir) + os.pathsep + os.defpath,
                    TEST_COMMAND_LOG=str(command_log))
-        result = subprocess.run([shell['program'], *shell['args']], env=env,
+        result = subprocess.run(shell, env=env,
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(command_log.read_text().splitlines(),
@@ -188,7 +211,7 @@ class InstallationTests(DisposableSetup):
         self.assertEqual(self.paths.tmux.read_text(), 'set -g mouse off\n')
         self.assertFalse(self.paths.root.exists())
         self.assertFalse(self.paths.root.is_symlink())
-        self.assertFalse(self.paths.alacritty.exists())
+        self.assertFalse(self.paths.kitty.exists())
 
     def test_existing_configuration_directory_is_not_replaced(self):
         self.paths.root.mkdir(parents=True)
@@ -197,7 +220,7 @@ class InstallationTests(DisposableSetup):
         with self.assertRaisesRegex(ValueError, 'directory'):
             self.install()
         self.assertEqual(personal.read_text(), 'keep me')
-        self.assertFalse(self.paths.alacritty.exists())
+        self.assertFalse(self.paths.kitty.exists())
 
     def test_ssh_configuration_is_untouched(self):
         config = self.paths.home_dir / '.ssh/config'
@@ -206,39 +229,15 @@ class InstallationTests(DisposableSetup):
         self.install()
         self.assertEqual(config.read_text(), 'Host github.com\n User git\n')
 
-    def test_imports_keep_relative_paths_missing_files_and_array_merging(self):
-        self.paths.config_dir.mkdir()
-        base = self.paths.config_dir / 'base.toml'
-        base.write_text('[font]\nsize = 9.0\n[keyboard]\nbindings = [{key="T", action="None"}]\n')
-        config = self.paths.config_dir / 'main.toml'
-        config.write_text('[general]\nimport = ["base.toml", "missing.toml"]\n'
-                          '[font]\nsize = 11.0\n[keyboard]\nbindings = [{key="H", action="None"}]\n')
-        result = alacritty_config.load(config)
-        self.assertEqual(result['font']['size'], 11.0)
-        self.assertEqual([item['key'] for item in result['keyboard']['bindings']], ['T', 'H'])
-
-    def test_shortcut_guide_reads_shared_and_local_bindings(self):
-        self.install()
-        local = self.paths.config_dir / 'alacritty/local.toml'
-        local.write_text('[keyboard]\nbindings = [{key="F10", mods="Alt", action="None"}]\n')
-        with patch.object(alacritty_config, 'config_path', return_value=self.paths.alacritty):
-            with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
-                content = shortcuts.render()
-        self.assertIn('Alt+F10', content)
-        self.assertNotIn('Cannot read Alacritty bindings', content)
+    def test_desktop_shortcut_guide_lists_kitty_keys(self):
+        with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
+            content = shortcuts.render()
+        self.assertIn('KITTY TERMINAL', content)
+        self.assertIn('new kitty tab', content)
         self.assertIn('SELECT / COPY / PASTE', content)
         self.assertIn('Ctrl+B → z to zoom', content)
         self.assertIn('in Windows Terminal, select before', content)
         self.assertIn('Shift+Insert', content)
-
-    def test_recursive_imports_are_reported_before_installing(self):
-        local = self.paths.config_dir / 'alacritty/local.toml'
-        local.parent.mkdir(parents=True)
-        local.write_text('[general]\nimport = ["local.toml"]\n')
-        with self.assertRaisesRegex(ValueError, 'Recursive'):
-            self.install()
-        self.assertFalse(self.paths.root.exists())
-
 
 class PromptTests(DisposableSetup):
     def test_block_is_appended_once_and_preserves_bashrc(self):
@@ -464,7 +463,7 @@ class RelocationTests(DisposableSetup):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Ctrl+B → c', result.stdout)
         self.assertIn('LIVE TMUX BINDINGS / PREFIX', result.stdout)
-        self.assertNotIn('ALACRITTY CUSTOM BINDINGS', result.stdout)
+        self.assertNotIn('KITTY TERMINAL', result.stdout)
 
     def test_reload_entrypoint_works_outside_checkout(self):
         environment, outside = self.install_from_copied_checkout()
@@ -514,6 +513,7 @@ class TmuxTests(TmuxFixture):
         self.tmux('set-option', '-g', '@cctab_window_strip', '🔵')
         before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
         self.do_reload()
+        self.reload_kitty.assert_called_once_with()
         features = self.tmux('show-options', '-s', 'terminal-features')
         overrides = self.tmux('show-options', '-s', 'terminal-overrides')
         self.do_reload()
@@ -551,15 +551,14 @@ class TmuxTests(TmuxFixture):
 
 
 class ServerInstallationTests(DisposableSetup):
-    def test_server_install_never_reads_or_changes_existing_alacritty_files(self):
-        self.paths.alacritty.parent.mkdir(parents=True)
-        self.paths.alacritty.write_text('invalid TOML: keep this file')
-        local = self.paths.config_dir / 'alacritty/local.toml'
-        local.write_text('another invalid TOML file')
+    def test_server_install_never_changes_existing_kitty_files(self):
+        self.paths.kitty.parent.mkdir(parents=True)
+        self.paths.kitty.write_text('font_size 9.0\n')
+        local = self.paths.config_dir / 'kitty/local.conf'
+        local.write_text('font_size 8.0\n')
         files = {path: (path.read_bytes(), path.stat().st_mtime_ns)
-                 for path in (self.paths.alacritty, local)}
-        with patch.object(setup, 'load', side_effect=AssertionError('Alacritty was read')):
-            self.install(profile='server')
+                 for path in (self.paths.kitty, local)}
+        self.install(profile='server')
         self.assertEqual(setup.installed_profile(self.paths), 'server')
         self.assertEqual(files, {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files})
 
@@ -571,7 +570,7 @@ class ServerInstallationTests(DisposableSetup):
         self.assertIsNone(self.install())
         self.assertEqual(setup.installed_profile(self.paths), 'server')
         self.assertEqual(before, {path: path.stat().st_mtime_ns for path in before})
-        self.assertFalse(self.paths.alacritty.parent.exists())
+        self.assertFalse(self.paths.kitty.parent.exists())
 
     def test_old_desktop_loader_is_migrated_with_a_backup(self):
         previous = setup.loaders(self.paths, legacy=True)[1]
@@ -591,7 +590,7 @@ class ServerInstallationTests(DisposableSetup):
             self.install(profile='server')
         self.assertEqual(self.paths.tmux.read_bytes(), before)
 
-    def test_cli_installs_and_repeats_with_no_alacritty_or_ssh_in_path(self):
+    def test_cli_installs_and_repeats_with_no_kitty_or_ssh_in_path(self):
         server_bin = self.directory / 'server-bin'
         server_bin.mkdir()
         for command in ('tmux', 'git', 'less'):
@@ -607,7 +606,7 @@ class ServerInstallationTests(DisposableSetup):
         installer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(installer)
         with patch.dict(os.environ, {'PATH': str(server_bin)}):
-            self.assertIsNone(shutil.which('alacritty'))
+            self.assertIsNone(shutil.which('kitty'))
             self.assertIsNone(shutil.which('ssh'))
             with patch.object(setup.Paths, 'current', return_value=self.paths):
                 for flags in [['--server'], []]:
@@ -615,19 +614,18 @@ class ServerInstallationTests(DisposableSetup):
                         with redirect_stdout(io.StringIO()):
                             self.assertEqual(installer.main(), 0)
         self.assertEqual(setup.installed_profile(self.paths), 'server')
-        self.assertFalse(self.paths.alacritty.parent.exists())
+        self.assertFalse(self.paths.kitty.parent.exists())
 
-    def test_server_dry_run_does_not_offer_alacritty_changes(self):
+    def test_server_dry_run_does_not_offer_kitty_changes(self):
         output = io.StringIO()
         with redirect_stdout(output):
             setup.install(self.paths, self.repo, profile='server', dry_run=True)
-        self.assertNotIn('alacritty', output.getvalue().lower())
+        self.assertNotIn('kitty', output.getvalue().lower())
         self.assertFalse(self.paths.config_dir.exists())
 
-    def test_server_guide_uses_tmux_keys_without_reading_alacritty(self):
+    def test_server_guide_uses_tmux_keys_without_kitty_keys(self):
         live = subprocess.CompletedProcess(['tmux'], 0, stdout='bind-key -T prefix F1 display-popup help\n')
-        with patch.object(alacritty_config, 'load', side_effect=AssertionError('Alacritty was read')), \
-                patch.object(shortcuts.sys, 'platform', 'linux'), \
+        with patch.object(shortcuts.sys, 'platform', 'linux'), \
                 patch.object(shortcuts.subprocess, 'run', return_value=live):
             content = shortcuts.render(tmux_only=True)
         self.assertIn('Ctrl+B → c', content)
@@ -638,11 +636,9 @@ class ServerInstallationTests(DisposableSetup):
         self.assertIn('Ctrl+B → Page Up, then Shift+drag', content)
         self.assertNotIn('Shift+Page Up', content)
         self.assertNotIn('Shift+Insert', content)
-        self.assertNotIn('Ctrl+Shift+F / Ctrl+Shift+B', content)
         self.assertNotIn('Copy selection / paste using your local terminal', content)
-        self.assertNotIn('ALACRITTY CUSTOM BINDINGS', content)
+        self.assertNotIn('KITTY TERMINAL', content)
         self.assertNotIn('SSH / SERVERS', content)
-        self.assertNotIn('Cannot read Alacritty', content)
 
 
 class ServerTmuxTests(TmuxFixture):
@@ -656,16 +652,16 @@ class ServerTmuxTests(TmuxFixture):
         self.start()
         before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
         self.tmux('set-option', '-g', '@cctab_window_strip', '🟣')
-        with patch.object(setup, 'load', side_effect=AssertionError('Alacritty was read')):
-            self.do_reload()
-            self.do_reload()
+        self.do_reload()
+        self.do_reload()
         self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
         self.assertIn('#[fg=#8e24aa]⬤', self.tmux('display-message', '-p', '#{E:@claude_tab_active_strip}'))
         self.assertEqual(self.tmux('show-options', '-gv', '@dalftui_profile'), 'server')
         bindings = self.prefix_bindings()
         self.assertNotIn('F2', bindings)
         self.assertIn('bin/shortcuts.py --tmux-only', bindings['F1'])
-        self.assertFalse(self.paths.alacritty.parent.exists())
+        self.reload_kitty.assert_not_called()
+        self.assertFalse(self.paths.kitty.parent.exists())
         env = dict(self.env, TMUX=f'{self.socket},{self.tmux("display-message", "-p", "#{pid}")},0')
         result = subprocess.run([sys.executable, str(self.repo / 'bin/shortcuts.py'), '--tmux-only', '--print'],
                                 capture_output=True, text=True, env=env, timeout=15)
@@ -678,7 +674,6 @@ class ServerTmuxTests(TmuxFixture):
         self.do_reload()
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'set-clipboard'), 'on')
-        self.assertIn('alacritty*:clipboard', self.tmux('show-options', '-s', 'terminal-features'))
         self.assertIn('#e5e7eb', self.tmux('show-options', '-gv', 'mode-style'))
         root = {shlex.split(line)[3]: line
                 for line in self.tmux('list-keys', '-T', 'root').splitlines()}
@@ -734,7 +729,7 @@ class MacTests(DisposableSetup):
         self.assertTrue(content.startswith('setopt autocd\n' + setup.PROMPT_MARKER + '\n'))
         self.assertIn('config/prompt.zsh', content)
         self.assertFalse(self.paths.bashrc.exists())
-        self.assertFalse(self.paths.alacritty.parent.exists())
+        self.assertFalse(self.paths.kitty.parent.exists())
         self.install_font.assert_called_once_with(False)
         self.assertIsNone(self.install())
         self.assertEqual(self.paths.zshrc.read_text(), content)
@@ -780,22 +775,14 @@ class MacTests(DisposableSetup):
         with patch.object(tmux_editor.Path, 'read_bytes', side_effect=AssertionError('/proc was read')):
             self.assertEqual(tmux_editor.client_environment(1), dict(os.environ))
 
-    def test_guide_names_mac_keys_and_never_imports_tomllib(self):
+    def test_guide_names_mac_keys(self):
         with patch.object(shortcuts.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, 'macos\n'), OSError('no server')]):
             content = shortcuts.render(tmux_only=True)
         self.assertIn('Cmd+C / Cmd+V', content)
         self.assertIn('Option+drag', content)
         self.assertIn('Ctrl+B → Fn+F1', content)
         self.assertIn('Ctrl+B → h', content)
-        self.assertNotIn('Alacritty', content)
-        # The F1 popup may run an older python3; the server guide must not need tomllib.
-        script = ('import sys; sys.path.insert(0, sys.argv[1]); import dalftui.linux.shortcuts as s\n'
-                  'def run(*args, **kwargs): raise OSError("no test server")\n'
-                  's.subprocess.run = run; s.render(tmux_only=True)\n'
-                  'print("dalftui.linux.alacritty_config" in sys.modules)')
-        result = subprocess.run([sys.executable, '-c', script, str(ROOT)],
-                                capture_output=True, text=True, timeout=15)
-        self.assertEqual(result.stdout.strip(), 'False', result.stderr)
+        self.assertNotIn('kitty', content)
 
     @unittest.skipUnless(shutil.which('zsh'), 'zsh is required')
     def test_zsh_loader_runs_init_before_job_counts(self):
@@ -835,7 +822,7 @@ class MacTmuxTests(TmuxFixture):
             self.tmux('bind-key', '-n', key, 'display-message', 'old')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), 'pbcopy')
-        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), '')
         prefix, root = self.keys('prefix'), self.keys('root')
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
@@ -844,7 +831,7 @@ class MacTmuxTests(TmuxFixture):
         self.install(profile='server')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
-        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), 'alacritty*:Tc')
+        self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), '')
         self.assertIn('Hold Shift', self.keys('root')['MouseDrag1Pane'])
 
 
@@ -877,8 +864,8 @@ class UninstallTests(DisposableSetup):
         self.assertEqual(stat.S_IMODE(self.paths.bashrc.stat().st_mode), 0o600)
         self.assertEqual(self.paths.tmux.read_text(), 'set -g mouse off\n')
         self.assertIn(f'Restore {self.paths.tmux} from ', output)
-        for path in (self.paths.root, self.paths.alacritty, self.paths.config_dir / 'tmux/shortcuts.py',
-                     self.paths.config_dir / 'alacritty/local.toml'):
+        for path in (self.paths.root, self.paths.kitty, self.paths.config_dir / 'tmux/shortcuts.py',
+                     self.paths.config_dir / 'kitty/local.conf'):
             self.assertFalse(path.exists() or path.is_symlink(), path)
         self.assertEqual(local_tmux.read_text(), 'set -g history-limit 4321\n')
         self.assertIn(f'Kept personal settings: {local_tmux}', output)
@@ -912,15 +899,15 @@ class UninstallTests(DisposableSetup):
 
     def test_edited_and_user_files_are_kept(self):
         self.install()
-        self.paths.alacritty.write_text(self.paths.alacritty.read_text() + '[font]\nsize = 9.0\n')
+        self.paths.kitty.write_text(self.paths.kitty.read_text() + 'font_size 9.0\n')
         bashrc = self.paths.bashrc.read_text().replace('] && .', '] && source')
         self.paths.bashrc.write_text(bashrc)
         guide = self.paths.config_dir / 'tmux/shortcuts.py'
         guide.unlink()
         guide.symlink_to('/my/own/guide.py')
         output = self.uninstall()
-        self.assertIn(f'Kept edited loader: {self.paths.alacritty}', output)
-        self.assertIn('[font]\nsize = 9.0\n', self.paths.alacritty.read_text())
+        self.assertIn(f'Kept edited loader: {self.paths.kitty}', output)
+        self.assertIn('font_size 9.0\n', self.paths.kitty.read_text())
         self.assertEqual(self.paths.bashrc.read_text(), bashrc)
         self.assertIn('Kept an edited', output)
         self.assertEqual(os.readlink(guide), '/my/own/guide.py')

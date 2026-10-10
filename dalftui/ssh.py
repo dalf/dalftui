@@ -328,8 +328,8 @@ def connect_selection(selection, transport=None):
 
 def configured_login(host):
     """Let OpenSSH resolve User, with a fallback marker to distinguish its local-user default."""
-    marker = f'__alacritty_unset_user_{os.getpid()}__'
-    with tempfile.TemporaryDirectory(prefix='alacritty-ssh-config-') as directory:
+    marker = f'__dalftui_unset_user_{os.getpid()}__'
+    with tempfile.TemporaryDirectory(prefix='dalftui-ssh-config-') as directory:
         if sys.platform == 'win32':
             from .windows import ssh as windows_ssh
             windows_ssh.secure_ssh_directory(directory)
@@ -492,6 +492,8 @@ def main():
                              'private Unix socket (default: TCP on Windows, Unix socket elsewhere)')
     parser.add_argument('--terminal-type', default='',
                         help='macOS: the tmux client terminal type; iTerm2 opens iTerm2, otherwise Terminal.app')
+    parser.add_argument('--client-pid', type=int,
+                        help='Linux: the tmux client process, whose kitty window gets the new tab')
     args = parser.parse_args()
     if sys.version_info < (3, 11):
         parser.error('Python 3.11 or newer is required.')
@@ -519,7 +521,8 @@ def main():
             print(f'Could not choose an SSH host: {error}', file=sys.stderr)
             return 1
     from .linux import ssh_picker
-    return ssh_picker.run_picker(parser, **refresh_options, terminal_type=args.terminal_type)
+    return ssh_picker.run_picker(parser, **refresh_options, terminal_type=args.terminal_type,
+                                 client_pid=args.client_pid)
 
 
 if __name__ == '__main__':

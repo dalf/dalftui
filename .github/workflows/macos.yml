@@ -52,7 +52,7 @@ jobs:
           ./install | grep 'Already installed'
           grep -A1 '^# dalftui: Oh My Posh prompt$' "$HOME/.zshrc" | grep -q 'config/prompt.zsh'
           test ! -e "$HOME/.bashrc"
-          test ! -e "$HOME/.config/alacritty"
+          test ! -e "$HOME/.config/kitty"
           grep -q 'Hack Nerd Font' "$HOME/Library/Application Support/Code/User/settings.json"
           zsh -i -c 'typeset -f set_poshcontext | grep -q jobstates && (( ${precmd_functions[(I)_omp_precmd]} ))'
           zsh -i -c 'sleep 30 & set_poshcontext; kill %1; [[ $OMP_JOBS_RUNNING == 1 ]]'
@@ -102,7 +102,7 @@ jobs:
           tmux -L ci run-shell "uv run --no-project --python '>=3.11' '$root/bin/vscode.py' --pane '%0' --client 1 --client-tty x"
           grep -q -- '--folder-uri' "$fake/code.log"
           tmux -L ci run-shell "uv run --no-project --python '>=3.11' '$root/bin/shortcuts.py' --tmux-only --print > '$fake/guide'"
-          if grep Alacritty "$fake/guide"; then exit 1; fi
+          if grep -i kitty "$fake/guide"; then exit 1; fi
           grep -q 'Cmd+C' "$fake/guide"
           grep -q 'Ctrl+B → h' "$fake/guide"
           tmux -L ci kill-server

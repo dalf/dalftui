@@ -1,9 +1,9 @@
-# tmux and Alacritty reference
+# tmux and kitty reference
 
 ## Shortcuts
 
 - **Ctrl+B, then F1:** open the keyboard shortcut guide.
-- **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
+- **Ctrl+B, then F2:** desktop mode: choose an SSH host and open it in a new tab of the current kitty window.
 - **Ctrl+B, then h:** macOS mode: choose an SSH host and open a Terminal.app or iTerm2 window.
 - **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
   **Ctrl+B, then v** does the same.
@@ -11,22 +11,22 @@
 Other shortcuts are standard tmux keys; see the [README](../README.md#shortcuts).
 After Ctrl+B, release it and press the next key. For windows 1 to 9, keeping
 Ctrl held also works when the terminal reports Ctrl+digit as a distinct key.
-Alacritty and Windows Terminal use Ctrl+0 to reset the font size, so release
+Windows Terminal uses Ctrl+0 to reset the font size, so release
 Ctrl for window 0; releasing Ctrl works everywhere.
 
-The guide reads Alacritty imports and local overrides, and shows live tmux
+The guide lists kitty's main keys and shows live tmux
 bindings. The terminal font needs glyphs for the rounded Powerline caps (`` and
 ``) and the status circle (`⬤`). The system monospace font remains the default.
 
 ## Selecting and copying
 
-Selection works the same way in Alacritty and Windows Terminal, locally or over
+Selection works the same way in kitty and Windows Terminal, locally or over
 SSH, whether the pane runs a shell or a mouse-aware program:
 
 - **Shift+drag** selects text; **Ctrl+Shift+C** copies and **Ctrl+Shift+V** pastes.
 - **Split panes:** a terminal selection crosses pane borders. Press **Ctrl+B, then z**
   to zoom the pane, select, then **Ctrl+B, then z** again to restore the layout.
-- **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in Alacritty,
+- **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in kitty,
   or **Ctrl+B, then Page Up**, then Shift+drag.
 
 On macOS, hold Fn while dragging in Terminal.app or Option in iTerm2, then
@@ -38,8 +38,8 @@ Programs that use the mouse, such as htop or editors, still receive drags and cl
 Terminal, select before pressing Ctrl+Shift+C: without a selection the key may
 reach the pane as Ctrl+C.
 
-dalftui adds no terminal copy bindings and relies on Alacritty and Windows
-Terminal defaults. Alacritty also copies selections automatically; Windows
+dalftui adds no terminal copy bindings and relies on kitty and Windows
+Terminal defaults. dalftui's kitty settings also copy selections automatically; Windows
 Terminal's `copyOnSelect` setting is left unchanged. tmux sets `set-clipboard on`,
 so programs in panes, including on remote servers, may set the desktop
 clipboard with OSC 52. They cannot read the desktop clipboard, but an OSC 52
@@ -53,7 +53,7 @@ root mouse bindings, restart the tmux server to drop them.
 
 SSH windows use tmux when it is installed on the remote host. Otherwise they
 silently open a plain login shell. No remote dalftui installation is required
-for either case. Local Alacritty windows and SSH windows with tmux use the same
+for either case. Local kitty windows and SSH windows with tmux use the same
 session policy:
 
 - No sessions: create session `0`.
@@ -66,7 +66,7 @@ With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window (after
 `dssh` typed at a PowerShell prompt, it returns to that prompt) while leaving its
 session running. Connection errors stay visible
 until Enter is pressed. A plain shell has no tmux shortcuts, persistence, or
-remote **Ctrl+B, then F3** integration. SSH windows override Alacritty's local
+remote **Ctrl+B, then F3** integration. SSH windows skip the local tmux
 startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--server` on each server where you want the shared configuration.
@@ -102,11 +102,11 @@ existing configuration, including claude-tabstatus's separate title policy.
 
 Color support is chosen for each attached terminal in every profile, including
 over SSH. `xterm-256color` alone does not imply 24-bit color: older Terminal.app
-uses that name and needs tmux's 256-color fallback. Alacritty's own terminal
-name gets a scoped truecolor override, and tmux detects iTerm2 automatically.
+uses that name and needs tmux's 256-color fallback. kitty's own terminal
+description, `xterm-kitty`, declares truecolor, and tmux detects iTerm2 automatically.
 From tmux 3.6, a client's `COLORTERM=truecolor` setting also enables truecolor.
 The dalftui SSH launcher supplies a per-attachment RGB hint for Windows Terminal
-and terminals declaring `COLORTERM=truecolor` or `24bit`, including Alacritty.
+and terminals declaring `COLORTERM=truecolor` or `24bit`, including kitty.
 This keeps their colors accurate when other clients on the same server need
 256 colors; remote tmux versions without the hint option use normal detection.
 

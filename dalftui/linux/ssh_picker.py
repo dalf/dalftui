@@ -1,9 +1,8 @@
-"""Desktop SSH picker and Alacritty, Terminal.app or iTerm2 window launching."""
+"""Desktop SSH picker and kitty tab, Terminal.app or iTerm2 window launching."""
 try:
     import curses
 except ImportError:
     curses = None
-import json
 import os
 from pathlib import Path
 import shlex
@@ -82,8 +81,9 @@ class PickerScreen:
         return keys.get(key, key if isinstance(key, str) else None)
 
 
-def pick(screen, hosts, *, action='opens a new window'):
+def pick(screen, hosts, *, action=None):
     from .. import host_picker, ssh
+    action = action or ('opens a new window' if sys.platform == 'darwin' else 'opens a new tab')
     return host_picker.pick(PickerScreen(screen), hosts, ssh.validate_picker_host, action=action,
                             details=ssh.connection_details, checks=ssh.saved_checks)
 
@@ -102,7 +102,7 @@ def open_mac_window(command, app):
         raise RuntimeError(result.stderr.strip() or f'Could not open {app}')
 
 
-def open_window(host, terminal_type=''):
+def open_window(host, terminal_type='', client_pid=None):
     from .. import ssh
     from ..host_picker import HostAction
 
@@ -116,31 +116,27 @@ def open_window(host, terminal_type=''):
         open_mac_window(command, 'iTerm' if terminal_type.startswith('iTerm2') else 'Terminal')
         return
 
-    alacritty = shutil.which('alacritty')
-    if not alacritty:
-        raise RuntimeError('Alacritty was not found in PATH')
-    env = dict(os.environ)
-    env.pop('TMUX', None)
-    env.pop('TMUX_PANE', None)
-    # -e overrides the normal local-tmux startup command for this new OS window.
-    # --title fixes the title in place, ignoring the connecting process's update.
-    # JSON quoting also produces a TOML basic string for this printable host.
-    title = json.dumps(f'SSH · {host}', ensure_ascii=False)
-    args = [alacritty, '--option', f'window.title={title}', 'window.dynamic_title=true',
-            '-e', *command]
-    with tempfile.TemporaryFile() as log:
-        process = subprocess.Popen(args, env=env, start_new_session=True,
-                                   stdin=subprocess.DEVNULL, stdout=log, stderr=log)
-        try:
-            status = process.wait(timeout=0.4)
-        except subprocess.TimeoutExpired:
-            return
-        if status:
-            log.seek(0)
-            raise RuntimeError(log.read().decode(errors='replace').strip() or 'Could not open Alacritty')
+    # This popup's environment belongs to the kitty that started the tmux server;
+    # the tmux client's names the kitty window where the key was pressed.
+    from .tmux_editor import client_environment
+    client = client_environment(client_pid) if client_pid else {}
+    socket, window = client.get('KITTY_LISTEN_ON'), client.get('KITTY_WINDOW_ID')
+    # Other terminals started from kitty inherit KITTY_* but replace TERM.
+    if not socket or not window or client.get('TERM') != 'xterm-kitty':
+        raise RuntimeError('Open the picker in a kitty window started after ./install; '
+                           'this tmux client has no kitty remote control socket')
+    kitten = shutil.which('kitten')
+    if not kitten:
+        raise RuntimeError('kitten was not found in PATH')
+    # The tab title is the user@host title that --connect sets.
+    result = subprocess.run([kitten, '@', '--to', socket, 'launch', '--type=tab',
+                             '--match', f'window_id:{window}', '--', *command],
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or 'Could not open a kitty tab')
 
 
-def run_picker(parser, *, refresh=False, terminal_type=''):
+def run_picker(parser, *, refresh=False, terminal_type='', client_pid=None):
     from .. import ssh
 
     if curses is None:
@@ -149,7 +145,7 @@ def run_picker(parser, *, refresh=False, terminal_type=''):
         hosts = ssh.target_hosts(refresh=True) if refresh else ssh.target_hosts()
         host = curses.wrapper(pick, hosts)
         if host:
-            open_window(host, terminal_type)
+            open_window(host, terminal_type, client_pid)
     except (OSError, RuntimeError, curses.error) as error:
         print(f'Could not open SSH window: {error}', file=sys.stderr)
         try:

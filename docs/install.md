@@ -4,7 +4,7 @@ Full detail behind the install steps in the [README](../README.md#installation-a
 
 ## Linux desktop
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Alacritty 0.14+,
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), kitty 0.41+ (with `kitten`),
 tmux 3.2+, OpenSSH 9.4+, Git, `less`, and
 [Oh My Posh](https://ohmyposh.dev/docs/installation/linux) 29.12+ (the prompt's Git
 conflict count uses its `cmd` template function) for the desktop mode.
@@ -26,7 +26,7 @@ cd ~/code/dalftui
 ./install
 ```
 
-`./install` then reloads running tmux and Alacritty.
+`./install` then reloads running tmux and kitty.
 
 Optional [mise tasks](development.md#repository-tasks) provide named shortcuts for installation,
 reloads, spelling, and tests.
@@ -39,7 +39,7 @@ The installer creates these connections:
 | Installed path | Purpose |
 | --- | --- |
 | `~/.config/dalftui` | Symlink to this checkout |
-| `~/.config/alacritty/alacritty.toml` | Desktop mode: imports shared Alacritty settings, then personal overrides |
+| `~/.config/kitty/kitty.conf` | Desktop mode: includes shared kitty settings, then personal overrides |
 | `~/.tmux.conf` | Sources shared tmux settings, then personal overrides |
 | `~/.config/tmux/shortcuts.py` | Link to `bin/shortcuts.py` |
 | `~/.bashrc` | Appended line sourcing `config/prompt.bash`, which starts Oh My Posh with `config/oh-my-posh.omp.json` |
@@ -70,18 +70,18 @@ cd ~/code/dalftui
 ./install --server
 ```
 
-Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh 29.12+**. Alacritty
+Server requirements are **Python 3.11+, uv, tmux 3.2+, Git, `less`, and Oh My Posh 29.12+**. kitty
 and the SSH picker's OpenSSH 9.4 requirement apply to the desktop mode. The
 server installer manages the shared configuration link, tmux loader, shortcut
 guide link, `~/.config/tmux/local.conf`, and the `~/.bashrc` prompt line. It
-preserves existing Alacritty files and installs no font: your local terminal draws the icons.
+preserves existing kitty files and installs no font: your local terminal draws the icons.
 
 The server uses the same rounded tabs, Claude status styling, pane bindings,
 and history settings. **Ctrl+B, then F1** opens a guide with native tmux keys,
 plus the [selection rules](tmux.md#selecting-and-copying) shared with Windows Terminal. The guide reads
-live tmux bindings and does not try to read Alacritty settings on the server.
-**Ctrl+B, then F2** is disabled in server mode because its picker launches a
-local Alacritty window.
+live tmux bindings and lists no kitty keys on the server.
+**Ctrl+B, then F2** is disabled in server mode because its picker opens a
+local kitty tab.
 
 On tmux 3.2, popup windows use a plain border and the terminal's default colors,
 and history searches share the normal command prompt history. tmux 3.3+ adds
@@ -125,7 +125,7 @@ sudo apt-get update && sudo apt-get install -y python3 git && git clone https://
 
 Debian installed with a root password gives your user no sudo: run
 `su -c "apt-get install -y sudo && usermod -aG sudo $USER"`, then log out and
-back in. The desktop mode needs Alacritty 0.14+,
+back in. The desktop mode needs kitty 0.41+,
 so it works on Fedora and Debian 13; on Debian 12 and Ubuntu 24.04 the packages
 install but `./install` then fails, so use `--server` there. Ubuntu 22.04 is
 refused: its Python is 3.10.
@@ -166,7 +166,7 @@ Each run, in order (a failed step does not stop the next ones):
    with 1 when anything failed.
 
 The package lists have one package per line; `#` starts a comment. The
-packages after `[desktop]` (OpenSSH, Alacritty, VS Code, DVC, AWS CLI, rclone and fido2-tools) are skipped with
+packages after `[desktop]` (OpenSSH, kitty, VS Code, DVC, AWS CLI, rclone and fido2-tools) are skipped with
 `--server`. On apt, bat's command is `batcat`, and yq is not installed:
 Debian's `yq` package is a different program from the mikefarah/yq that Fedora has.
 
@@ -277,7 +277,7 @@ brew install tmux oh-my-posh uv
 ./install
 ```
 
-On a Mac, `./install` uses the `macos` mode; `--desktop` (Alacritty) is refused
+On a Mac, `./install` uses the `macos` mode; `--desktop` (kitty) is refused
 and `--server` still works (`./install --macos` switches back). Compared with
 the server mode, it also:
 
@@ -345,12 +345,12 @@ git pull --ff-only
 
 The symlink makes new repository files available immediately. The helper
 scripts read their configuration whenever you open them. `./install` writes
-nothing when nothing changed, then requests
-an Alacritty refresh in desktop mode and sources tmux's configuration again without ending
-sessions or restarting running programs. It rewrites the Alacritty loader in
-place because file replacements from Git or an editor may not trigger a reload.
+nothing when nothing changed, then sends SIGUSR1 to your running kitty
+processes in desktop mode, which reloads their configuration, and sources tmux's configuration again without ending
+sessions or restarting running programs. kitty does not watch the included
+repository file, so edits there need this reload.
 
-Settings that affect terminal startup apply to new Alacritty windows. If tmux
+Settings that affect terminal startup, including the remote control socket, apply to new kitty processes. If tmux
 is not running, the reload leaves it stopped; the next server loads the updated
 configuration. From inside tmux, reload targets the current server. Outside tmux,
 it targets the default server. Use `--socket /path/to/socket` with `./install` or `./bin/reload` for
@@ -361,30 +361,41 @@ reloads do not append duplicates. New terminal capabilities can require a new
 terminal connection. Existing history buffers retain their original limit;
 the configured history limit applies to new panes.
 
+### Moving from Alacritty
+
+Earlier versions used Alacritty. The installer does not migrate it; on each desktop:
+
+1. Install kitty (`sudo dnf install kitty` or `sudo apt-get install kitty`, or rerun
+   `./bootstrap`), then run `./install`.
+2. Copy your settings from `~/.config/alacritty/local.toml` to
+   `~/.config/kitty/local.conf`, in kitty's syntax (`font_size 11.0`).
+3. Close Alacritty and kitty windows opened before the install, then open kitty:
+   **Ctrl+B, then F2** needs the remote control socket that only new kitty processes open.
+   Remove `~/.config/alacritty` when nothing else needs it.
+
 ## Personal settings and backups
 
 These files stay outside the repository and are preserved across installs:
 
-- `~/.config/alacritty/local.toml`
+- `~/.config/kitty/local.conf`
 - `~/.config/tmux/local.conf`
 
 Server mode uses only the tmux override file.
 
-For example, put this in `local.toml` to override the font size:
+For example, put this in `~/.config/kitty/local.conf` to override the font size:
 
-```toml
-[font]
-size = 11.0
+```text
+font_size 11.0
 ```
 
-Or put this in `local.conf` to change the history limit for new panes:
+Or put this in `~/.config/tmux/local.conf` to change the history limit for new panes:
 
 ```tmux
 set -g history-limit 50000
 ```
 
-Run `./bin/reload` after editing either file. Alacritty merges imported tables and
-appends arrays, including keyboard bindings; tmux executes local settings last.
+Run `./bin/reload` after editing either file. kitty and tmux both read the
+local file last, so its settings win.
 Keep personal changes in these files so repository updates remain easy to pull.
 The small generated loader files are managed by the installer.
 
@@ -404,17 +415,17 @@ installer's content, and backs up every file it changes or removes. Preview it f
 ```
 
 On Linux and macOS it removes the `~/.config/dalftui` link, the `~/.config/tmux/shortcuts.py`
-link, the generated `~/.tmux.conf` and Alacritty loaders, the marked prompt line
+link, the generated `~/.tmux.conf` and kitty loaders, the marked prompt line
 pair in `~/.bashrc` and `~/.zshrc`, and VS Code's `terminal.integrated.fontFamily` and
 `terminal.integrated.fontSize` while they are still `Hack Nerd Font` and `12`.
-When a backup holds the `~/.tmux.conf` or `alacritty.toml` file or link you had
+When a backup holds the `~/.tmux.conf` or `kitty.conf` file or link you had
 before dalftui, it is put back. An edited loader (with the `~/.config/dalftui` link
 it sources), an edited prompt line, symlinks the
-installer did not create, and personal `local.conf` and `local.toml` files are kept
+installer did not create, and personal `local.conf` files are kept
 and reported; the override files are removed only while they are the unchanged
 templates. The removed VS Code values may have replaced your own: the earlier
 values are in the backups. Fonts, Oh My Posh, the backups, and the checkout are
-kept. Running tmux and Alacritty keep their current configuration until restarted.
+kept. Running tmux and kitty keep their current configuration until restarted.
 
 On Windows:
 
@@ -446,7 +457,7 @@ provides Python 3.11+), Windows OpenSSH, [Oh My Posh](https://ohmyposh.dev/) (`w
 JanDeDobbeleer.OhMyPosh`), and Windows VS Code with **Remote - SSH**. The `code`
 command should be on an absolute PATH entry during setup. The host picker also
 needs OpenSSH 9.4+ for `Tag dalftui`. The full-screen grid uses Python's native
-Windows console support; no local tmux, Alacritty, or curses package is needed.
+Windows console support; no local tmux, kitty, or curses package is needed.
 The picker requires an interactive terminal. Direct connections with `dssh HOST`
 remain available when the console cannot run the picker.
 
