@@ -110,6 +110,17 @@ and terminals declaring `COLORTERM=truecolor` or `24bit`, including Alacritty.
 This keeps their colors accurate when other clients on the same server need
 256 colors; remote tmux versions without the hint option use normal detection.
 
+Programs inside panes choose their colors from `TERM` and `COLORTERM`. tmux
+before 3.3 gives panes `TERM=screen` (8 colors), so dalftui replaces that built-in
+value with `tmux-256color`, or `screen-256color` when the host lacks that terminfo
+entry. It also sets `COLORTERM=truecolor`, which tmux 3.6 and later set themselves
+and which SSH does not forward. tmux converts 24-bit colors for each attached
+client that cannot display them. Panes opened before `./bin/reload` keep their
+old values; restart programs such as Claude Code in a new pane or window. Claude
+Code stays at 256 colors inside tmux unless `CLAUDE_CODE_TMUX_TRUECOLOR=1` is set.
+Plain `ssh` from a pane sends `tmux-256color` to the next host; set
+`default-terminal screen-256color` in `local.conf` if older hosts lack that entry.
+
 When upgrading from the earlier `*:Tc` override, run `./bin/reload` on each
 affected host, then detach and reattach existing clients to their original
 sessions (Ctrl+B, then d detaches). tmux can retain an attached client's old

@@ -1,6 +1,7 @@
-"""Verify each attached tmux client receives colors its terminal can render."""
+"""Verify tmux clients and pane programs receive colors the terminal can render."""
 import os
 import select
+import shlex
 import subprocess
 import termios
 import time
@@ -105,6 +106,70 @@ class TmuxColorTests(install_tests.TmuxFixture):
         _, _, output = self.attach()
         self.assert_colors(output, rgb=False)
         self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
+
+
+@unittest.skipIf(os.name == 'nt', 'tmux panes require a POSIX host')
+class PaneColorTests(install_tests.TmuxFixture):
+    """Programs in panes see 256 colors and truecolor, however the server started."""
+    profile = 'server'
+
+    def pane_env(self, name):
+        path = self.directory / f'{name}.env'
+        until = time.monotonic() + 5
+        while not (path.exists() and path.read_text().endswith('done\n')) and time.monotonic() < until:
+            time.sleep(0.05)
+        return dict(line.split('=', 1) for line in path.read_text().splitlines() if '=' in line)
+
+    def env_command(self, name):
+        path = shlex.quote(str(self.directory / f'{name}.env'))
+        return f'env > {path}; echo done >> {path}; sleep 600'
+
+    def assert_pane_colors(self, env):
+        self.assertIn(env.get('TERM'), ('tmux-256color', 'screen-256color'))
+        self.assertEqual(env.get('COLORTERM'), 'truecolor')
+
+    def test_ssh_started_server_gives_first_pane_color_hints(self):
+        # SSH forwards TERM but not COLORTERM.
+        env = dict(self.env, TERM='xterm-256color')
+        env.pop('COLORTERM', None)
+        subprocess.run(['tmux', '-S', str(self.socket), '-f', str(self.paths.tmux),
+                        'new-session', '-d', '-s', 'verify', self.env_command('first')],
+                       env=env, check=True, timeout=15)
+        self.addCleanup(subprocess.run, [*self.command, 'kill-server'], capture_output=True, env=self.env)
+        self.assert_pane_colors(self.pane_env('first'))
+
+    def reload_old_default(self):
+        self.env.pop('COLORTERM', None)
+        self.start()
+        # tmux before 3.3 has this built in; CI's newer tmux would otherwise skip the replacement.
+        self.tmux('set-option', '-s', 'default-terminal', 'screen')
+        before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
+        self.do_reload()
+        self.do_reload()
+        self.tmux('new-window', '-d', self.env_command('new'))
+        env = self.pane_env('new')
+        self.assert_pane_colors(env)
+        self.assertIn(before, self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'))
+        return env['TERM']
+
+    def test_reload_gives_new_panes_color_hints_and_keeps_old_ones(self):
+        known = subprocess.run(['infocmp', 'tmux-256color'], capture_output=True, check=False).returncode == 0
+        self.assertEqual(self.reload_old_default(), 'tmux-256color' if known else 'screen-256color')
+
+    def test_reload_falls_back_without_tmux_terminfo(self):
+        tools = self.directory / 'no-terminfo'
+        tools.mkdir()
+        infocmp = tools / 'infocmp'
+        infocmp.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
+        infocmp.chmod(0o755)
+        self.env['PATH'] = f'{tools}{os.pathsep}{self.env["PATH"]}'
+        self.assertEqual(self.reload_old_default(), 'screen-256color')
+
+    def test_reload_keeps_a_chosen_terminal(self):
+        self.start()
+        self.tmux('set-option', '-s', 'default-terminal', 'xterm-256color')
+        self.do_reload()
+        self.assertEqual(self.tmux('show-options', '-sv', 'default-terminal'), 'xterm-256color')
 
 
 if __name__ == '__main__':
