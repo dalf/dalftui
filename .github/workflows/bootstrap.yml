@@ -24,11 +24,11 @@ jobs:
         include:
           - image: fedora:44
             prereq: dnf install -y python3 git sudo
-            tools: fzf yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            tools: fzf yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code kitty
             desktop: true
           - image: debian:13
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            tools: fzf rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code kitty
             desktop: true
           - image: debian:12
             prereq: apt-get update && apt-get install -y python3 git sudo

@@ -34,7 +34,7 @@ zsh
 
 [desktop]
 openssh-clients    # the SSH picker; requires 9.4+
-alacritty          # desktop install requires 0.14+
+kitty              # desktop install requires 0.41+; pulls in kitty-kitten
 code               # VS Code, from Microsoft's repository that bootstrap adds
 dvc                # from DVC's repository that bootstrap adds; x86-64 only
 awscli2            # AWS CLI v2: S3 client sharing ~/.aws with DVC

@@ -10,14 +10,14 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | | Linux desktop | Linux server | Windows 10/11 | macOS |
 | --- | --- | --- | --- | --- |
 | **Set up with** | `./bootstrap` | `./bootstrap --server` | `.\bootstrap.cmd` | `./bootstrap` |
-| **Terminal window**: text, keyboard, clipboard | Alacritty | the terminal you connect from | Windows Terminal (installed separately) | Terminal.app or iTerm2 |
+| **Terminal window**: text, keyboard, clipboard | kitty | the terminal you connect from | Windows Terminal (installed separately) | Terminal.app or iTerm2 |
 | **tmux**: tabs, splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
-| **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
+| **SSH host picker** | F2, opens a kitty tab | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
 | **VS Code (F3 or v)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
 
-The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
+The usual Linux arrangement is **kitty → tmux → bash**. A tmux *session*
 contains *windows*, displayed like tabs; each window contains one or more
 *panes*, the splits. Windows uses local PowerShell without local tmux; tmux
 runs on the Linux server when connecting remotely.
@@ -25,9 +25,9 @@ runs on the Linux server when connecting remotely.
 The intended everyday workflow on a configured Linux desktop is (keys in
 [Shortcuts](#shortcuts)):
 
-1. Open Alacritty. It creates or attaches to a tmux session.
+1. Open kitty. It creates or attaches to a tmux session.
 2. Work in tmux tabs and split panes.
-3. Choose an SSH host. The connection opens in a separate Alacritty window,
+3. Choose an SSH host. The connection opens in a new kitty tab of the same window,
    using remote tmux when available and a login shell otherwise.
 4. Open the active pane's folder in VS Code. For a remote pane with editor
    integration available, the request travels back to the desktop and opens
@@ -43,7 +43,7 @@ All shortcuts are tmux keys: they work in any terminal, including over SSH.
 | Action | Keys | Notes |
 | --- | --- | --- |
 | Shortcut guide | `Ctrl+B` `F1` | |
-| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
+| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a new kitty tab in the same window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
 | Open folder in VS Code | `Ctrl+B` `F3` or `v` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
 | New tab | `Ctrl+B` `c` | |
 | Previous / next tab | `Ctrl+B` `p` / `n` | |
@@ -90,7 +90,7 @@ PowerShell prompt keys (Windows):
 
 Select, copy, paste:
 
-- **Alacritty:** `Shift`+drag selects and copies; `Ctrl+Shift+C` / `Ctrl+Shift+V`.
+- **kitty:** `Shift`+drag selects and copies; `Ctrl+Shift+C` / `Ctrl+Shift+V`.
   `Shift+Insert` or `Shift`+middle click pastes the primary selection.
 - **Windows Terminal:** `Shift`+drag, then `Ctrl+Shift+C` (select first, or it
   may reach the pane as `Ctrl+C`); `Ctrl+Shift+V` pastes.
@@ -211,7 +211,7 @@ Windows installer options (`-VSCodePath`, `-ProfilePath`, `-TerminalSettingsPath
 
 ### Linux desktop: Fedora or Debian 13
 
-The desktop requirements include Alacritty 0.14+, tmux 3.2+, and OpenSSH 9.4+
+The desktop requirements include kitty 0.41+, tmux 3.2+, and OpenSSH 9.4+
 for the tagged host picker. The documented bootstrap coverage includes Fedora
 44 and Debian 13. Debian 12 and Ubuntu 24.04 need the server path below
 because their packaged desktop tools do not meet all requirements. Ubuntu
@@ -255,13 +255,14 @@ cd ~/code/dalftui
 Bootstrap adds GitHub CLI's package repository, then installs or upgrades the listed
 packages, Oh My Posh, mise, and uv. Desktop mode also adds Microsoft's VS Code
 repository and, on x86-64, DVC's. Installation
-then configures Alacritty, tmux, the prompt, and installs Hack Nerd Font. Open a new
-Alacritty window afterward.
+then configures kitty, tmux, the prompt, and installs Hack Nerd Font. Open a new
+kitty window afterward. Coming from Alacritty: see
+[Moving from Alacritty](docs/install.md#moving-from-alacritty).
 
 ### Linux server setup
 
 Use this on a Linux server, or when you want tmux and the prompt without the
-Alacritty desktop setup. Python 3.11+, Git, and sudo must exist first. On
+kitty desktop setup. Python 3.11+, Git, and sudo must exist first. On
 Debian or Ubuntu:
 
 ```sh
@@ -281,7 +282,7 @@ cd ~/code/dalftui
 
 On an existing checkout, skip the clone. This still adds GitHub CLI's repository
 but skips the `[desktop]` package section and the VS Code and DVC repositories, configures tmux and the bash prompt,
-leaves Alacritty alone, and installs no font; the terminal you connect from
+leaves kitty alone, and installs no font; the terminal you connect from
 needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the server profile; `./bootstrap`
 does not, so keep passing `--server`.
 
@@ -387,7 +388,7 @@ git pull --ff-only
 ```
 
 `./install` changes nothing when nothing changed, then reloads running tmux, and
-Alacritty in desktop mode. Reload preserves running
+kitty in desktop mode. Reload preserves running
 pane programs. New shell sessions load prompt changes; startup settings apply
 to new terminal windows. Removing a tmux binding from a file does not remove
 an already loaded binding automatically.
@@ -437,7 +438,7 @@ Details: [Uninstall](docs/install.md#uninstall).
 Keep Linux personal overrides outside the checkout:
 
 ```text
-~/.config/alacritty/local.toml
+~/.config/kitty/local.conf
 ~/.config/tmux/local.conf
 ```
 

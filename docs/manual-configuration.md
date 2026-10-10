@@ -1,6 +1,6 @@
 # Manual configuration
 
-dalftui's installers and reload commands set up Alacritty, tmux, PowerShell, and
+dalftui's installers and reload commands set up kitty, tmux, PowerShell, and
 Windows Terminal. This file records related machine settings, mostly ones
 dalftui does not apply, why they matter, and how to apply them by hand. Each entry says where
 it applies, so it can be checked again when setting up a new machine.

@@ -12,20 +12,19 @@ import sys
 import tempfile
 import time
 
-from .alacritty_config import config_directory, load
 # Portable JSONC editing shared with the Windows setup.
 from ..windows.terminal_settings import PROMPT_FONT, removed_vscode_settings, vscode_settings
 
 MARKER = '# Managed by dalftui.'
 PROFILE_MARKER = '# dalftui-profile: '
 PROFILES = ('desktop', 'server', 'macos')
-# Alacritty is not used on macOS; a new Mac installation uses Terminal.app or iTerm2.
+# kitty is not used on macOS; a new Mac installation uses Terminal.app or iTerm2.
 DEFAULT_PROFILE = 'macos' if sys.platform == 'darwin' else 'desktop'
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
 REPO = Path(__file__).resolve().parents[2]
 LOCAL_TMUX = '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'
-LOCAL_ALACRITTY = ('# Personal Alacritty settings. This file stays outside the repository.\n'
-                   '# Example:\n# [font]\n# size = 11.0\n')
+LOCAL_KITTY = ('# Personal kitty settings. This file stays outside the repository.\n'
+               '# Example:\n# font_size 11.0\n')
 # Discover the directory before .zshrc/.zlogin can change it or initialize a prompt.
 # -f skips user startup; /etc/zshenv still runs automatically. Enable the normal
 # startup options while sourcing the files that select an interactive login rc.
@@ -45,6 +44,11 @@ unsetopt rcs
 '''
 
 
+def config_directory():
+    value = os.environ.get('XDG_CONFIG_HOME')
+    return Path(value) if value and Path(value).is_absolute() else Path.home() / '.config'
+
+
 @dataclass(frozen=True)
 class Paths:
     home_dir: Path
@@ -62,8 +66,8 @@ class Paths:
         return self.config_dir / 'dalftui'
 
     @property
-    def alacritty(self):
-        return self.config_dir / 'alacritty/alacritty.toml'
+    def kitty(self):
+        return self.config_dir / 'kitty/kitty.conf'
 
     @property
     def tmux(self):
@@ -159,18 +163,16 @@ def installed_profile(paths=None):
 
 
 def loaders(paths, profile='desktop', *, legacy=False):
-    imports = [str(paths.root / 'config/alacritty.toml'),
-               str(paths.config_dir / 'alacritty/local.toml')]
-    alacritty = (f'{MARKER} Edit local.toml for personal settings.\n'
-                 '[general]\n'
-                 f'import = {json.dumps(imports, ensure_ascii=False)}\n'
-                 'live_config_reload = true\n')
+    # globinclude skips a missing local.conf without a warning.
+    kitty = (f'{MARKER} Edit local.conf for personal settings.\n'
+             f'include {paths.root / "config/kitty.conf"}\n'
+             'globinclude local.conf\n')
     tmux = f'{MARKER} Edit the local.conf below for personal settings.\n'
     if not legacy:
         tmux += f'{PROFILE_MARKER}{profile}\nset -g @dalftui_profile {profile}\n'
     tmux += (f'source-file {tmux_quote(paths.root / "config/tmux.conf")}\n'
             f'source-file -q {tmux_quote(paths.config_dir / "tmux/local.conf")}\n')
-    return alacritty.encode(), tmux.encode()
+    return kitty.encode(), tmux.encode()
 
 
 def known_tmux(paths):
@@ -183,14 +185,14 @@ def dependencies(profile='desktop'):
     if not sys.platform.startswith('linux') and sys.platform != 'darwin':
         raise RuntimeError('This installer targets Linux and macOS.')
     if sys.platform == 'darwin' and profile == 'desktop':
-        raise RuntimeError('The Alacritty desktop mode is Linux-only; run ./install without --desktop.')
+        raise RuntimeError('The kitty desktop mode is Linux-only; run ./install without --desktop.')
     if sys.platform != 'darwin' and profile == 'macos':
         raise RuntimeError('The macos mode is for macOS only.')
     if sys.version_info < (3, 11):
         raise RuntimeError('Python 3.11 or newer is required.')
     programs = ('tmux', 'less', 'git', 'oh-my-posh', 'uv')  # uv runs the Python of the tmux keys.
     if profile == 'desktop':
-        programs += ('alacritty', 'ssh')
+        programs += ('kitty', 'kitten', 'ssh')
     missing = [name for name in programs if not shutil.which(name)]
     if missing:
         hint = ''
@@ -201,7 +203,7 @@ def dependencies(profile='desktop'):
         raise RuntimeError('Install the missing dependencies first: ' + ', '.join(missing) + hint)
     specifications = [('tmux', '-V', (3, 2))]
     if profile == 'desktop':
-        specifications += [('alacritty', '--version', (0, 14)), ('ssh', '-V', (9, 4))]
+        specifications += [('kitty', '--version', (0, 41)), ('ssh', '-V', (9, 4))]
     for name, flag, minimum in specifications:
         result = subprocess.run([name, flag], capture_output=True, text=True, timeout=10)
         match = re.search(r'(\d+)\.(\d+)', result.stdout + result.stderr)
@@ -272,7 +274,7 @@ def install_font(dry_run):
     subprocess.run(['oh-my-posh', 'font', 'install', 'Hack'], check=True, timeout=300)
 
 
-def apply(paths, changes, *, dry_run, check=None):
+def apply(paths, changes, *, dry_run):
     """Back up, then write or remove (wanted None) each path; roll back on failure."""
     if dry_run:
         for path, previous, wanted in changes:
@@ -301,8 +303,6 @@ def apply(paths, changes, *, dry_run, check=None):
             else:
                 write(path, wanted)
             written.append((path, previous))
-        if check:
-            check()
     except BaseException:
         for path, previous in reversed(written):
             if previous is None:
@@ -324,9 +324,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             raise ValueError('Configuration paths must be absolute and contain no control characters.')
     if paths.root == repo:
         raise ValueError('Keep the checkout outside the managed ~/.config/dalftui link.')
-    if profile == 'desktop':
-        load(repo / 'config/alacritty.toml', home_dir=paths.home_dir)
-    alacritty, tmux = loaders(paths, profile)
+    kitty, tmux = loaders(paths, profile)
     desired = [
         (paths.root, Snapshot('link', str(repo))),
         (paths.tmux, Snapshot('file', tmux)),
@@ -334,7 +332,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
          Snapshot('link', str(paths.root / 'bin/shortcuts.py'))),
     ]
     if profile == 'desktop':
-        desired.append((paths.alacritty, Snapshot('file', alacritty)))
+        desired.append((paths.kitty, Snapshot('file', kitty)))
     # A symlinked ~/.bashrc or ~/.zshrc is replaced like other managed paths, keeping its content.
     rc, loader_name = (paths.zshrc, 'prompt.zsh') if profile == 'macos' else (paths.bashrc, 'prompt.bash')
     desired.append((rc, Snapshot('file', rc_with_prompt(paths, snapshot(rc.resolve()), loader_name))))
@@ -342,17 +340,15 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
         settings = vscode_settings_bytes(paths.vscode_settings)
         if settings is not None:
             desired.append((paths.vscode_settings, Snapshot('file', settings)))
-    local_alacritty = paths.config_dir / 'alacritty/local.toml'
+    local_kitty = paths.config_dir / 'kitty/local.conf'
     local_tmux = paths.config_dir / 'tmux/local.conf'
     local_files = [(local_tmux, LOCAL_TMUX)]
     if profile == 'desktop':
-        local_files.append((local_alacritty, LOCAL_ALACRITTY))
+        local_files.append((local_kitty, LOCAL_KITTY))
     for path, content in local_files:
         existing = snapshot(path)
         if existing is None:
             desired.append((path, Snapshot('file', content.encode())))
-        elif path == local_alacritty:
-            load(path, home_dir=paths.home_dir)
 
     changes = []
     for path, wanted in desired:
@@ -361,7 +357,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             wanted = replace(wanted, mode=previous.mode)
         if previous == wanted:
             continue
-        if (path in (paths.alacritty, paths.tmux) and previous and previous.kind == 'file'
+        if (path in (paths.kitty, paths.tmux) and previous and previous.kind == 'file'
                 and previous.value.startswith(MARKER.encode())):
             if path != paths.tmux or previous.value not in known_tmux(paths):
                 raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
@@ -371,8 +367,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
     if not changes:
         print('Already installed; personal overrides preserved.')
         return None
-    check = (lambda: load(paths.alacritty, home_dir=paths.home_dir)) if profile == 'desktop' else None
-    backup = apply(paths, changes, dry_run=dry_run, check=check)
+    backup = apply(paths, changes, dry_run=dry_run)
     if dry_run:
         return None
     print(f'Installed ({profile}): {paths.root} -> {repo}')
@@ -380,7 +375,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
         print(f'Original configurations backed up in {backup}')
     personal = [str(local_tmux)]
     if profile == 'desktop':
-        personal.insert(0, str(local_alacritty))
+        personal.insert(0, str(local_kitty))
     print('Personal settings: ' + ' and '.join(personal))
     return backup
 
@@ -406,8 +401,8 @@ def uninstall(paths=None, *, dry_run=False):
     """Remove what install created while it is unchanged; keep personal files and backups."""
     paths = paths or Paths.current()
     changes, notes, edited = [], [], False
-    alacritty = loaders(paths)[0]
-    for path, known in ((paths.tmux, known_tmux(paths)), (paths.alacritty, {alacritty})):
+    kitty = loaders(paths)[0]
+    for path, known in ((paths.tmux, known_tmux(paths)), (paths.kitty, {kitty})):
         previous = snapshot(path)
         if not previous or previous.kind != 'file' or not previous.value.startswith(MARKER.encode()):
             continue
@@ -444,7 +439,7 @@ def uninstall(paths=None, *, dry_run=False):
             changes.append((paths.vscode_settings, previous, replace(previous, value=content)))
             notes.append(f'Earlier VS Code font settings, if any, are backed up in {paths.state_dir / "dalftui/backups"}')
     for path, template in ((paths.config_dir / 'tmux/local.conf', LOCAL_TMUX),
-                           (paths.config_dir / 'alacritty/local.toml', LOCAL_ALACRITTY)):
+                           (paths.config_dir / 'kitty/local.conf', LOCAL_KITTY)):
         previous = snapshot(path)
         if previous and previous.kind == 'file' and previous.value == template.encode():
             changes.append((path, previous, None))
@@ -465,8 +460,23 @@ def uninstall(paths=None, *, dry_run=False):
     if dry_run:
         return None
     print(f'Uninstalled dalftui configuration. Removed files are backed up in {backup}')
-    print('Running tmux and Alacritty keep their current configuration until restarted.')
+    print('Running tmux and kitty keep their current configuration until restarted.')
     return backup
+
+
+def reload_kitty():
+    # Debian 13's kitty watches no files; newer ones miss changes to included files.
+    if not shutil.which('pkill'):
+        print('pkill is missing; new kitty windows will load the updated configuration.')
+        return
+    result = subprocess.run(['pkill', '-USR1', '-x', '-u', str(os.getuid()), 'kitty'],
+                            capture_output=True, text=True, timeout=10)
+    if result.returncode == 1:
+        print('kitty is not running; new windows will load the updated configuration.')
+    elif result.returncode:
+        raise RuntimeError(result.stderr.strip() or 'Could not signal kitty to reload.')
+    else:
+        print('kitty configuration reloaded; startup settings apply to new windows.')
 
 
 def reload_config(paths=None, *, socket=None):
@@ -479,18 +489,9 @@ def reload_config(paths=None, *, socket=None):
         raise RuntimeError('uv is missing; the tmux keys need it. Install uv, or rerun ./bootstrap, then reload.')
     profile = installed_profile(paths)
     if profile == 'desktop':
-        content = paths.alacritty.read_bytes()
-        if not content.startswith(MARKER.encode()):
-            raise RuntimeError('The Alacritty loader is missing. Run ./install first.')
-        load(paths.alacritty, home_dir=paths.home_dir)
-
-        # Write the same bytes in place: Alacritty's watcher can miss rename events
-        # produced by Git or an editor. A data modification on its main file is reliable.
-        with paths.alacritty.open('r+b') as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        print('Alacritty configuration reload requested; startup settings apply to new windows.')
+        if not paths.kitty.read_bytes().startswith(MARKER.encode()):
+            raise RuntimeError('The kitty loader is missing. Run ./install first.')
+        reload_kitty()
 
     command = ['tmux', '-N']
     if socket:

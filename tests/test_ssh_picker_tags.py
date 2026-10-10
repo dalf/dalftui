@@ -8,7 +8,7 @@ import sys
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -217,7 +217,7 @@ class DesktopPickerTests(unittest.TestCase):
                     self.assertEqual(picker.main(), 0)
                 hosts.assert_called_once_with()
                 if key == '\n':
-                    window.assert_called_once_with('server', '')
+                    window.assert_called_once_with('server', '', None)
                 else:
                     window.assert_not_called()
 
@@ -251,25 +251,6 @@ class DesktopWindowTests(unittest.TestCase):
         hosts.assert_not_called()
         self.assertIn('The SSH picker requires Python curses support. Use --connect HOST to connect directly.',
                       output.getvalue())
-
-    @patch.object(ssh_picker.sys, 'platform', 'linux')
-    def test_missing_alacritty_and_startup_failures(self):
-        with patch.object(ssh_picker.shutil, 'which', return_value=None):
-            with self.assertRaisesRegex(RuntimeError, 'Alacritty was not found in PATH'):
-                ssh_picker.open_window('server')
-        for output, expected in ((b'Alacritty failed', 'Alacritty failed'),
-                                 (b'', 'Could not open Alacritty')):
-            with self.subTest(output=output):
-                def start(_command, *, output=output, **kwargs):
-                    kwargs['stderr'].write(output)
-                    process = Mock()
-                    process.wait.return_value = 1
-                    return process
-
-                with (patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'),
-                      patch.object(ssh_picker.subprocess, 'Popen', side_effect=start)):
-                    with self.assertRaisesRegex(RuntimeError, expected):
-                        ssh_picker.open_window('server')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install or uninstall dalftui configuration links and loaders, then reload running tmux and Alacritty."""
+"""Install or uninstall dalftui configuration links and loaders, then reload running tmux and kitty."""
 import argparse
 import os
 import shutil
@@ -21,9 +21,9 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Show changes without writing files')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--server', dest='profile', action='store_const', const='server',
-                      help='Configure tmux for a server without requiring Alacritty or an SSH picker')
+                      help='Configure tmux for a server without requiring kitty or an SSH picker')
     mode.add_argument('--desktop', dest='profile', action='store_const', const='desktop',
-                      help='Configure Alacritty and tmux (the default for a new Linux installation)')
+                      help='Configure kitty and tmux (the default for a new Linux installation)')
     mode.add_argument('--macos', dest='profile', action='store_const', const='macos',
                       help='Configure tmux and the zsh prompt on macOS (the default for a new Mac installation)')
     mode.add_argument('--uninstall', action='store_true',

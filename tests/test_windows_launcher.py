@@ -11,7 +11,6 @@ import sys
 import tempfile
 import threading
 import time
-import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -116,46 +115,44 @@ class SharedLauncherTests(unittest.TestCase):
                 self.assertEqual(result.stderr, '')
         self.assertEqual(list(self.checkout.rglob('__pycache__')), [])
 
-    def test_alacritty_launches_the_copied_bin_picker_as_separate_arguments(self):
+    def test_kitty_launches_the_copied_bin_picker_as_separate_arguments(self):
         host = "alice@prod-é;$host'\"\\🛰"
         program = '''import json, subprocess, sys
 from unittest.mock import patch
 sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
 from dalftui import ssh as picker
-from dalftui.linux import ssh_picker
-with patch.object(ssh_picker.shutil, 'which', return_value='alacritty-probe'):
-    with patch.object(ssh_picker.subprocess, 'Popen') as start:
-        start.return_value.wait.side_effect = subprocess.TimeoutExpired('alacritty-probe', 0.4)
+from dalftui.linux import ssh_picker, tmux_editor
+client = {'KITTY_LISTEN_ON': 'unix:/run/user/1000/kitty-42', 'KITTY_WINDOW_ID': '7', 'TERM': 'xterm-kitty'}
+with patch.object(ssh_picker.shutil, 'which', return_value='kitten-probe'), \\
+        patch.object(tmux_editor, 'client_environment', return_value=client) as environment:
+    with patch.object(ssh_picker.subprocess, 'run') as run:
+        run.return_value = subprocess.CompletedProcess([], 0, '9\\n', '')
         host = sys.argv[2]
         with patch.object(ssh_picker, 'curses') as curses:
             curses.wrapper.return_value = host
             with patch.object(picker, 'target_hosts', return_value=[host]):
-                with patch.object(sys, 'platform', 'linux'), patch.object(sys, 'argv', ['bin/ssh_picker.py']):
+                with patch.object(sys, 'platform', 'linux'), \\
+                        patch.object(sys, 'argv', ['bin/ssh_picker.py', '--client-pid', '4242']):
                     assert picker.main() == 0
             curses.wrapper.assert_called_once_with(ssh_picker.pick, [host])
-        args, kwargs = start.call_args
+        environment.assert_called_once_with(4242)
+        args, kwargs = run.call_args
         assert kwargs['stdin'] == subprocess.DEVNULL
-        assert kwargs['stdout'] is kwargs['stderr']
-        start.return_value.wait.assert_called_once_with(timeout=0.4)
-        print(json.dumps({'args': args[0],
-                          'tmux': [name for name in ('TMUX', 'TMUX_PANE') if name in kwargs['env']],
-                          'detached': kwargs['start_new_session']}))
+        assert 'shell' not in kwargs
+        print(json.dumps({'args': args[0]}))
 '''
         result = subprocess.run([sys.executable, '-I', '-c', program,
                                  str(self.checkout), host], cwd=self.outside,
-                                env=dict(self.env, TMUX='stale', TMUX_PANE='%3'),
+                                # The popup inherits the KITTY_* of the kitty that started the tmux server.
+                                env=dict(self.env, KITTY_LISTEN_ON='unix:/wrong', KITTY_WINDOW_ID='1'),
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         observation = json.loads(result.stdout)
-        self.assertEqual(observation['args'][:2], ['alacritty-probe', '--option'])
-        self.assertEqual(tomllib.loads('\n'.join(observation['args'][2:4])),
-                         {'window': {'title': f'SSH · {host}', 'dynamic_title': True}})
-        self.assertEqual(observation['args'][4:],
-                         ['-e', sys.executable,
+        self.assertEqual(observation['args'],
+                         ['kitten-probe', '@', '--to', 'unix:/run/user/1000/kitty-42', 'launch', '--type=tab',
+                          '--match', 'window_id:7', '--', sys.executable,
                           str(self.checkout.resolve() / 'bin/ssh_picker.py'), '--connect', host])
-        self.assertTrue(observation['detached'])
-        self.assertEqual(observation['tmux'], [])
 
     def test_windows_generates_remote_programs_without_local_linux_integrations_or_execution(self):
         program = '''import importlib.abc, shlex, shutil, socket, subprocess, sys
@@ -410,7 +407,7 @@ raise SystemExit(status)
                     self.assertEqual(vscode.main(), 1)
                 run.assert_not_called()
 
-    def test_windows_picker_connects_selected_host_without_curses_or_alacritty(self):
+    def test_windows_picker_connects_selected_host_without_curses_or_kitty(self):
         with patch.object(picker.sys, 'platform', 'win32'):
             with patch.object(picker, 'pick_host', return_value='vm-alias') as choose:
                 with patch.object(picker, 'connect', return_value=17) as connect:

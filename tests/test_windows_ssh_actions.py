@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_windows_host_picker import Screen
 from dalftui import host_picker, ssh
-from dalftui.linux import ssh_picker
+from dalftui.linux import ssh_picker, tmux_editor
 from dalftui.windows.host_picker import ConsoleScreen
 
 
@@ -217,10 +217,13 @@ class ActionDispatchTests(unittest.TestCase):
                                    (host_picker.HostAction('prod', 'plain'), ['--plain']),
                                    (host_picker.HostAction('prod', 'check', 'a check'), ['--check', 'a check'])):
             with (self.subTest(selection=selection), patch.object(ssh_picker.sys, 'platform', 'linux'),
-                  patch.object(ssh_picker.shutil, 'which', return_value='/bin/alacritty'),
-                  patch.object(ssh_picker.subprocess, 'Popen') as launch):
-                launch.return_value.wait.side_effect = subprocess.TimeoutExpired('alacritty', 0.4)
-                ssh_picker.open_window(selection)
+                  patch.object(ssh_picker.shutil, 'which', return_value='/bin/kitten'),
+                  patch.object(tmux_editor, 'client_environment', return_value={
+                      'KITTY_LISTEN_ON': 'unix:/run/user/1000/kitty-42', 'KITTY_WINDOW_ID': '7',
+                      'TERM': 'xterm-kitty'}),
+                  patch.object(ssh_picker.subprocess, 'run') as launch):
+                launch.return_value = subprocess.CompletedProcess([], 0, '9\n', '')
+                ssh_picker.open_window(selection, client_pid=4242)
                 self.assertEqual(launch.call_args.args[0][-len(options) - 2:], ['--connect', 'prod', *options])
                 self.assertNotIn('shell', launch.call_args.kwargs)
 

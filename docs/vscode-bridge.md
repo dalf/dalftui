@@ -151,7 +151,7 @@ desktops. [dalftui/ssh.py](../dalftui/ssh.py) runs SSH and manages the desktop b
 The generator embeds [dalftui/linux/tmux-start.sh](../dalftui/linux/tmux-start.sh)
 so remote tmux startup works without a dalftui installation.
 [bin/tmux-start.sh](../bin/tmux-start.sh) forwards local startup to that canonical
-policy; Alacritty invokes it through the installed checkout link.
+policy; kitty invokes it through the installed checkout link.
 
 Check both older remote clients with the current desktop bridge and current
 remote clients with supported older desktop bridges. The frozen historical peer

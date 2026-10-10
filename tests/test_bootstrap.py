@@ -130,8 +130,8 @@ class PackageListTests(unittest.TestCase):
         self.path = Path(directory.name) / 'fedora.txt'
 
     def test_comments_and_desktop_section(self):
-        self.path.write_text('# heading\ngit  # comment\n\ntmux\n[desktop]\nalacritty\n', encoding='utf-8')
-        self.assertEqual(bootstrap.read_packages(self.path), ['git', 'tmux', 'alacritty'])
+        self.path.write_text('# heading\ngit  # comment\n\ntmux\n[desktop]\nkitty\n', encoding='utf-8')
+        self.assertEqual(bootstrap.read_packages(self.path), ['git', 'tmux', 'kitty'])
         self.assertEqual(bootstrap.read_packages(self.path, server=True), ['git', 'tmux'])
 
     def test_unknown_section_is_an_error(self):
@@ -146,7 +146,7 @@ class PackageListTests(unittest.TestCase):
                 desktop = bootstrap.read_packages(bootstrap.PACKAGES / f'{family}.txt')
                 for name in ('python3', 'git', 'tmux', 'less', 'fontconfig', 'curl', 'unzip'):
                     self.assertIn(name, server)
-                self.assertEqual(set(desktop) - set(server), {ssh, 'alacritty', 'code', 'dvc', aws, 'rclone', 'fido2-tools'})
+                self.assertEqual(set(desktop) - set(server), {ssh, 'kitty', 'code', 'dvc', aws, 'rclone', 'fido2-tools'})
         # Debian's yq is a different program from the mikefarah/yq that Fedora installs.
         self.assertNotIn('yq', bootstrap.read_packages(bootstrap.PACKAGES / 'debian.txt'))
 

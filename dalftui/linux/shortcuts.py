@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --no-project --python >=3.11
-"""A readable shortcut guide, followed by the current Alacritty/tmux bindings."""
+"""A readable shortcut guide, followed by the current tmux bindings."""
 import argparse
 import os
 import shlex
@@ -76,19 +76,19 @@ def render(tmux_only=False):
             ("Esc", "Leave history and return to the application"),
         ],
         "Select / copy / paste": [
-            ("Shift+drag", "Select text in Alacritty or Windows Terminal, locally or over SSH"),
+            ("Shift+drag", "Select text in kitty or Windows Terminal, locally or over SSH"),
             ("Ctrl+Shift+C / Ctrl+Shift+V", "Copy selection / paste; in Windows Terminal, select before copying"),
             ("Split panes", "Ctrl+B → z to zoom, Shift+drag, then Ctrl+B → z to restore"),
             ("Text in history", "Scroll with the wheel or Shift+Page Up, then Shift+drag"),
             ("Plain drag / double-click", "Does not select in shells (drag shows a hint); mouse apps such as htop receive it"),
         ],
-        "Alacritty terminal": [
+        "kitty terminal": [
             ("Shift+Insert / middle click", "Paste Linux primary selection"),
-            ("Ctrl+= / Ctrl+- / Ctrl+0", "Larger font / smaller font / reset font size"),
-            ("Ctrl+Shift+F / Ctrl+Shift+B", "Search Alacritty's own buffer forward / backward"),
+            ("Ctrl+Shift+= / - / Backspace", "Larger font / smaller font / reset font size"),
+            ("Ctrl+Shift+Right / Left", "Next / previous kitty tab, such as an SSH tab"),
         ],
         "SSH / servers": [
-            ("Ctrl+B → F2", "Choose a host tagged dalftui; open a new Alacritty window with remote tmux"),
+            ("Ctrl+B → F2", "Choose a host tagged dalftui; open a new kitty tab with remote tmux"),
             ("Type / arrows / Enter", "Filter hosts / select / connect in the host picker"),
             ("Esc", "Close the host picker"),
         ],
@@ -105,7 +105,7 @@ def render(tmux_only=False):
     if tmux_only:
         groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
         groups["Select / copy / paste"][3] = ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then Shift+drag")
-        del groups["Alacritty terminal"]
+        del groups["kitty terminal"]
         if tmux_profile() == "macos":
             groups["SSH / servers"][0] = ("Ctrl+B → h", "Choose a host tagged dalftui; open a new Terminal.app or iTerm2 window with remote tmux")
         else:
@@ -125,36 +125,6 @@ def render(tmux_only=False):
         heading(title)
         for keys, description in bindings:
             row(keys, description)
-
-    if not tmux_only:
-        # Only the desktop guide reads Alacritty; tomllib needs Python 3.11.
-        from .alacritty_config import config_path, load
-        heading("Alacritty custom bindings (live)")
-        paragraph("Read from alacritty.toml and its imports each time this guide opens. Terminal defaults are listed above.", MUTED)
-        config = config_path()
-        try:
-            bindings = load(config).get("keyboard", {}).get("bindings", [])
-            if not bindings:
-                paragraph("None.", MUTED)
-            for binding in bindings:
-                mods = binding.get("mods", "").replace("Control", "Ctrl").replace("Super", "Win").replace("|", "+")
-                key = binding.get("key", "?")
-                label = (mods + "+" if mods else "") + key
-                if "action" in binding:
-                    description = binding["action"]
-                elif "command" in binding:
-                    description = "Run " + str(binding["command"])
-                else:
-                    chars = binding.get("chars", "")
-                    if chars.startswith("\x02"):
-                        tail = chars[1:]
-                        function_keys = {"\x1bOP": "F1", "\x1bOQ": "F2", "\x1bOR": "F3"}
-                        description = "tmux: Ctrl+B → " + function_keys.get(tail, tail)
-                    else:
-                        description = "Send " + ascii(chars)
-                row(label, description)
-        except (OSError, ValueError, KeyError) as error:
-            paragraph("Cannot read Alacritty bindings: " + str(error), MUTED)
 
     try:
         result = subprocess.run(["tmux", "list-keys"], capture_output=True, text=True,

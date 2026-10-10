@@ -25,7 +25,6 @@ needed. Representative layout:
 │   ├── host_picker.py
 │   ├── vscode.py
 │   ├── linux/
-│   │   ├── alacritty_config.py
 │   │   ├── setup.py
 │   │   ├── shortcuts.py
 │   │   ├── ssh_picker.py
@@ -235,7 +234,7 @@ They cover backups, rollback, repeated installation, updates through the link,
 personal overrides, both shortcut guides, tag filtering, mode switching,
 reloads that preserve pane processes and Claude status, and the clipboard and
 mouse-selection bindings loaded into a real tmux server. The CLI is also tested
-with Alacritty and SSH absent from PATH. Desktop picker tests are skipped when
+with kitty and SSH absent from PATH. Desktop picker tests are skipped when
 OpenSSH's Tag directive is unavailable; it is not required by server mode.
 Unix authentication tests include a deliberately mode-0666 socket in a
 mode-0755 directory: they prove that reaching the endpoint does not authorize
