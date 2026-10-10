@@ -98,7 +98,7 @@ def render(tmux_only=False):
             ("Ctrl+B → d", "Detach from tmux; leave the session running"),
         ],
         "Editor": [
-            ("Ctrl+B → F3", "Open the current pane's folder in a new VS Code window"),
+            ("Ctrl+B → F3 / v", "Open the current pane's folder in a new VS Code window"),
             ("Remote VS Code", "Reconnect through the dalftui SSH launcher after updating; each client needs credentials"),
         ],
     }
@@ -119,7 +119,7 @@ def render(tmux_only=False):
         ]
         # Apple keyboards send F1/F3 with Fn unless set to standard function keys.
         groups["Session / help"][0] = ("Ctrl+B → Fn+F1", "Open this guide")
-        groups["Editor"][0] = ("Ctrl+B → Fn+F3", groups["Editor"][0][1])
+        groups["Editor"][0] = (groups["Editor"][0][0].replace("F3", "Fn+F3"), groups["Editor"][0][1])
         del groups["Editor"][1]  # Relaying to an SSH client's editor is not supported on a Mac.
     for title, bindings in groups.items():
         heading(title)

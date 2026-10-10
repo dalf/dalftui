@@ -6,6 +6,7 @@
 - **Ctrl+B, then F2:** desktop mode: choose an SSH host and open a separate Alacritty window.
 - **Ctrl+B, then h:** macOS mode: choose an SSH host and open a Terminal.app or iTerm2 window.
 - **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
+  **Ctrl+B, then v** does the same.
 
 Other shortcuts are standard tmux keys; see the [README](../README.md#shortcuts).
 After Ctrl+B, release it and press the next key. For windows 1 to 9, keeping

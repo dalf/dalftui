@@ -3,7 +3,8 @@
 ## Open a folder
 
 Press **Ctrl+B, then F3** in a tmux pane to open its directory in a new local
-VS Code window. Install VS Code's `code` command on your desktop.
+VS Code window; **Ctrl+B, then v** does the same.
+Install VS Code's `code` command on your desktop.
 
 In an SSH window opened through the picker (**Ctrl+B, then F2**; **Ctrl+B, then h**
 on macOS) to a server with a compatible

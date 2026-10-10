@@ -442,7 +442,7 @@ function Invoke-DalftuiWindowsSetup {
             -VSCodeSettingsPath $(if ($vscode) { Get-DalftuiVSCodeSettingsPath $vscode })
     }
     Write-Host 'dssh HOST is ready.'
-    Write-Host 'Open a new PowerShell session to load dssh, Ctrl+B F2 (picker) and Ctrl+B F3 (VS Code).'
+    Write-Host 'Open a new PowerShell session to load dssh, Ctrl+B F2 (picker) and Ctrl+B F3 or v (VS Code).'
     Write-Host 'Run dssh to pick a host. Enable hosts with Tag dalftui in ~/.ssh/config (OpenSSH 9.4+).'
     Write-Host 'In the picker, Ctrl+O connects to a typed hostname, IP address or user@host.'
 }

@@ -15,7 +15,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
 | **SSH host picker** | F2, opens an Alacritty window | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
-| **VS Code (F3)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
+| **VS Code (F3 or v)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
 
 The usual Linux arrangement is **Alacritty → tmux → bash**. A tmux *session*
 contains *windows*, displayed like tabs; each window contains one or more
@@ -38,13 +38,13 @@ The intended everyday workflow on a configured Linux desktop is (keys in
 `Ctrl+B` `c` means press `Ctrl+B`, release, then `c`.
 
 All shortcuts are tmux keys: they work in any terminal, including over SSH.
-`F1`–`F3`, macOS `h`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
+`F1`–`F3`, `v`, macOS `h`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
 
 | Action | Keys | Notes |
 | --- | --- | --- |
 | Shortcut guide | `Ctrl+B` `F1` | |
 | Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a separate Alacritty window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
-| Open folder in VS Code | `Ctrl+B` `F3` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
+| Open folder in VS Code | `Ctrl+B` `F3` or `v` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
 | New tab | `Ctrl+B` `c` | |
 | Previous / next tab | `Ctrl+B` `p` / `n` | |
 | Rename tab | `Ctrl+B` `,` | |
@@ -85,7 +85,7 @@ PowerShell prompt keys (Windows):
 | `Ctrl+Left` / `Ctrl+Right` | Move by word |
 | `Ctrl+B` `Ctrl+B` | Move back one character |
 | `Ctrl+B` `F2` | Choose an SSH host with `dssh`, keeping the typed line |
-| `Ctrl+B` `F3` | Open the folder in VS Code, keeping the typed line |
+| `Ctrl+B` `F3` or `v` | Open the folder in VS Code, keeping the typed line |
 | Other keys | Emacs editing, as in bash |
 
 Select, copy, paste:

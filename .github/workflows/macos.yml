@@ -66,6 +66,7 @@ jobs:
           if tmux -L ci list-keys -T prefix | grep ' F2 '; then exit 1; fi
           tmux -L ci list-keys -T prefix | grep ' h .*bin/ssh_picker.py --terminal-type'
           tmux -L ci list-keys -T prefix | grep ' F3 .*uv run --no-project'
+          tmux -L ci list-keys -T prefix | grep ' v .*uv run --no-project'
           if tmux -L ci show-messages | grep -i error; then exit 1; fi
           tmux -L ci send-keys -t t 'printf "dalftui-%s\n" clip' Enter
           pane_wait_attempt=0

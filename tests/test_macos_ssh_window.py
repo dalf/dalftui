@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import test_install as install_tests
 from dalftui import host_picker
-from dalftui.linux import ssh_picker
+from dalftui.linux import shortcuts, ssh_picker
 
 RUN, MKDTEMP = subprocess.run, tempfile.mkdtemp
 PRINT_ARGUMENTS = 'import json, sys; print(json.dumps(sys.argv[1:]))'
@@ -68,6 +68,21 @@ class MacWindowTests(unittest.TestCase):
         self.assertFalse(scripts[0].parent.exists())
 
 
+class GuideEditorKeyTests(unittest.TestCase):
+    def render(self, profile, platform):
+        def run(args, **_):
+            if 'show-options' in args:
+                return subprocess.CompletedProcess(args, 0, profile + '\n')
+            raise OSError('no test server')
+        with patch.object(shortcuts.subprocess, 'run', side_effect=run), patch.object(sys, 'platform', platform):
+            return shortcuts.render(tmux_only=True)
+
+    def test_guides_name_v_beside_f3(self):
+        self.assertIn('Ctrl+B → Fn+F3 / v', self.render('macos', 'darwin'))
+        self.assertIn('Ctrl+B → F3 / v', self.render('server', 'linux'))
+        self.assertIn('Ctrl+B → F3 / v', shortcuts.render())
+
+
 class MacPickerKeyTests(install_tests.TmuxFixture):
     profile = 'macos'
 
@@ -86,6 +101,16 @@ class MacPickerKeyTests(install_tests.TmuxFixture):
                 self.install(profile=profile)
                 self.do_reload()
                 self.assertNotIn('h', self.prefix())
+
+    def test_every_profile_binds_v_like_f3(self):
+        self.start()
+        for profile in ('macos', 'server', 'desktop'):
+            with self.subTest(profile=profile):
+                self.install(profile=profile)
+                self.do_reload()
+                keys = self.prefix()
+                self.assertIn('bin/vscode.py --pane', keys['v'])
+                self.assertEqual(keys['v'].split(None, 4)[4], keys['F3'].split(None, 4)[4])
 
     @unittest.skipIf(sys.platform == 'win32', 'Needs a pseudo-terminal')
     def test_prefix_h_passes_the_pressing_clients_terminal_type_to_the_picker(self):

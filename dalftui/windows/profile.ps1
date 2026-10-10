@@ -228,7 +228,7 @@ if ((Get-Command oh-my-posh -CommandType Application -ErrorAction SilentlyContin
     oh-my-posh init pwsh --config (Join-Path $Checkout 'config/oh-my-posh.omp.json') | Invoke-Expression
 }
 
-# Ctrl+B, F2 and Ctrl+B, F3 are tmux keys. PSReadLine handles them at a local
+# Ctrl+B, F2 and Ctrl+B, F3 / v are tmux keys. PSReadLine handles them at a local
 # prompt without inserting or executing command-line text.
 $dalftuiEditorPath = Join-Path $Checkout 'bin/vscode.py'
 $dalftuiOpenFolder = {
@@ -275,15 +275,17 @@ if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
             finally { $global:LASTEXITCODE = $previousExitCode }
             [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, [Console]::CursorTop)
         }
-    Set-PSReadLineKeyHandler -Chord 'Ctrl+b,F3' `
-        -BriefDescription 'DalftuiOpenFolderInCode' `
-        -Description 'Open the current directory in VS Code; keep the input line' `
-        -ScriptBlock {
-            [Console]::WriteLine()  # Output and errors go below the input line, not under the redrawn prompt.
-            $previousExitCode = $global:LASTEXITCODE
-            try { Open-DalftuiCurrentFolder | Out-Host }
-            catch { [Console]::Error.WriteLine('VS Code: ' + $_.Exception.Message) }
-            finally { $global:LASTEXITCODE = $previousExitCode }
-            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, [Console]::CursorTop)
-        }
+    foreach ($chord in 'Ctrl+b,F3', 'Ctrl+b,v') {
+        Set-PSReadLineKeyHandler -Chord $chord `
+            -BriefDescription 'DalftuiOpenFolderInCode' `
+            -Description 'Open the current directory in VS Code; keep the input line' `
+            -ScriptBlock {
+                [Console]::WriteLine()  # Output and errors go below the input line, not under the redrawn prompt.
+                $previousExitCode = $global:LASTEXITCODE
+                try { Open-DalftuiCurrentFolder | Out-Host }
+                catch { [Console]::Error.WriteLine('VS Code: ' + $_.Exception.Message) }
+                finally { $global:LASTEXITCODE = $previousExitCode }
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt($null, [Console]::CursorTop)
+            }
+    }
 }

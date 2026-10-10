@@ -308,14 +308,15 @@ settings. Sessions and running programs are kept, without restarting tmux.
 Keys and terminals:
 
 - **Ctrl+B, then F1 / F3** open the guide and VS Code. Apple keyboards need Fn for
-  F-keys unless they are set as standard function keys.
+  F-keys unless they are set as standard function keys; **Ctrl+B, then v** also
+  opens VS Code without Fn.
 - **Ctrl+B, then h** chooses an SSH host and opens it in a new Terminal.app window,
   or iTerm2 when this tmux client is iTerm2. The first time, iTerm2 asks whether to
   run the generated file; it may open a tab instead of a window. F2 is not bound.
 - **F3** opens local VS Code and needs its `code` command on the PATH of the
   shell that started tmux (the Homebrew cask provides it; otherwise VS Code:
   *Shell Command: Install 'code' command in PATH*). In a window opened with
-  Ctrl+B, then h, F3 on the server opens the remote folder in this Mac's VS Code.
+  Ctrl+B, then h, F3 or v on the server opens the remote folder in this Mac's VS Code.
   A Mac cannot be the server end of the bridge.
 - **Selecting:** hold Fn (Terminal.app) or Option (iTerm2) while dragging;
   Cmd+C copies.
@@ -531,7 +532,7 @@ host, `dssh` sets the tab title to `username@host-alias` using the effective SSH
 username (or the login you enter). This also works when remote tmux does not set
 a terminal title; remote applications can still update it.
 
-**Ctrl+B, then F3** opens the current directory in a new VS Code window:
+**Ctrl+B, then F3** (or **v**) opens the current directory in a new VS Code window:
 
 - At a local PowerShell prompt, it uses the current filesystem directory and
   preserves any command you are typing.
