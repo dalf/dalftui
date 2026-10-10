@@ -363,8 +363,8 @@ Bootstrap runs `brew update` and `brew bundle` for `packages/Brewfile`, then
 installation and reload. It configures tmux and the zsh prompt, installs Hack
 Nerd Font, and sets VS Code's terminal font. Select Hack Nerd Font yourself in
 Terminal.app or iTerm2. If Apple's Python is too old, `bootstrap`, `install`,
-and `bin/reload` rerun themselves through uv; the other launchers always use
-uv. Run bootstrap as your normal user; `--server` is
+and `bin/reload` rerun themselves through uv; the other launchers use uv, and
+the tmux keys run `bin/vscode.py` through uv. Run bootstrap as your normal user; `--server` is
 refused by the macOS bootstrap.
 
 macOS support has been exercised on CI; interactive keys and selection are
@@ -480,6 +480,7 @@ SSH keys and credentials remain outside the repository.
 - [Ops mode and checks](docs/ops-mode.md)
 - [VS Code bridge](docs/vscode-bridge.md)
 - [Manual configuration](docs/manual-configuration.md)
+- [Secrets and SSH keys](docs/secrets-and-keys.md)
 - [Development guide](docs/development.md)
 
 MIT licensed; see [LICENSE](LICENSE). Vendored code keeps its own license.
