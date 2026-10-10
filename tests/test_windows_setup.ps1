@@ -459,8 +459,8 @@ function Invoke-DalftuiWindowsSetup {
                     'Default installation must configure each PowerShell profile exactly once'
                 . $installedProfile
                 $keyHandlers = @(Get-PSReadLineKeyHandler | Where-Object { $_.Function -in @('DalftuiSshPicker', 'DalftuiOpenFolderInCode') })
-                Assert-True ($keyHandlers.Count -eq 2) `
-                    'Each installed profile must load the Ctrl+B F2 and Ctrl+B F3 handlers'
+                Assert-True ($keyHandlers.Count -eq 3) `
+                    'Each installed profile must load the Ctrl+B F2, F3 and v handlers'
                 Assert-True (@(Get-ChildItem -LiteralPath (Split-Path $installedProfile) -Filter '*.bak').Count -eq 0) `
                     'Repeating default setup must leave configured profiles unchanged'
             }
