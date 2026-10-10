@@ -11,7 +11,6 @@ brew "uv"                   # runs bootstrap, install, bin/reload and the tmux k
 
 # The owner's personal tools
 brew "mise"
-brew "lsd"
 brew "bat"
 brew "ripgrep"
 brew "fzf"

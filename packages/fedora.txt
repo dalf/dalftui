@@ -17,7 +17,6 @@ ripgrep
 jq
 yq
 fzf
-lsd
 7zip
 wget2-wget         # provides the wget command
 nano

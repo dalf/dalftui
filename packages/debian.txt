@@ -17,7 +17,6 @@ btop
 ripgrep
 jq
 fzf
-lsd
 7zip               # Debian 12 installs only the 7zz command
 wget
 nano

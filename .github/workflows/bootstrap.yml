@@ -24,19 +24,19 @@ jobs:
         include:
           - image: fedora:44
             prereq: dnf install -y python3 git sudo
-            tools: fzf lsd yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            tools: fzf yq rg bat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
             desktop: true
           - image: debian:13
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
+            tools: fzf rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv code alacritty
             desktop: true
           - image: debian:12
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
+            tools: fzf rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
             flags: --server
           - image: ubuntu:24.04
             prereq: apt-get update && apt-get install -y python3 git sudo
-            tools: fzf lsd rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
+            tools: fzf rg batcat jq btop wget gh htop mc strace sqlite3 zsh mise uv
             flags: --server
     steps:
       - name: Install the documented prerequisites
@@ -254,7 +254,7 @@ jobs:
           set -eo pipefail
           tmux -V
           fido2-token -V
-          for tool in git oh-my-posh uv mise lsd bat rg fzf jq yq btop wget gh htop nano code dvc aws rclone; do
+          for tool in git oh-my-posh uv mise bat rg fzf jq yq btop wget gh htop nano code dvc aws rclone; do
             "$tool" --version | head -n 1
           done
           # mc --version needs a terminal; 7zz has no --version.
