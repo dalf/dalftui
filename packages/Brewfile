@@ -22,7 +22,6 @@ brew "gh"
 brew "htop"
 brew "midnight-commander"   # command: mc
 brew "sevenzip"             # command: 7zz
-brew "nano"                 # macOS's nano is pico
 brew "socat"
 brew "libfido2"             # fido2-token and the other FIDO2 tools
 brew "dvc"

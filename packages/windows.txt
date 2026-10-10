@@ -15,7 +15,6 @@ lsd
 less
 7zip
 diffutils
-nano
 wget2
 curl               # profile prefers it to Windows' curl and 5.1's alias
 ripgrep

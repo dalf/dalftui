@@ -202,7 +202,7 @@ jobs:
         run: |
           & "$env:RUNNER_TEMP\as-tester.ps1" @'
           $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'User') + ';' + $env:PATH
-          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'nano', 'diff', 'less', 'dvc', 'aws', 'rclone') {
+          foreach ($tool in 'git', 'oh-my-posh', 'mise', 'uv', 'rg', 'bat', 'jq', 'yq', 'fzf', 'lsd', 'gh', 'sqlite3', 'pwsh', 'code', 'gsudo', 'wget2', 'diff', 'less', 'dvc', 'aws', 'rclone') {
               $path = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
               "$tool ..."
               $version = @($null | & $tool --version)[0]
@@ -254,7 +254,7 @@ jobs:
           set -eo pipefail
           tmux -V
           fido2-token -V
-          for tool in git oh-my-posh uv mise bat rg fzf jq yq btop wget gh htop nano code dvc aws rclone; do
+          for tool in git oh-my-posh uv mise bat rg fzf jq yq btop wget gh htop code dvc aws rclone; do
             "$tool" --version | head -n 1
           done
           # mc --version needs a terminal; 7zz has no --version.

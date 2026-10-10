@@ -243,7 +243,7 @@ runs `./install`. On a new Apple Silicon Mac, in Terminal.app:
 Homebrew's installer asks for an administrator password once and installs the
 Command Line Tools, which provide Git for the clone. The `eval` applies only to
 that shell; as Homebrew's installer suggests, add it to `~/.zprofile` so that new
-shells use Homebrew's `git` and `nano` rather than Apple's. An
+shells use Homebrew's `git` rather than Apple's. An
 existing Intel Homebrew in `/usr/local` should work but is untested. Apple's
 `python3` is 3.9, so `bootstrap`, `install` and `bin/reload` run themselves
 through `uv run --no-project --python ">=3.11" --script`; Homebrew's Python is not needed.
