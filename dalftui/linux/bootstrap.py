@@ -1,6 +1,10 @@
 """Install the packages and tools of a new Fedora, Debian, Ubuntu or macOS machine, then install dalftui. Safe to rerun."""
 from contextlib import contextmanager
 from datetime import datetime
+# urlopen imports it lazily; after dnf upgrades Python under this process, that import fails.
+import encodings.idna  # pylint: disable=unused-import
+import hashlib
+import http.client
 import json
 import os
 import platform
@@ -9,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.request
 
@@ -17,6 +22,11 @@ PACKAGES = REPO / 'packages'
 OH_MY_POSH_INSTALLER = 'https://ohmyposh.dev/install.sh'
 MISE_INSTALLER = 'https://mise.run'
 UV_INSTALLER = 'https://astral.sh/uv/install.sh'
+# claude-tabstatus release assets, by os.name, and their SHA-256. To upgrade, change all three lines.
+TABSTATUS_VERSION = '0.2.0'
+TABSTATUS_ASSETS = {
+    'posix': ('tabstatus-x86_64-unknown-linux-musl', '0ad5c776c40be09a85145aeed398eee8a1a18e2118f3afa103ea76592d315329'),
+    'nt': ('tabstatus-x86_64-pc-windows-msvc.exe', '2c41f29c2b031162f4a418946f99c035477a80994d5e9368ae414e8d48df8f9d')}
 # sudo drops DEBIAN_FRONTEND; stdin is closed, so conffile prompts must not be asked.
 APT = ['sudo', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', '-y', '-o', 'DPkg::Lock::Timeout=300',
        '-o', 'Dpkg::Options::=--force-confdef', '-o', 'Dpkg::Options::=--force-confold']
@@ -366,6 +376,64 @@ class Bootstrap:
         else:
             self.add('upgraded', [f'{name} ({before} -> {after})'])
 
+    def tabstatus(self):
+        """The pinned claude-tabstatus release into ~/.local/bin, then `tabstatus install` when it is new."""
+        name = 'claude-tabstatus'
+        if sys.platform == 'darwin' or (os.name != 'nt' and platform.machine() != 'x86_64'):
+            self.add('skipped', [f"{name} ({'no macOS build' if sys.platform == 'darwin' else 'x86-64 only'})"])
+            return
+        asset, sha256 = TABSTATUS_ASSETS[os.name]
+        target = Path.home() / '.local/bin' / ('tabstatus.exe' if os.name == 'nt' else 'tabstatus')
+        before = None
+        if target.is_file():
+            try:
+                words = self.query([str(target), 'version']).stdout.split()
+                before = words[1] if words[:1] == ['tabstatus'] and len(words) > 1 else '?'
+            except OSError:
+                before = '?'
+        if before == TABSTATUS_VERSION:
+            self.add('skipped', [name])
+            return
+        if self.dry_run:
+            self.add('installed' if before is None else 'upgraded', [name])
+            return
+        url = f'https://github.com/dalf/claude-tabstatus/releases/download/{TABSTATUS_VERSION}/{asset}'
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                data = response.read()
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            self.say(f'{url}: {error}\n')
+            self.add('failed', [f'{name} (download)'])
+            return
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != sha256:  # Checked before anything is written.
+            self.say(f'{url}: SHA-256 {digest}, expected {sha256}\n')
+            self.add('failed', [f'{name} (checksum mismatch)'])
+            return
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Wired from the temporary copy, so a failed install leaves the old version for the next run to retry.
+            with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.tabstatus-', suffix=target.suffix,
+                                             delete=False) as file:
+                file.write(data)
+            temporary = Path(file.name)
+            try:
+                temporary.chmod(0o755)
+                if self.run([str(temporary), 'install']).returncode:
+                    self.add('failed', [f'{name} (tabstatus install)'])
+                    return
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            self.say(f'{target}: {error}\n')
+            self.add('failed', [f'{name} (could not install into {target.parent})'])
+        else:
+            if before is None:
+                self.add('installed', [name])
+            else:
+                self.add('upgraded', [f'{name} ({before} -> {TABSTATUS_VERSION})'])
+
     def install(self, *, server):
         command = [sys.executable, str(self.root / 'install')] + (['--server'] if server else [])
         if self.dry_run:
@@ -492,6 +560,8 @@ def bootstrap(*, dry_run=False, server=False, argv=()):
         run.oh_my_posh()
         run.mise()
         run.uv()
+    with run.step('Claude Code tab status (claude-tabstatus)'):
+        run.tabstatus()
     with run.step('Configuration (./install)'):
         run.install(server=server)
     return run.report()
@@ -517,6 +587,8 @@ def macos(*, dry_run, server, argv):
         run.update_repo(list(argv))
     with run.step('Packages (Brewfile)'):
         run.packages(run.entries())
+    with run.step('Claude Code tab status (claude-tabstatus)'):
+        run.tabstatus()
     with run.step('Configuration (./install)'):
         run.install(server=False)
     return run.report()
