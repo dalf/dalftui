@@ -54,7 +54,7 @@ When the `code` command or `~/.config/Code` exists, the desktop mode sets
 user settings, replacing your values and keeping the rest of the file.
 
 On a French AZERTY keyboard, the desktop mode's kitty loader also includes
-`config/kitty-azerty.conf`, so `Ctrl+Alt+&` to `ç` switch tabs without `Shift`.
+`config/kitty-azerty.conf`, so `Ctrl+Alt+&` to `à` switch tabs without `Shift`.
 Other layouts do not get it, since there these characters are keys such as
 `Ctrl+Alt+-`. Each run detects the layout from the first of `XKB_DEFAULT_LAYOUT`
 (exported by Plasma), KDE's `~/.config/kxkbrc`, GNOME's input sources, then the
