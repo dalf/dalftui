@@ -21,10 +21,20 @@ PROFILES = ('desktop', 'server', 'macos')
 # kitty is not used on macOS; a new Mac installation uses Terminal.app or iTerm2.
 DEFAULT_PROFILE = 'macos' if sys.platform == 'darwin' else 'desktop'
 PROMPT_MARKER = '# dalftui: Oh My Posh prompt'
+# French variants with the AZERTY digit row; not bepo, ergol, afnor, dvorak, mac or Belgian be.
+AZERTY_VARIANTS = ('', 'oss', 'oss_latin9', 'oss_nodeadkeys', 'latin9', 'latin9_nodeadkeys', 'nodeadkeys', 'azerty')
+SYSTEM_KEYBOARD = Path('/etc/default/keyboard')
 REPO = Path(__file__).resolve().parents[2]
 LOCAL_TMUX = '# Personal tmux settings. Loaded after the shared dalftui configuration.\n'
 LOCAL_KITTY = ('# Personal kitty settings. This file stays outside the repository.\n'
                '# Example:\n# font_size 11.0\n')
+KITTY_DESKTOP = (f'{MARKER} Opens kitty windows in one process.\n'
+                 '[Desktop Entry]\nVersion=1.0\nType=Application\nName=kitty\n'
+                 'GenericName=Terminal emulator\nComment=Fast, feature-rich, GPU based terminal\n'
+                 'TryExec=kitty\nStartupNotify=true\nExec=kitty -1\nIcon=kitty\n'
+                 'Categories=System;TerminalEmulator;\nX-TerminalArgExec=--\n'
+                 'X-TerminalArgTitle=--title\nX-TerminalArgAppId=--class\n'
+                 'X-TerminalArgDir=--working-directory\nX-TerminalArgHold=--hold\n').encode()
 # Discover the directory before .zshrc/.zlogin can change it or initialize a prompt.
 # -f skips user startup; /etc/zshenv still runs automatically. Enable the normal
 # startup options while sourcing the files that select an interactive login rc.
@@ -44,9 +54,9 @@ unsetopt rcs
 '''
 
 
-def config_directory():
-    value = os.environ.get('XDG_CONFIG_HOME')
-    return Path(value) if value and Path(value).is_absolute() else Path.home() / '.config'
+def xdg_directory(name, default):
+    value = os.environ.get(name)
+    return Path(value) if value and Path(value).is_absolute() else Path.home() / default
 
 
 @dataclass(frozen=True)
@@ -54,12 +64,13 @@ class Paths:
     home_dir: Path
     config_dir: Path
     state_dir: Path
+    data_dir: Path | None = None  # None means home_dir/.local/share.
 
     @classmethod
     def current(cls):
-        state = os.environ.get('XDG_STATE_HOME')
-        state_dir = Path(state) if state and Path(state).is_absolute() else Path.home() / '.local/state'
-        return cls(Path.home(), config_directory(), state_dir)
+        return cls(Path.home(), xdg_directory('XDG_CONFIG_HOME', '.config'),
+                   xdg_directory('XDG_STATE_HOME', '.local/state'),
+                   xdg_directory('XDG_DATA_HOME', '.local/share'))
 
     @property
     def root(self):
@@ -68,6 +79,10 @@ class Paths:
     @property
     def kitty(self):
         return self.config_dir / 'kitty/kitty.conf'
+
+    @property
+    def kitty_desktop(self):
+        return (self.data_dir or self.home_dir / '.local/share') / 'applications/kitty.desktop'
 
     @property
     def tmux(self):
@@ -162,11 +177,12 @@ def installed_profile(paths=None):
     return 'desktop'
 
 
-def loaders(paths, profile='desktop', *, legacy=False):
+def loaders(paths, profile='desktop', *, legacy=False, azerty=False):
     # globinclude skips a missing local.conf without a warning.
     kitty = (f'{MARKER} Edit local.conf for personal settings.\n'
              f'include {paths.root / "config/kitty.conf"}\n'
-             'globinclude local.conf\n')
+             + (f'include {paths.root / "config/kitty-azerty.conf"}\n' if azerty else '')
+             + 'globinclude local.conf\n')
     tmux = f'{MARKER} Edit the local.conf below for personal settings.\n'
     if not legacy:
         tmux += f'{PROFILE_MARKER}{profile}\nset -g @dalftui_profile {profile}\n'
@@ -177,6 +193,70 @@ def loaders(paths, profile='desktop', *, legacy=False):
 
 def known_tmux(paths):
     return {loaders(paths, mode)[1] for mode in PROFILES} | {loaders(paths, legacy=True)[1]}
+
+
+def known_kitty(paths):
+    return {loaders(paths, azerty=azerty)[0] for azerty in (False, True)}
+
+
+def command_output(*command):
+    """Return a command's output, or '' when it is missing, slow or fails."""
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return result.stdout if result.returncode == 0 else ''
+
+
+def keyboard_layout(paths):
+    """Return the first (layout, variant, source) found, or None. setxkbmap is wrong under Wayland."""
+    def first(value):
+        return value.split(',')[0].strip()
+    if os.environ.get('XKB_DEFAULT_LAYOUT'):  # Plasma exports these.
+        return (first(os.environ['XKB_DEFAULT_LAYOUT']), first(os.environ.get('XKB_DEFAULT_VARIANT', '')),
+                'XKB_DEFAULT_LAYOUT')
+    try:
+        section, values = None, {}
+        for line in (paths.config_dir / 'kxkbrc').read_text(encoding='utf-8').splitlines():
+            if line.startswith('['):
+                section = line.strip()
+            elif section == '[Layout]' and '=' in line:
+                key, _, value = line.partition('=')
+                values[key.strip()] = value
+        if values.get('Use', '').strip() == 'true' and first(values.get('LayoutList', '')):
+            return first(values['LayoutList']), first(values.get('VariantList', '')), 'kxkbrc'
+    except (OSError, UnicodeDecodeError):
+        pass
+    source = re.search(r"\('([^']*)', '([^']*)'\)",
+                       command_output('gsettings', 'get', 'org.gnome.desktop.input-sources', 'sources'))
+    if source:
+        layout, _, variant = source.group(2).partition('+') if source.group(1) == 'xkb' else (source.group(2), '', '')
+        return layout, variant, 'GNOME input sources'
+    status, source = command_output('localectl', 'status'), 'localectl'
+    layout, variant = re.search(r'X11 Layout: *([^\s(]\S*)', status), re.search(r'X11 Variant: *([^\s(]\S*)', status)
+    if not layout:
+        try:
+            content, source = SYSTEM_KEYBOARD.read_text(encoding='utf-8'), str(SYSTEM_KEYBOARD)
+        except (OSError, UnicodeDecodeError):
+            return None
+        layout = re.search(r'^XKBLAYOUT=["\']?([^"\'\n]*)', content, re.M)
+        variant = re.search(r'^XKBVARIANT=["\']?([^"\'\n]*)', content, re.M)
+    if layout and first(layout.group(1)):
+        return first(layout.group(1)), first(variant.group(1) if variant else ''), source
+    return None
+
+
+def azerty_keyboard(choice='auto', paths=None):
+    """Decide whether kitty gets the AZERTY tab keys, printing what decided it."""
+    if choice != 'auto':
+        print(f'Keyboard: {choice} (--keyboard)')
+        return choice == 'azerty'
+    found = keyboard_layout(paths or Paths.current())
+    azerty = bool(found) and found[0] == 'fr' and found[1] in AZERTY_VARIANTS
+    name = found and found[0] + (f'+{found[1]}' if found[1] else '')
+    print(f'Keyboard: {"azerty" if azerty else "other"} '
+          + (f'({name} from {found[2]})' if found else '(no layout found)'))
+    return azerty
 
 
 def dependencies(profile='desktop'):
@@ -313,7 +393,7 @@ def apply(paths, changes, *, dry_run):
     return backup
 
 
-def install(paths=None, repo=None, *, dry_run=False, profile=None):
+def install(paths=None, repo=None, *, dry_run=False, profile=None, azerty=False):
     paths = paths or Paths.current()
     profile = profile or installed_profile(paths)
     if profile not in PROFILES:
@@ -324,7 +404,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             raise ValueError('Configuration paths must be absolute and contain no control characters.')
     if paths.root == repo:
         raise ValueError('Keep the checkout outside the managed ~/.config/dalftui link.')
-    kitty, tmux = loaders(paths, profile)
+    kitty, tmux = loaders(paths, profile, azerty=azerty)
     desired = [
         (paths.root, Snapshot('link', str(repo))),
         (paths.tmux, Snapshot('file', tmux)),
@@ -332,7 +412,8 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
          Snapshot('link', str(paths.root / 'bin/shortcuts.py'))),
     ]
     if profile == 'desktop':
-        desired.append((paths.kitty, Snapshot('file', kitty)))
+        desired += [(paths.kitty, Snapshot('file', kitty)),
+                    (paths.kitty_desktop, Snapshot('file', KITTY_DESKTOP))]
     # A symlinked ~/.bashrc or ~/.zshrc is replaced like other managed paths, keeping its content.
     rc, loader_name = (paths.zshrc, 'prompt.zsh') if profile == 'macos' else (paths.bashrc, 'prompt.bash')
     desired.append((rc, Snapshot('file', rc_with_prompt(paths, snapshot(rc.resolve()), loader_name))))
@@ -359,7 +440,7 @@ def install(paths=None, repo=None, *, dry_run=False, profile=None):
             continue
         if (path in (paths.kitty, paths.tmux) and previous and previous.kind == 'file'
                 and previous.value.startswith(MARKER.encode())):
-            if path != paths.tmux or previous.value not in known_tmux(paths):
+            if previous.value not in (known_tmux(paths) if path == paths.tmux else known_kitty(paths)):
                 raise ValueError(f'Managed loader was edited: {path}. Move overrides to the local file first.')
         changes.append((path, previous, wanted))
     if profile in ('desktop', 'macos'):
@@ -401,8 +482,7 @@ def uninstall(paths=None, *, dry_run=False):
     """Remove what install created while it is unchanged; keep personal files and backups."""
     paths = paths or Paths.current()
     changes, notes, edited = [], [], False
-    kitty = loaders(paths)[0]
-    for path, known in ((paths.tmux, known_tmux(paths)), (paths.kitty, {kitty})):
+    for path, known in ((paths.tmux, known_tmux(paths)), (paths.kitty, known_kitty(paths))):
         previous = snapshot(path)
         if not previous or previous.kind != 'file' or not previous.value.startswith(MARKER.encode()):
             continue
@@ -414,6 +494,14 @@ def uninstall(paths=None, *, dry_run=False):
         if restored:
             notes.append(f'Restore {path} from {restored[1]}')
         changes.append((path, previous, restored and restored[0]))
+    previous = snapshot(paths.kitty_desktop)
+    if previous and previous.kind == 'file' and previous.value == KITTY_DESKTOP:
+        restored = original_file(paths, paths.kitty_desktop)
+        if restored:
+            notes.append(f'Restore {paths.kitty_desktop} from {restored[1]}')
+        changes.append((paths.kitty_desktop, previous, restored and restored[0]))
+    elif previous and previous.kind == 'file' and previous.value.startswith(MARKER.encode()):
+        notes.append(f'Kept edited launcher: {paths.kitty_desktop}')
     guide = paths.config_dir / 'tmux/shortcuts.py'
     previous = snapshot(guide)
     if previous and previous.kind == 'link' and previous.value in (

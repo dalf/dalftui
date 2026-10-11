@@ -13,7 +13,7 @@ if sys.version_info < (3, 11):  # The setup module needs Python 3.11 to import.
                          *sys.argv[1:]])
     raise SystemExit('Install failed: Python 3.11 or newer is required'
                      + (' (macOS: brew install uv, then rerun).' if sys.platform == 'darwin' else '.'))
-from dalftui.linux.setup import dependencies, install, installed_profile, reload_config, uninstall
+from dalftui.linux.setup import azerty_keyboard, dependencies, install, installed_profile, reload_config, uninstall
 
 
 def main():
@@ -28,6 +28,8 @@ def main():
                       help='Configure tmux and the zsh prompt on macOS (the default for a new Mac installation)')
     mode.add_argument('--uninstall', action='store_true',
                       help='Remove the links, loaders and settings that install added')
+    parser.add_argument('--keyboard', choices=('auto', 'azerty', 'other'), default='auto',
+                        help='Desktop mode: keyboard for the kitty tab keys (default: detect it on every run)')
     parser.add_argument('--socket', metavar='PATH', help='Reload this tmux server socket instead of the default one')
     args = parser.parse_args()
     if args.uninstall:
@@ -40,7 +42,8 @@ def main():
     try:
         profile = args.profile or installed_profile()
         dependencies(profile)
-        install(dry_run=args.dry_run, profile=profile)
+        azerty = profile == 'desktop' and azerty_keyboard(args.keyboard)
+        install(dry_run=args.dry_run, profile=profile, azerty=azerty)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f'Install failed: {error}', file=sys.stderr)
         return 1

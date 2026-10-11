@@ -83,9 +83,13 @@ def render(tmux_only=False):
             ("Plain drag / double-click", "Does not select in shells (drag shows a hint); mouse apps such as htop receive it"),
         ],
         "kitty terminal": [
-            ("Shift+Insert / middle click", "Paste Linux primary selection"),
-            ("Ctrl+Shift+= / - / Backspace", "Larger font / smaller font / reset font size"),
+            ("Ctrl+Alt+1-8 / 9", "Go to kitty tab 1-8 / last tab; on AZERTY, Ctrl+Alt+& to ç without Shift"),
             ("Ctrl+Shift+Right / Left", "Next / previous kitty tab, such as an SSH tab"),
+            ("Ctrl+Shift+Q / W", "Close the kitty tab without confirmation; tmux keeps running"),
+            ("Ctrl+Shift+E / Ctrl+Shift+click", "Open a URL shown on screen: pick it by hint / click it"),
+            ("Ctrl+Shift+P → F / L / W / H", "Insert a path / line / word / hash picked from the screen"),
+            ("Shift+Insert / Shift+middle click", "Paste Linux primary selection"),
+            ("Ctrl+Shift+= / - / Backspace", "Larger font / smaller font / reset font size"),
         ],
         "SSH / servers": [
             ("Ctrl+B → F2", "Choose a host tagged dalftui; open a new kitty tab with remote tmux"),

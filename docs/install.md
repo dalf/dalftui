@@ -40,6 +40,7 @@ The installer creates these connections:
 | --- | --- |
 | `~/.config/dalftui` | Symlink to this checkout |
 | `~/.config/kitty/kitty.conf` | Desktop mode: includes shared kitty settings, then personal overrides |
+| `~/.local/share/applications/kitty.desktop` | Desktop mode: menu entry running `kitty -1`, so all windows share one kitty process |
 | `~/.tmux.conf` | Sources shared tmux settings, then personal overrides |
 | `~/.config/tmux/shortcuts.py` | Link to `bin/shortcuts.py` |
 | `~/.bashrc` | Appended line sourcing `config/prompt.bash`, which starts Oh My Posh with `config/oh-my-posh.omp.json` |
@@ -52,7 +53,18 @@ When the `code` command or `~/.config/Code` exists, the desktop mode sets
 `terminal.integrated.fontFamily` and `terminal.integrated.fontSize` in VS Code's
 user settings, replacing your values and keeping the rest of the file.
 
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are respected when they contain absolute
+On a French AZERTY keyboard, the desktop mode's kitty loader also includes
+`config/kitty-azerty.conf`, so `Ctrl+Alt+&` to `ç` switch tabs without `Shift`.
+Other layouts do not get it, since there these characters are keys such as
+`Ctrl+Alt+-`. Each run detects the layout from the first of `XKB_DEFAULT_LAYOUT`
+(exported by Plasma), KDE's `~/.config/kxkbrc`, GNOME's input sources, then the
+system default from `localectl status` or `/etc/default/keyboard`, using the first
+layout listed, and prints it as `Keyboard: azerty (fr+oss from XKB_DEFAULT_LAYOUT)`.
+Use `./install --keyboard azerty` or `--keyboard other` to override the
+detection. After changing layout, log in again (or pass `--keyboard`) before
+re-running `./install`.
+
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` are respected when they contain absolute
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
 
 Running `./install` again preserves personal overrides and leaves an existing
@@ -415,10 +427,10 @@ installer's content, and backs up every file it changes or removes. Preview it f
 ```
 
 On Linux and macOS it removes the `~/.config/dalftui` link, the `~/.config/tmux/shortcuts.py`
-link, the generated `~/.tmux.conf` and kitty loaders, the marked prompt line
+link, the generated `~/.tmux.conf` and kitty loaders, the kitty menu entry, the marked prompt line
 pair in `~/.bashrc` and `~/.zshrc`, and VS Code's `terminal.integrated.fontFamily` and
 `terminal.integrated.fontSize` while they are still `Hack Nerd Font` and `12`.
-When a backup holds the `~/.tmux.conf` or `kitty.conf` file or link you had
+When a backup holds the `~/.tmux.conf`, `kitty.conf` or `kitty.desktop` file or link you had
 before dalftui, it is put back. An edited loader (with the `~/.config/dalftui` link
 it sources), an edited prompt line, symlinks the
 installer did not create, and personal `local.conf` files are kept

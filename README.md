@@ -37,7 +37,7 @@ The intended everyday workflow on a configured Linux desktop is (keys in
 
 `Ctrl+B` `c` means press `Ctrl+B`, release, then `c`.
 
-All shortcuts are tmux keys: they work in any terminal, including over SSH.
+The table's shortcuts are tmux keys: they work in any terminal, including over SSH.
 `F1`–`F3`, `v`, macOS `h`, `Shift+PgUp` and `Ctrl+F` need dalftui's tmux config.
 
 | Action | Keys | Notes |
@@ -87,6 +87,17 @@ PowerShell prompt keys (Windows):
 | `Ctrl+B` `F2` | Choose an SSH host with `dssh`, keeping the typed line |
 | `Ctrl+B` `F3` or `v` | Open the folder in VS Code, keeping the typed line |
 | Other keys | Emacs editing, as in bash |
+
+kitty keys (Linux desktop), one kitty tab per host:
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+Alt+1`–`8` / `9` | Go to tab 1–8 / last tab; on AZERTY, `Ctrl+Alt+&` to `ç` without `Shift` |
+| `Ctrl+Shift+Right` / `Left` | Next / previous tab |
+| `Ctrl+Shift+Q` / `W` | Close the tab without confirmation; tmux keeps running |
+| `Ctrl+Shift+E`, `Ctrl+Shift`+click | Open a URL shown on screen |
+| `Ctrl+Shift+P` `F` / `L` / `W` / `H` | Insert a path / line / word / hash picked from the screen |
+| `Ctrl+Shift+=` / `-` / `Backspace` | Larger / smaller / reset font |
 
 Select, copy, paste:
 
