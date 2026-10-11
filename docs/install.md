@@ -60,9 +60,9 @@ Other layouts do not get it, since there these characters are keys such as
 (exported by Plasma), KDE's `~/.config/kxkbrc`, GNOME's input sources, then the
 system default from `localectl status` or `/etc/default/keyboard`, using the first
 layout listed, and prints it as `Keyboard: azerty (fr+oss from XKB_DEFAULT_LAYOUT)`.
-Use `./install --keyboard azerty` or `--keyboard other` to override the
-detection. After changing layout, log in again (or pass `--keyboard`) before
-re-running `./install`.
+`./bootstrap` uses the same detection. Use `./install --keyboard azerty` or
+`--keyboard other` to override it. After changing layout, log in again (or pass
+`--keyboard`) before re-running `./install`.
 
 `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `XDG_DATA_HOME` are respected when they contain absolute
 paths. The tmux loader remains at `~/.tmux.conf` so tmux finds it consistently.
