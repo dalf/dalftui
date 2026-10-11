@@ -11,7 +11,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | --- | --- | --- | --- | --- |
 | **Set up with** | `./bootstrap` | `./bootstrap --server` | `.\bootstrap.cmd` | `./bootstrap` |
 | **Terminal window**: text, keyboard, clipboard | kitty | the terminal you connect from | Windows Terminal (installed separately) | Terminal.app or iTerm2 |
-| **tmux**: tabs, splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
+| **tmux**: windows (shown as tabs), splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
 | **SSH host picker** | F2, opens a kitty tab | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
@@ -22,11 +22,18 @@ contains *windows*, displayed like tabs; each window contains one or more
 *panes*, the splits. Windows uses local PowerShell without local tmux; tmux
 runs on the Linux server when connecting remotely.
 
+The rule: **one terminal tab per host, one tmux window per shell on that host**.
+On Linux the local machine is one kitty tab, and each SSH host opens in its own
+tab with tmux running on the host when available, so its sessions survive a
+dropped connection and tmux never runs inside tmux. On Windows, open one Windows
+Terminal tab per host and run `dssh` in it. An SSH tab is titled `user@alias`;
+once Claude runs there with claude-tabstatus, Claude's status appears before it.
+
 The intended everyday workflow on a configured Linux desktop is (keys in
 [Shortcuts](#shortcuts)):
 
 1. Open kitty. It creates or attaches to a tmux session.
-2. Work in tmux tabs and split panes.
+2. Work in tmux windows and split panes.
 3. Choose an SSH host. The connection opens in a new kitty tab of the same window,
    using remote tmux when available and a login shell otherwise.
 4. Open the active pane's folder in VS Code. For a remote pane with editor
@@ -45,10 +52,10 @@ The table's shortcuts are tmux keys: they work in any terminal, including over S
 | Shortcut guide | `Ctrl+B` `F1` | |
 | Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a new kitty tab in the same window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
 | Open folder in VS Code | `Ctrl+B` `F3` or `v` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
-| New tab | `Ctrl+B` `c` | |
-| Previous / next tab | `Ctrl+B` `p` / `n` | |
-| Rename tab | `Ctrl+B` `,` | |
-| Close tab | `Ctrl+B` `&` | Asks for confirmation |
+| New tmux window | `Ctrl+B` `c` | |
+| Previous / next tmux window | `Ctrl+B` `p` / `n` | |
+| Rename tmux window | `Ctrl+B` `,` | |
+| Close tmux window | `Ctrl+B` `&` | Asks for confirmation |
 | Split side by side | `Ctrl+B` `%` | |
 | Split top / bottom | `Ctrl+B` `"` | |
 | Move to pane | `Ctrl+B` arrow | |
