@@ -108,10 +108,13 @@ to the directory name.
 Override `@dalftui_program_label` or `status-interval` in
 `~/.config/tmux/local.conf` to customize this behavior. To restore program-only
 labels, use `set -g @dalftui_program_label '#{window_name}'`.
-These labels affect tmux's status bar. Outer terminal titles keep their existing
-configuration until claude-tabstatus sets them: its status for the attached session,
-then `@cctab_label`, which dalftui sets to the SSH launcher's `username@host-alias`
-or else tmux's short host name.
+These labels affect tmux's status bar. The outer terminal title shows the SSH
+launcher's `username@host-alias`, including for shell-only sessions and after
+reattaching. Local sessions use the active pane's prompt/application title.
+When claude-tabstatus takes over, it adds its status for the attached session,
+then `@cctab_label`, which uses the SSH label or else tmux's short host name.
+Reload preserves claude-tabstatus's title format. Personal title settings in
+`~/.config/tmux/local.conf` take precedence.
 
 Color support is chosen for each attached terminal in every profile, including
 over SSH. `xterm-256color` alone does not imply 24-bit color: older Terminal.app
