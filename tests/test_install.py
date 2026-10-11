@@ -646,7 +646,9 @@ class ServerInstallationTests(DisposableSetup):
         self.assertIn('SELECT / COPY / PASTE', content)
         self.assertIn('Ctrl+B → z to zoom', content)
         self.assertIn('in Windows Terminal, select before', content)
-        self.assertIn('Ctrl+B → Page Up, then Shift+drag', content)
+        self.assertIn('Ctrl+B → Page Up, then drag to select', content)
+        self.assertIn('Click+drag', content)
+        self.assertNotIn('drag shows a hint', content)
         self.assertNotIn('Shift+Page Up', content)
         self.assertNotIn('Shift+Insert', content)
         self.assertNotIn('Copy selection / paste using your local terminal', content)
@@ -681,21 +683,6 @@ class ServerTmuxTests(TmuxFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('LIVE TMUX BINDINGS', result.stdout)
         self.assertNotIn('Cannot read', result.stdout)
-
-    def test_selection_uses_terminal_and_clipboard_writes_are_allowed(self):
-        self.start()
-        self.do_reload()
-        self.do_reload()
-        self.assertEqual(self.tmux('show-options', '-sv', 'set-clipboard'), 'on')
-        self.assertIn('#e5e7eb', self.tmux('show-options', '-gv', 'mode-style'))
-        root = {shlex.split(line)[3]: line
-                for line in self.tmux('list-keys', '-T', 'root').splitlines()}
-        self.assertIn('send-keys -M', root['MouseDrag1Pane'])
-        self.assertIn('Hold Shift', root['MouseDrag1Pane'])
-        self.assertNotIn('copy-mode -M', root['MouseDrag1Pane'])
-        for key in ('DoubleClick1Pane', 'TripleClick1Pane'):
-            self.assertIn('send-keys -M', root[key])
-            self.assertNotIn('copy-pipe', root[key])
 
     def test_switching_modes_removes_and_restores_the_desktop_picker(self):
         self.start()
@@ -840,12 +827,12 @@ class MacTmuxTests(TmuxFixture):
         self.assertNotIn('F2', prefix)
         self.assertIn('bin/shortcuts.py --tmux-only', prefix['F1'])
         self.assertFalse(set(removed) & set(root))
-        self.assertIn('Hold Fn', root['MouseDrag1Pane'])
+        self.assertIn('copy-mode -M', root['MouseDrag1Pane'])
         self.install(profile='server')
         self.do_reload()
         self.assertEqual(self.tmux('show-options', '-sv', 'copy-command'), '')
         self.assertEqual(self.tmux('show-options', '-sv', 'terminal-overrides[100]'), '')
-        self.assertIn('Hold Shift', self.keys('root')['MouseDrag1Pane'])
+        self.assertEqual(self.keys('root')['MouseDrag1Pane'], root['MouseDrag1Pane'])
 
 
 class UninstallTests(DisposableSetup):

@@ -76,11 +76,11 @@ def render(tmux_only=False):
             ("Esc", "Leave history and return to the application"),
         ],
         "Select / copy / paste": [
-            ("Shift+drag", "Select text in kitty or Windows Terminal, locally or over SSH"),
+            ("Click+drag", "Select in tmux, locally or over SSH; drag at the pane edge to scroll history; release to copy"),
             ("Ctrl+Shift+C / Ctrl+Shift+V", "Copy selection / paste; in Windows Terminal, select before copying"),
-            ("Split panes", "Ctrl+B → z to zoom, Shift+drag, then Ctrl+B → z to restore"),
-            ("Text in history", "Scroll with the wheel or Shift+Page Up, then Shift+drag"),
-            ("Plain drag / double-click", "Does not select in shells (drag shows a hint); mouse apps such as htop receive it"),
+            ("Shift+drag", "Select visible text in the terminal; Ctrl+B → z to zoom before selecting across split panes"),
+            ("Text in history", "Wheel or Shift+Page Up, then drag to select"),
+            ("Double-click / triple-click", "Copy a word / line; mouse apps such as htop receive their own gestures"),
         ],
         "kitty terminal": [
             ("Ctrl+Alt+1-8 / 9 / 0", "Go to kitty tab 1-8 / last tab / list all tabs; on AZERTY, Ctrl+Alt+& to à without Shift"),
@@ -108,18 +108,16 @@ def render(tmux_only=False):
     }
     if tmux_only:
         groups["History / search"][0] = ("Ctrl+B → Page Up / [", "Open tmux history")
-        groups["Select / copy / paste"][3] = ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then Shift+drag")
+        groups["Select / copy / paste"][3] = ("Text in history", "Wheel or Ctrl+B → Page Up, then drag to select")
         del groups["kitty terminal"]
         if tmux_profile() == "macos":
             groups["SSH / servers"][0] = ("Ctrl+B → h", "Choose a host tagged dalftui; open a new Terminal.app or iTerm2 window with remote tmux")
         else:
             del groups["SSH / servers"]
     if tmux_only and sys.platform == "darwin":
-        groups["Select / copy / paste"][:4] = [
-            ("Fn+drag / Option+drag", "Select text in Terminal.app / iTerm2"),
+        groups["Select / copy / paste"][1:3] = [
             ("Cmd+C / Cmd+V", "Copy selection / paste"),
-            ("Split panes", "Ctrl+B → z to zoom, select, then Ctrl+B → z to restore"),
-            ("Text in history", "Scroll with the wheel or Ctrl+B → Page Up, then select"),
+            ("Fn+drag / Option+drag", "Select visible text in Terminal.app / iTerm2; Ctrl+B → z to zoom split panes"),
         ]
         # Apple keyboards send F1/F3 with Fn unless set to standard function keys.
         groups["Session / help"][0] = ("Ctrl+B → Fn+F1", "Open this guide")

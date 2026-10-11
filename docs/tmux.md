@@ -20,23 +20,30 @@ bindings. The terminal font needs glyphs for the rounded Powerline caps (`` a
 
 ## Selecting and copying
 
-Selection works the same way in kitty and Windows Terminal, locally or over
-SSH, whether the pane runs a shell or a mouse-aware program:
+In tmux shells, the same mouse gestures work locally and over SSH:
 
-- **Shift+drag** selects text; **Ctrl+Shift+C** copies and **Ctrl+Shift+V** pastes.
-- **Split panes:** a terminal selection crosses pane borders. Press **Ctrl+B, then z**
-  to zoom the pane, select, then **Ctrl+B, then z** again to restore the layout.
-- **Text in history:** scroll with the mouse wheel, **Shift+Page Up** in kitty,
-  or **Ctrl+B, then Page Up**, then Shift+drag.
+- **Click and drag** selects text in the pane. Keep the button held and drag to
+  the top or bottom edge to scroll through tmux history while selecting.
+  Releasing copies the text and returns to the live pane.
+- **Double-click / triple-click** copies a word / line.
+- **Text in history:** scroll with the mouse wheel, **Shift+Page Up**,
+  or **Ctrl+B, then Page Up**, then drag to select.
 
-On macOS, hold Fn while dragging in Terminal.app or Option in iTerm2, then
-press Cmd+C; tmux copies go to the clipboard through `pbcopy`.
+Programs that use the mouse, such as htop or editors, still receive drags and
+clicks. The wheel may also go to an application using the alternate screen;
+**Ctrl+B, then Page Up** opens tmux history directly. tmux can only select text
+it has retained; an application's own history may need its own scroll controls.
 
-A plain drag in a shell only shows a reminder to hold Shift, and a plain double-
-or triple-click no longer selects a word or line; hold Shift for those too.
-Programs that use the mouse, such as htop or editors, still receive drags and clicks. In Windows
-Terminal, select before pressing Ctrl+Shift+C: without a selection the key may
-reach the pane as Ctrl+C.
+For terminal-native selection, hold **Shift** while dragging in kitty or Windows
+Terminal, then use **Ctrl+Shift+C** to copy. This selects the currently displayed
+text and cannot scroll through tmux history. A terminal selection crosses split
+pane borders: **Ctrl+B, then z** zooms the pane; press it again to restore the
+layout. In Windows Terminal, select before copying, or Ctrl+Shift+C may reach
+the pane as Ctrl+C. **Ctrl+Shift+V** pastes from the desktop clipboard.
+
+On macOS, terminal-native selection uses Fn in Terminal.app or Option in iTerm2,
+then Cmd+C / Cmd+V. Local macOS tmux copies use `pbcopy`; remote copies need a
+terminal with OSC 52 support, which Terminal.app does not provide.
 
 dalftui adds no terminal copy bindings and relies on kitty and Windows
 Terminal defaults. dalftui's kitty settings also copy selections automatically; Windows
@@ -46,8 +53,10 @@ clipboard with OSC 52. They cannot read the desktop clipboard, but an OSC 52
 query returns tmux's most recent paste buffer: text copied in tmux history or
 set by another pane. Override it in
 `~/.config/tmux/local.conf`, for example with `set -s set-clipboard off`.
-Reloading only re-sources the configuration: if a later version removes these
-root mouse bindings, restart the tmux server to drop them.
+After updating the checkout on each host, run `./bin/reload` there. Reloading
+replaces the earlier selection hints with these bindings while keeping sessions
+and running programs. Personal bindings in `~/.config/tmux/local.conf` still
+take precedence.
 
 ## Session policy
 
@@ -70,9 +79,11 @@ remote **Ctrl+B, then F3** integration. SSH windows skip the local tmux
 startup and apply the policy directly on the server.
 Installing dalftui locally does not deploy its tmux configuration to remote hosts.
 Install `--server` on each server where you want the shared configuration.
-Without it, remote tmux uses the server's existing configuration and bindings. Shift+drag
-selection works either way; the plain-drag reminder and OSC 52 clipboard writes
-need the shared configuration.
+Without it, remote tmux uses the server's existing configuration and bindings.
+Plain dragging through tmux history needs mouse mode and selection bindings on
+the remote host. Clipboard copying also needs working OSC 52 support in tmux and
+the desktop terminal. Installing or updating dalftui locally does not update the
+remote host's configuration.
 
 ## Theme and claude-tabstatus
 

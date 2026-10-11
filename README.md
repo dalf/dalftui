@@ -113,8 +113,11 @@ Select, copy, paste:
 - **Windows Terminal:** `Shift`+drag, then `Ctrl+Shift+C` (select first, or it
   may reach the pane as `Ctrl+C`); `Ctrl+Shift+V` pastes.
 - **macOS:** `Fn`+drag (Terminal.app) or `Option`+drag (iTerm2), then `Cmd+C` / `Cmd+V`.
-- **tmux:** a plain drag in a shell only shows a hint; mouse programs such as
-  htop still receive it. To select inside one split pane, zoom it first with `Ctrl+B` `z`.
+- **tmux, locally or over SSH:** click and drag selects within the pane; keep
+  dragging at the top or bottom edge to select through history. Release to copy.
+  Double-click / triple-click copies a word / line. Mouse programs such as htop
+  still receive their own gestures; use the terminal selection keys above to
+  bypass them. For terminal selection inside one split pane, zoom it with `Ctrl+B` `z`.
 
 The setup also provides rounded tmux tabs, Git-aware titles, scrollback
 search, and Claude Code status circles from
@@ -162,9 +165,9 @@ integration tests, and GitHub Actions.
   directly from it without a pip installation. Installed links and configuration
   loaders point back to the checkout. Many shortcuts use `uv run --no-project`
   to run a suitable Python. Keep the checkout at a stable path.
-- **Mouse selection is opinionated.** A plain drag in a shell displays a hint
-  (over SSH, only with dalftui on the server); Shift+drag selects text on Linux
-  and Windows.
+- **Remote mouse selection uses the server's tmux configuration.** With the
+  shared configuration, plain dragging selects through history. Updating the
+  local checkout does not update servers; update and reload each remote checkout.
 - **Startup avoids automatically sharing an occupied session.** With no tmux
   session, it creates one. With one detached session, it reattaches. With one
   attached session, it creates another. With several, it asks which to use.
