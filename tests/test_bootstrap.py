@@ -1,5 +1,7 @@
 """Test the bootstrap with recorded commands instead of dnf, apt, sudo or the network."""
 from contextlib import redirect_stdout
+import hashlib
+import http.client
 import io
 import json
 import os
@@ -425,6 +427,94 @@ class UserToolTests(unittest.TestCase):
                 run = self.run_step(installed=installed, dry_run=True)
                 self.assertEqual(run.commands, [])
                 self.assertEqual(len(run.summary[category]), 1)
+
+
+class TabstatusTests(unittest.TestCase):
+    """claude-tabstatus: the pinned release, checked against its SHA-256, then `tabstatus install`."""
+    DATA = b'tabstatus binary'
+    target = None  # The installed copy in the latest run_step's home.
+
+    def run_step(self, *, version=None, dry_run=False, data=DATA, download=None, install=0, system='linux',
+                 machine='x86_64'):
+        directory = tempfile.TemporaryDirectory()  # A new home each time.
+        self.addCleanup(directory.cleanup)
+        self.target = Path(directory.name) / '.local/bin/tabstatus'
+        if version:
+            self.target.parent.mkdir(parents=True)
+            self.target.write_bytes(b'old')
+        run = FakeBootstrap({}, dry_run=dry_run)
+        wired = []
+
+        def record(command, **_kwargs):
+            run.commands.append(command)
+            wired.append(Path(command[0]).read_bytes() == data and os.access(command[0], os.X_OK))
+            return done(command, install)
+        assets = {'posix': ('asset', hashlib.sha256(self.DATA).hexdigest())}
+        with patch.object(bootstrap.Path, 'home', return_value=Path(directory.name)), \
+                patch.object(bootstrap.sys, 'platform', system), \
+                patch.object(bootstrap.platform, 'machine', return_value=machine), \
+                patch.object(bootstrap, 'TABSTATUS_ASSETS', assets), \
+                patch.object(bootstrap.urllib.request, 'urlopen', side_effect=download,
+                             return_value=io.BytesIO(data)) as urlopen, \
+                patch.object(run, 'query', return_value=done([], stdout=f'tabstatus {version} (x86_64)\n')), \
+                patch.object(run, 'run', side_effect=record):
+            quietly(run.tabstatus)
+        self.assertEqual(wired, [True] * len(run.commands))
+        self.assertEqual([path.name for path in self.target.parent.glob('.tabstatus-*')], [])
+        return run, urlopen
+
+    def test_missing_is_downloaded_checked_and_wired(self):
+        run, urlopen = self.run_step()
+        self.assertEqual(urlopen.call_args.args[0],
+                         f'https://github.com/dalf/claude-tabstatus/releases/download/{bootstrap.TABSTATUS_VERSION}/asset')
+        self.assertEqual(run.commands[0][1:], ['install'])
+        self.assertEqual(self.target.read_bytes(), self.DATA)
+        self.assertEqual(run.summary['installed'], ['claude-tabstatus'])
+
+    def test_older_version_is_upgraded(self):
+        run, _ = self.run_step(version='0.1.0')
+        self.assertEqual(self.target.read_bytes(), self.DATA)
+        self.assertEqual(run.summary['upgraded'], [f'claude-tabstatus (0.1.0 -> {bootstrap.TABSTATUS_VERSION})'])
+
+    def test_pinned_version_is_skipped(self):
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                run, urlopen = self.run_step(version=bootstrap.TABSTATUS_VERSION, dry_run=dry_run)
+                urlopen.assert_not_called()
+                self.assertEqual(run.commands, [])
+                self.assertEqual(run.summary['skipped'], ['claude-tabstatus'])
+
+    def test_dry_run_downloads_nothing(self):
+        for version, category in ((None, 'installed'), ('0.1.0', 'upgraded')):
+            with self.subTest(version=version):
+                run, urlopen = self.run_step(version=version, dry_run=True)
+                urlopen.assert_not_called()
+                self.assertEqual(run.commands, [])
+                self.assertEqual(run.summary[category], ['claude-tabstatus'])
+
+    def test_failures_keep_the_installed_copy(self):
+        for kwargs, entry in (({'data': b'tampered'}, 'checksum mismatch'),
+                              ({'download': OSError('offline')}, 'download'),
+                              ({'download': http.client.IncompleteRead(b'')}, 'download'),
+                              ({'install': 1}, 'tabstatus install')):
+            with self.subTest(entry=entry):
+                run, _ = self.run_step(version='0.1.0', **kwargs)
+                self.assertEqual(self.target.read_bytes(), b'old')
+                self.assertEqual(run.commands, [[run.commands[0][0], 'install']] if 'install' in kwargs else [])
+                self.assertEqual(run.summary['failed'], [f'claude-tabstatus ({entry})'])
+
+    def test_a_file_error_fails_only_this_step(self):
+        with patch.object(bootstrap.os, 'replace', side_effect=PermissionError('in use')):
+            run, _ = self.run_step(version='0.1.0')
+        self.assertEqual(self.target.read_bytes(), b'old')
+        self.assertEqual(run.summary['failed'], [f'claude-tabstatus (could not install into {self.target.parent})'])
+
+    def test_macos_and_other_architectures_are_skipped(self):
+        for system, machine, reason in (('darwin', 'arm64', 'no macOS build'), ('linux', 'aarch64', 'x86-64 only')):
+            with self.subTest(system=system):
+                run, urlopen = self.run_step(system=system, machine=machine)
+                urlopen.assert_not_called()
+                self.assertEqual(run.summary['skipped'], [f'claude-tabstatus ({reason})'])
 
 
 # Each repository step: method, summary name, file stem, rpm key, apt key and keyring.

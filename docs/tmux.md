@@ -130,13 +130,11 @@ color capabilities after reload; fresh clients use the updated capabilities
 immediately. Detaching keeps sessions, running programs and other clients
 running, so no tmux server restart is needed.
 
-[claude-tabstatus](https://github.com/dalf/claude-tabstatus) is an optional,
-separate project. Existing installations continue to supply repository/branch
-labels and status through pane titles and `@cctab_window_strip`. dalftui preserves
-that integration and does not change Claude hooks. Without it, shell titles and
+[claude-tabstatus](https://github.com/dalf/claude-tabstatus) is a separate
+project that bootstrap installs, including with `--server`; its `tabstatus install`
+wires the Claude hooks. It supplies repository/branch labels and status through
+pane titles and `@cctab_window_strip`. Without it, shell titles and
 the Git/directory-aware program labels above are displayed.
-Install claude-tabstatus separately on the server too if you want its status
-indicators for Claude running there.
 
 The tab design keeps the optional claude-tabstatus integration: the active
 light pill uses dark status circles, and inactive dark pills use light circles.

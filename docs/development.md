@@ -138,6 +138,14 @@ Keep `config/`, `vendor/`, and the flat test layout. Apply these rules when addi
 or moving files; they do not call for renaming functions, classes, variables,
 already-clear files, or adding speculative platform directories.
 
+## Bumping claude-tabstatus
+
+Bootstrap installs one pinned [claude-tabstatus](https://github.com/dalf/claude-tabstatus)
+release. To move to a new one, edit `TABSTATUS_VERSION` and the two SHA-256 values in
+`TABSTATUS_ASSETS` at the top of [dalftui/linux/bootstrap.py](../dalftui/linux/bootstrap.py).
+Take the hashes from files you downloaded and checked, for example with `sha256sum`,
+not from the release's `SHA256SUMS` alone. The next bootstrap run upgrades each machine.
+
 ## Repository tasks
 
 [mise](https://mise.jdx.dev/getting-started.html) 2026.7.5+ runs the commands

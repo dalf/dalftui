@@ -172,9 +172,13 @@ Each run, in order (a failed step does not stop the next ones):
    into `~/.local/bin` when they are missing, otherwise runs `oh-my-posh upgrade`,
    `mise self-update --yes --no-plugins` and `uv self update`. A copy that the user cannot write,
    such as an rpm, is left alone.
-5. Runs `./install` (with `--server` when given; otherwise the existing
+5. On x86-64, downloads the pinned [claude-tabstatus](https://github.com/dalf/claude-tabstatus)
+   release when `~/.local/bin/tabstatus version` reports another version or none,
+   checks its SHA-256, runs `tabstatus install` to wire it into Claude Code, then
+   places it in `~/.local/bin`.
+6. Runs `./install` (with `--server` when given; otherwise the existing
    profile, or desktop on a new machine), which also reloads.
-6. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
+7. Prints a summary (`Installed`, `Upgraded`, `Skipped`, `Failed`) and exits
    with 1 when anything failed.
 
 The package lists have one package per line; `#` starts a comment. The
@@ -212,7 +216,9 @@ missing, runs `scoop update`, installs each missing app with its own
 `scoop install`, and runs `scoop update APP` for each listed app that its bucket
 has newer; other apps are not updated. Installed versions, not Scoop's exit
 status, decide the result. It then sets up OpenSSH, checks Windows Terminal,
-runs `install.cmd`, and prints the same summary. The log is
+installs claude-tabstatus as on Linux into `%USERPROFILE%\.local\bin\tabstatus.exe`
+(not added to `PATH`: run it as `~\.local\bin\tabstatus.exe doctor`), runs
+`install.cmd`, and prints the same summary. The log is
 `%LOCALAPPDATA%\dalftui\bootstrap.log`. A dry run changes nothing, compares
 with the buckets as of the last `scoop update`, and does not run `install.cmd`.
 
@@ -266,7 +272,7 @@ Each run updates the checkout as on Linux, runs `brew update`, then one
 upgrades the outdated listed ones; other formulae are not upgraded. VS Code
 updates itself, so Homebrew leaves it alone. Installed versions decide the
 summary, which is the same as on Linux, and so is the log. A dry run changes
-nothing and compares with `brew outdated` as of the last `brew update`. A root
+nothing and compares with `brew outdated` as of the last `brew update`. claude-tabstatus is skipped: it has no macOS build. A root
 run and `--server` are refused.
 
 The Brewfile also installs the VS Code cask, which provides the `code` command,

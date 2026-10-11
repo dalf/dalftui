@@ -110,8 +110,8 @@ Select, copy, paste:
   htop still receive it. To select inside one split pane, zoom it first with `Ctrl+B` `z`.
 
 The setup also provides rounded tmux tabs, Git-aware titles, scrollback
-search, and optional status circles from the separately installed
-claude-tabstatus project. Ops mode and checks: [docs/ops-mode.md](docs/ops-mode.md).
+search, and Claude Code status circles from
+[claude-tabstatus](https://github.com/dalf/claude-tabstatus), which bootstrap installs. Ops mode and checks: [docs/ops-mode.md](docs/ops-mode.md).
 
 The Oh My Posh prompt is shared by bash, zsh and PowerShell. It shows
 `user@host` only over SSH, the path, the Python environment, Git branch and
@@ -182,6 +182,7 @@ Bootstrap and installation also handle the following:
 - **Hack Nerd Font:** Oh My Posh, desktop only.
 - **GitHub CLI repository:** added on every machine, including `--server`.
 - **VS Code and DVC repositories:** added for desktop packages; DVC is x86-64 only.
+- **claude-tabstatus:** pinned release, checksum-verified, also with `--server`; x86-64 only.
 
 **Windows**
 
@@ -189,6 +190,7 @@ Bootstrap and installation also handle the following:
 - **OpenSSH:** Windows capability if missing; ssh-agent service configured.
 - **VC++ runtime:** Scoop download; elevated installer when needed.
 - **Hack Nerd Font:** Oh My Posh, if missing.
+- **claude-tabstatus:** pinned release, checksum-verified, in `%USERPROFILE%\.local\bin`.
 
 Install [Windows Terminal separately](#windows-10-or-11), then open it once.
 
@@ -264,7 +266,7 @@ cd ~/code/dalftui
 ```
 
 Bootstrap adds GitHub CLI's package repository, then installs or upgrades the listed
-packages, Oh My Posh, mise, and uv. Desktop mode also adds Microsoft's VS Code
+packages, Oh My Posh, mise, uv, and claude-tabstatus. Desktop mode also adds Microsoft's VS Code
 repository and, on x86-64, DVC's. Installation
 then configures kitty, tmux, the prompt, and installs Hack Nerd Font. Open a new
 kitty window afterward. Coming from Alacritty: see

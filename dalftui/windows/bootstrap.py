@@ -272,6 +272,8 @@ def bootstrap(*, dry_run=False, server=False, argv=()):
         run.git_ssh()
     with run.step('Windows Terminal'):
         run.terminal()
+    with run.step('Claude Code tab status (claude-tabstatus)'):
+        run.tabstatus()
     with run.step('Configuration (install.cmd)'):
         run.install_cmd()
     return run.report()

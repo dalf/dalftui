@@ -352,6 +352,22 @@ class OutputTests(ScoopTestCase):
                                             'from the Microsoft Store and open it once)\n')
 
 
+class TabstatusTests(unittest.TestCase):
+    def test_windows_keeps_the_exe_in_local_bin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / '.local/bin/tabstatus.exe'
+            target.parent.mkdir(parents=True)
+            target.touch()
+            run = FakeScoop(Path(directory) / 'scoop')
+            answer = done([], stdout=f'tabstatus {shared.TABSTATUS_VERSION} (x86_64-pc-windows-msvc)\n')
+            with patch.object(shared.Path, 'home', return_value=Path(directory)), patch.object(shared.os, 'name', 'nt'), \
+                    patch.object(shared.sys, 'platform', 'win32'), patch.object(run, 'query', return_value=answer) as query:
+                quietly(run.tabstatus)
+        query.assert_called_once_with([str(target), 'version'])
+        self.assertEqual(run.summary['skipped'], ['claude-tabstatus'])
+        self.assertTrue(shared.TABSTATUS_ASSETS['nt'][0].endswith('-windows-msvc.exe'))
+
+
 class StartTests(unittest.TestCase):
     def start(self, **kwargs):
         with patch.object(bootstrap, 'Scoop') as run, patch('sys.stderr', io.StringIO()) as error:
