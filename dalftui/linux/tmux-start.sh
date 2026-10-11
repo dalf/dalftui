@@ -8,8 +8,18 @@ if ! command -v tmux >/dev/null 2>&1; then
     exit 127
 fi
 
+# The SSH launcher sets dalftui_host_label; @cctab_label shows it in the terminal title.
+# Without one the session drops an earlier launch's label, so the title is this host.
+tmux_client() {
+    if [ -n "${dalftui_host_label:-}" ]; then
+        tmux "$@" \; set-option @dalftui_host "$dalftui_host_label"
+    else
+        tmux "$@" \; set-option -u @dalftui_host
+    fi
+}
+
 start_new_session() {
-    tmux new-session "$@"
+    tmux_client new-session "$@"
     exit $?
 }
 
@@ -39,7 +49,7 @@ fi
 
 if [ "$session_count" -eq 1 ]; then
     if [ "$only_attached" -eq 0 ]; then
-        tmux attach-session -t "$only_session"
+        tmux_client attach-session -t "$only_session"
         exit $?
     fi
     # tmux assigns the next numeric name. This keeps a second terminal independent.
@@ -65,7 +75,7 @@ while :; do
             ;;
         *)
             if tmux has-session -t "$selection" 2>/dev/null; then
-                tmux attach-session -t "$selection"
+                tmux_client attach-session -t "$selection"
                 exit $?
             fi
             printf 'No such tmux session: %s\n' "$selection" >&2

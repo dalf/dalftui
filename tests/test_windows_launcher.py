@@ -892,7 +892,7 @@ else:
               redirect_stdout(output)):
             self.assertEqual(picker.connect('vm-alias', 'tcp'), 0)
         isatty.assert_called_once_with()
-        command.assert_called_once_with('vm-alias', None, rgb=True)
+        command.assert_called_once_with('vm-alias', None, rgb=True, host_label='alice@vm-alias')
 
     def test_connect_without_remote_dalftui_never_starts_or_forwards_the_bridge(self):
         output = io.StringIO()
@@ -913,7 +913,7 @@ else:
         self.assertTrue(prepare.call_args.kwargs['check_installation'])
         run.assert_called_once()
         command = run.call_args.args[0]
-        self.assertEqual(command, picker.ssh_command('vm-alias'))
+        self.assertEqual(command, picker.ssh_command('vm-alias', host_label='alice@vm-alias'))
         self.assertNotIn('-R', command)
         self.assertNotIn('ExitOnForwardFailure=yes', command)
         for name in (vscode.SOCKET_ENV, vscode.TOKEN_ENV, 'TMUX', 'TMUX_PANE'):

@@ -19,6 +19,7 @@ import unittest
 from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture
+from test_tmux_start import UNLABELLED
 from dalftui import vscode
 from dalftui.linux import tmux_editor
 
@@ -305,11 +306,11 @@ class EditorTests(DisposableSetup):
         def local_ssh(args, **kwargs):
             return real_run(shlex.split(args[-1]), **kwargs, timeout=5)
 
-        for sessions, selection, expected in [('', '', ['new-session', '-A', '-s', '0']),
-                                              ('$5 0\n', '', ['attach-session', '-t', '$5']),
-                                              ('$5 1\n', '', ['new-session']),
+        for sessions, selection, expected in [('', '', ['new-session', '-A', '-s', '0', *UNLABELLED]),
+                                              ('$5 0\n', '', ['attach-session', '-t', '$5', *UNLABELLED]),
+                                              ('$5 1\n', '', ['new-session', *UNLABELLED]),
                                               ('$5 0\n$9 1\n', '$9\n',
-                                               ['attach-session', '-t', '$9'])]:
+                                               ['attach-session', '-t', '$9', *UNLABELLED])]:
             with self.subTest(sessions=sessions):
                 bridge = vscode.EditorBridge('server', self.editor_env)
                 bridge.local_socket = '/tmp/local.sock'

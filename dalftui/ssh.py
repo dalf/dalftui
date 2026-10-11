@@ -400,7 +400,8 @@ def terminal_supports_rgb(env):
     return bool(env.get('WT_SESSION')) or env.get('COLORTERM', '').lower() in ('truecolor', '24bit')
 
 
-def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None, rgb=False):
+def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None, rgb=False,
+                host_label=None):
     args = [*ssh_base(host, login), '-t']
     if bridge:
         # Keep the forwarding and its local bridge owned by this SSH window.
@@ -410,7 +411,7 @@ def ssh_command(host, login=None, bridge=None, *, mode='normal', check=None, rgb
         args += ['-R', bridge.forward_spec, '-o', 'ExitOnForwardFailure=yes']
     return [*args, '--', host,
             'sh -c ' + shlex.quote(remote_bootstrap.session_script(
-                bridge, mode=mode, check=check, rgb=rgb))]
+                bridge, mode=mode, check=check, rgb=rgb, host_label=host_label))]
 
 
 def connect(host, transport=None, *, mode='normal', check=None):
@@ -443,7 +444,8 @@ def connect(host, transport=None, *, mode='normal', check=None):
             from .windows import ssh as terminal
         else:
             from .linux import ssh_picker as terminal
-        terminal.set_terminal_title(f'{login or user}@{host.rsplit("@", 1)[-1]}')
+        options['host_label'] = f'{login or user}@{host.rsplit("@", 1)[-1]}'
+        terminal.set_terminal_title(options['host_label'])
         print(f'Connecting to {host} …', flush=True)
         destination = f'{login}@{host}' if login else host
         bridge = EditorBridge(destination, env, transport)

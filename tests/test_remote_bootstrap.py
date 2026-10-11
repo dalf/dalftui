@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from test_tmux_start import UNLABELLED
 import dalftui.linux.setup as setup
 from dalftui.vscode import EditorBridge
 
@@ -118,7 +119,7 @@ class SshAutoTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_rgb_hint_reaches_new_and_attached_clients_without_changing_credentials(self):
@@ -137,8 +138,8 @@ fi
 printf '%s\\n' "$hint" "$@" > "$TEST_COMMAND_LOG"
 printf '%s\\n' "${DALFTUI_EDITOR_SOCKET-unset}" "${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"
 ''')
-        for rows, expected in (('', ['new-session', '-A', '-s', '0']),
-                               ('$5 0\n', ['attach-session', '-t', '$5'])):
+        for rows, expected in (('', ['new-session', '-A', '-s', '0', *UNLABELLED]),
+                               ('$5 0\n', ['attach-session', '-t', '$5', *UNLABELLED])):
             with self.subTest(rows=rows):
                 result = self.remote_command(rgb=True, TEST_SESSION_ROWS=rows)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -152,7 +153,7 @@ printf '%s\\n' "${DALFTUI_EDITOR_SOCKET-unset}" "${DALFTUI_EDITOR_TOKEN-unset}" 
         result = self.remote_command(rgb=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout + result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_installed_picker_dispatches_and_embeds_its_copied_canonical_policy(self):
@@ -205,7 +206,9 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         self.assertEqual(len(commands), 3)
         for command in commands:
             self.assertEqual(command[command.index('--') + 1], host)
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.log.read_text().splitlines(),
+                         ['new-session', '-A', '-s', '0', ';', 'set-option', '@dalftui_host',
+                          "alice@prod-é;$(probe)'"])
         self.assertEqual(policy_log.read_text(), 'copied-policy\n')
         self.assertFalse(policy.exists())
         self.assertFalse((remote_home / '.config/dalftui').exists())
@@ -250,7 +253,7 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_unversioned_remote_dalftui_suggests_github_update_and_keeps_tmux(self):
@@ -318,7 +321,13 @@ class TerminalColorTests(unittest.TestCase):
                            return_value=subprocess.CompletedProcess(['ssh'], 0)),
               redirect_stdout(output)):
             self.assertEqual(picker.connect('server'), 0)
-        command.assert_called_once_with('server', None, rgb=True)
+        command.assert_called_once_with('server', None, rgb=True, host_label='alice@server')
+
+    def test_host_label_with_a_final_semicolon_is_not_passed_to_tmux(self):
+        script = picker.ssh_command('server', host_label='alice@prod;')[-1]
+        self.assertNotIn('dalftui_host_label=', script)
+        self.assertIn('dalftui_host_label=',
+                      picker.ssh_command('server', host_label='alice@prod')[-1])
 
 
 if __name__ == '__main__':

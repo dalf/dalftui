@@ -231,7 +231,9 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 command_log = self.directory / (name + '-tmux-commands')
                 self.env['TEST_SYSTEM_REPORT'] = str(report)
                 self.env['TEST_TMUX_COMMANDS'] = str(command_log)
-                script = remote_bootstrap.session_script(bridge, mode=mode, check=check, rgb=rgb)
+                # Current connects always label the session for the terminal title.
+                script = remote_bootstrap.session_script(bridge, mode=mode, check=check, rgb=rgb,
+                                                         host_label='alice@historical-host')
                 self.assertNotIn(bridge.token, script)
                 result = self.run_script(script)
                 self.assertEqual(result.returncode, 0, result.stderr)

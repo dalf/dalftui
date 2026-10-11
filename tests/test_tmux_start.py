@@ -10,6 +10,8 @@ import unittest
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 STARTER = ROOT / 'bin/tmux-start.sh'
+# Without an SSH host label the session drops any label an earlier launch left.
+UNLABELLED = [';', 'set-option', '-u', '@dalftui_host']
 
 
 @unittest.skipIf(sys.platform == 'win32', 'The tmux entrypoint runs in a POSIX shell')
@@ -54,28 +56,42 @@ class TmuxStartTests(unittest.TestCase):
     def test_no_session_creates_zero(self):
         result = self.run_starter('')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['new-session', '-A', '-s', '0'])
+        self.assertEqual(self.command(), ['new-session', '-A', '-s', '0', *UNLABELLED])
 
     def test_one_detached_session_attaches_it(self):
         result = self.run_starter('$5 0\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5'])
+        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
 
     def test_one_attached_session_creates_an_independent_session(self):
         result = self.run_starter('$5 1\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['new-session'])
+        self.assertEqual(self.command(), ['new-session', *UNLABELLED])
 
     def test_multiple_sessions_default_to_new(self):
         result = self.run_starter('$5 0\n$9 1\n', '\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['new-session'])
+        self.assertEqual(self.command(), ['new-session', *UNLABELLED])
         self.assertIn('[s] shell', result.stdout)
 
     def test_multiple_sessions_can_attach_by_id(self):
         result = self.run_starter('$5 0\n$9 1\n', '$5\n', '$5')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5'])
+        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
+
+    def test_ssh_host_label_is_set_on_the_new_or_attached_session(self):
+        label = "alice@prod-é;$x #{host}"
+        suffix = [';', 'set-option', '@dalftui_host', label]
+        self.env['dalftui_host_label'] = label
+        for rows, selection, valid, expected in (
+                ('', '', '', ['new-session', '-A', '-s', '0']),
+                ('$5 0\n', '', '', ['attach-session', '-t', '$5']),
+                ('$5 1\n', '', '', ['new-session']),
+                ('$5 0\n$9 1\n', '$5\n', '$5', ['attach-session', '-t', '$5'])):
+            with self.subTest(rows=rows):
+                result = self.run_starter(rows, selection, valid)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), expected + suffix)
 
     def test_multiple_sessions_can_start_a_plain_login_shell(self):
         result = self.run_starter('$5 0\n$9 1\n', 's\n')
@@ -113,13 +129,13 @@ class TmuxStartTests(unittest.TestCase):
                 self.assertEqual(result.stdout + result.stderr, '')
                 self.assertEqual(argument_log.read_bytes().split(b'\0')[:-1],
                                  [argument.encode('utf-8') for argument in arguments])
-                self.assertEqual(self.command(), ['new-session', '-A', '-s', '0'])
+                self.assertEqual(self.command(), ['new-session', '-A', '-s', '0', *UNLABELLED])
 
     def test_entrypoint_propagates_attach_and_plain_shell_status(self):
         self.env['TEST_TMUX_STATUS'] = '17'
         result = self.run_starter('$5 0\n')
         self.assertEqual(result.returncode, 17, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5'])
+        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
         self.env['TEST_SHELL_STATUS'] = '23'
         result = self.run_starter('$5 0\n$9 1\n', 's\n')
         self.assertEqual(result.returncode, 23, result.stderr)
