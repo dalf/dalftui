@@ -92,7 +92,7 @@ kitty keys (Linux desktop), one kitty tab per host:
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+Alt+1`–`8` / `9` | Go to tab 1–8 / last tab; on AZERTY, `Ctrl+Alt+&` to `ç` without `Shift` |
+| `Ctrl+Alt+1`–`8` / `9` / `0` | Go to tab 1–8 / last tab / list all tabs; on AZERTY, `Ctrl+Alt+&` to `à` without `Shift` |
 | `Ctrl+Shift+Right` / `Left` | Next / previous tab |
 | `Ctrl+Shift+Q` / `W` | Close the tab without confirmation; tmux keeps running |
 | `Ctrl+Shift+E`, `Ctrl+Shift`+click | Open a URL shown on screen |
