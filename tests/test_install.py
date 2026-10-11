@@ -18,6 +18,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from test_tmux_start import UNLABELLED
 import dalftui.linux.setup as setup
 import dalftui.linux.shortcuts as shortcuts
 from dalftui.linux import tmux_editor
@@ -184,7 +185,7 @@ class InstallationTests(DisposableSetup):
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(command_log.read_text().splitlines(),
-                         ['new-session', '-A', '-s', '0'])
+                         ['new-session', '-A', '-s', '0', *UNLABELLED])
 
     def test_dry_run_does_not_create_files_or_backups(self):
         self.paths.tmux.write_text('set -g mouse off\n')
@@ -532,6 +533,17 @@ class TmuxTests(TmuxFixture):
         root_output = self.tmux('display-message', '-p',
                                 tmux_editor.PATH_OUTPUT_PREFIX + '#{@dalftui_root}')
         self.assertEqual(Path(tmux_editor.decode_path_output(root_output)).resolve(), self.repo)
+
+    def test_title_label_shows_the_ssh_host_literally_or_the_short_host_name(self):
+        self.start()
+        self.do_reload()
+        self.tmux('new-session', '-d', '-s', 'remote', 'sleep 600')
+        self.tmux('set-option', '-t', 'remote', '@dalftui_host', 'alice@prod#{host},#[x]')
+        label = '#{E:@cctab_label}'
+        self.assertEqual(self.tmux('display-message', '-p', '-t', 'remote', label),
+                         'alice@prod#{host},#[x]')
+        self.assertEqual(self.tmux('display-message', '-p', '-t', 'verify', label),
+                         self.tmux('display-message', '-p', '#{host_short}'))
 
     def test_runtime_update_and_local_override_require_no_install(self):
         self.start()

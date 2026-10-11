@@ -107,7 +107,10 @@ configuration, is used automatically. Otherwise the new window or tab asks for t
 login. A destination such as `user@host` already provides its username.
 On Linux, macOS and Windows, the launcher then sets the window or tab title to
 `username@host-alias`, even when remote tmux supplies no title. Remote applications
-can still update it; on Linux this is the kitty tab title.
+can still update it; on Linux this is the kitty tab title. Once Claude runs there with
+claude-tabstatus, the title shows its status followed by the same `username@host-alias`;
+the remote host needs dalftui's current tmux configuration and a claude-tabstatus
+version that supports `@cctab_label`.
 Redirected command output contains no title escape sequences.
 
 ## Windows: `dssh`

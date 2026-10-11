@@ -105,6 +105,7 @@ ops_failed() {
 }
 ops_shell=$(tmux split-window -v -l 45% -t "$ops_monitor" -P -F '#{pane_id}' sh -c "$ops_shell_command") || ops_failed
 ops_journal=$(tmux split-window -h -l 50% -t "$ops_monitor" -P -F '#{pane_id}' sh -c "$ops_journal_command") || ops_failed
+[ -z "${dalftui_host_label:-}" ] || tmux set-option -t "$ops_session" @dalftui_host "$dalftui_host_label"
 tmux set-option -w -t "$ops_monitor" automatic-rename off
 tmux set-option -w -t "$ops_monitor" pane-border-status top
 tmux set-option -w -t "$ops_monitor" pane-border-format '#{pane_title}'

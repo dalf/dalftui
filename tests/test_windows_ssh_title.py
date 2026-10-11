@@ -111,7 +111,7 @@ class SshTitleTests(unittest.TestCase):
                         run.assert_called_once()
                         self.assertEqual(run.call_args.args[0], command.return_value)
                         expected = (host, login, bridge.return_value) if prepared else (host, login)
-                        command.assert_called_once_with(*expected)
+                        command.assert_called_once_with(*expected, host_label=title)
                     lookup.assert_called_once_with(host)
                     set_title.assert_called_once_with(title)
                     if login:

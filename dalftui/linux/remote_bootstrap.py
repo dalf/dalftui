@@ -82,7 +82,7 @@ def cleanup_script(bridge):
     return _editor_resources(bridge) + '\ncleanup_editor_resources\n'
 
 
-def session_script(bridge=None, *, mode='normal', check=None, rgb=False):
+def session_script(bridge=None, *, mode='normal', check=None, rgb=False, host_label=None):
     """Consume credentials and run the embedded policy in the same shell.
 
     Keep its exit/signal traps active through the policy and silent login-shell
@@ -122,6 +122,10 @@ editor_file_valid "$editor_token" || editor_credentials_error
               Path(__file__).resolve().with_name('tmux-start.sh').read_text(encoding='utf-8'))
     fallback_notice = ("    printf '%s\\n' 'tmux is unavailable; opening a shell.'\n"
                        if mode == 'ops' else '')
+    # tmux reads an argument's final ';' as a command separator, escaped differently
+    # by version; such a label is skipped and the title shows the remote host name.
+    if host_label and not host_label.endswith(';'):
+        policy = f'dalftui_host_label={shlex.quote(host_label)}\n' + policy
     tmux_features = """# The hint belongs to this attachment, even when other clients share the server.
 # Older remote tmux versions without -T still run the ordinary session policy.
 if tmux -T RGB -V >/dev/null 2>&1; then

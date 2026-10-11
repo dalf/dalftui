@@ -135,6 +135,12 @@ elif sys.argv[1] == 'split-window':
             if '-t' in command:
                 self.assertIn(command[command.index('-t') + 1], ('$42', '%70', '%71', '%72'))
 
+    def test_ssh_host_label_is_set_only_on_the_new_ops_session(self):
+        label = "alice@prod-é;$x #{host}"
+        result = self.run_script(remote_bootstrap.session_script(mode='ops', host_label=label))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(['set-option', '-t', '$42', '@dalftui_host', label], self.commands())
+
     def test_pane_commands_fall_back_from_htop_and_report_journal_permission_errors(self):
         result = self.run_script(remote_bootstrap.session_script(mode='ops'))
         self.assertEqual(result.returncode, 0, result.stderr)
