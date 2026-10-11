@@ -234,6 +234,7 @@ class InstallationTests(DisposableSetup):
         with patch.object(shortcuts.subprocess, 'run', side_effect=FileNotFoundError('no test server')):
             content = shortcuts.render()
         self.assertIn('KITTY TERMINAL', content)
+        self.assertIn('Shift+Insert / Shift+middle click', content)
         self.assertIn('new kitty tab', content)
         self.assertIn('SELECT / COPY / PASTE', content)
         self.assertIn('Ctrl+B → z to zoom', content)
