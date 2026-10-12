@@ -65,13 +65,93 @@ take precedence.
 SSH windows use tmux when it is installed on the remote host. Otherwise they
 silently open a plain login shell. No remote dalftui installation is required
 for either case. Local kitty windows and SSH windows with tmux use the same
-session policy:
+session policy, which keeps one terminal per session: it never attaches a
+second terminal that mirrors a session already in use.
 
-- No sessions: create session `0`.
-- One detached session: attach to it, whatever its name.
-- One attached session: create a new independent session with the next numeric name.
-- Multiple sessions: list their IDs, names, and client counts. Enter a session ID to
-  attach, `n` or Enter for a new session, `s` for a plain login shell, or `q` to cancel.
+| Sessions on the host | SSH window | Local kitty window |
+| --- | --- | --- |
+| None | Create session `0` | Same |
+| Exactly one, detached | Attach to it, whatever its name | Same |
+| Exactly one, attached | Show the session list | Create a new independent session with the next numeric name |
+| Two or more | Show the session list | Same |
+
+Every attachment uses `attach -d`, so a terminal that attaches detaches any other
+client of that session; two windows connecting at the same moment cannot end up
+sharing one. `dalftui-ops-*` sessions never count (see [Ops mode](ops-mode.md#ops-mode)).
+
+Over SSH, an attached session may belong to a live tab or to a connection that
+died while its laptop slept: the server keeps counting that client until the
+connection times out. tmux cannot tell them apart, so the launcher asks:
+
+```text
+tmux sessions on vm:
+  1  0     attached  pts/4 from 10.8.0.2, connected 3h05m ago, last key 2h13m ago
+  2  work  detached
+  3  2     attached  pts/7 from 10.8.0.3, connected 20m ago, last key 12s ago
+[1-3] attach   [n] new session (default)   [q] cancel
+Choice [n]: 1
+Session 0 has a client. Take it over (its window closes)? [y/N]
+```
+
+- **A number** picks a session; with up to nine sessions, one keystroke is enough.
+  With more, type the number and press Enter.
+- **A detached session** is attached at once.
+- **An attached session** asks before a takeover; No (the default) returns to the
+  list, so a wrong key never closes a live tab. Yes detaches that session's other
+  clients, whose windows show *Another terminal took over this tmux session.*
+  and close, then attaches. Clients of other sessions are not affected.
+- **`n` or Enter** creates a new independent session. **`q` or Ctrl+C** cancels.
+- The tty, source address (from the client's own `SSH_CONNECTION`, or `local`),
+  connection time and time since its last key are information only. They never
+  choose or suggest a session: tabs from one desktop share an address, and an idle
+  live tab looks the same as a dead one.
+
+There is no shell-without-tmux choice here; the SSH picker's **F5** opens one.
+Without a terminal on standard input, the launcher prints an error and exits
+with status 1 instead of choosing; it never takes over a session unattended.
+There is no countdown for the same reason.
+
+The launcher alone cannot enforce one client per session: `choose-tree`,
+`switch-client`, a manual `tmux attach`, or an older desktop's launcher can still
+attach a second client. On hosts with dalftui's tmux configuration (any
+installation mode, after `./bin/reload`), tmux hooks enforce it: when a client
+attaches to a session or switches into it, that session's other clients are
+detached with the same *Another terminal took over this tmux session.* message.
+The newcomer always wins, so a dead client that still counts as attached never
+locks you out; when two clients arrive almost together, the later one wins.
+Clients of other sessions are never detached. Read-only clients
+(`attach -r`) are not special: they count, and they take over like any other.
+Only attaching and switching take over. With `detach-on-destroy off` (or
+`previous`/`next`), closing a session makes tmux move its clients into another
+session; a moved client that lands in a session another terminal is using is
+detached instead, with *Your tmux session closed, and the session tmux moved you
+to is in use by another terminal.* `detach-on-destroy no-detached` avoids that
+by moving only into a detached session.
+On tmux 3.2, which does not tell the hook which client arrived, the most
+recently active client keeps the session. Hosts without dalftui's configuration
+keep tmux's own behaviour.
+
+Server keepalives make the list rare. With OpenSSH's default
+`ClientAliveInterval 0`, a server keeps a slept laptop's connection, tmux client
+and forwarded agent socket until TCP gives up, which can take hours for an idle
+pane. Meanwhile its session counts as attached, and agent requests through the
+stale socket can hang. On servers you administer, consider adding to
+`/etc/ssh/sshd_config` (then reload sshd):
+
+```text
+ClientAliveInterval 60
+ClientAliveCountMax 5
+```
+
+sshd then drops a silent client after about five minutes, its session becomes
+detached and its [agent alias](#ssh-agent-in-tmux-sessions) goes away, so `git`
+fails at once instead of hanging, and the next connection reattaches without a
+question. The cost is
+that a sleep longer than that always ends the connection; tmux keeps the work
+and only the window is lost. On desktops, `ServerAliveInterval 60` in
+`~/.ssh/config` makes a dead window exit soon after waking instead of staying
+frozen, although it does not help the server notice the sleep. dalftui
+documents these settings but does not change SSH configuration.
 
 With remote tmux, **Ctrl+B, then d** detaches and closes the SSH window (after
 `dssh` typed at a PowerShell prompt, it returns to that prompt) while leaving its
@@ -86,6 +166,103 @@ Plain dragging through tmux history needs mouse mode and selection bindings on
 the remote host. Clipboard copying also needs working OSC 52 support in tmux and
 the desktop terminal. Installing or updating dalftui locally does not update the
 remote host's configuration.
+
+## SSH agent in tmux sessions
+
+A shell keeps the `SSH_AUTH_SOCK` it started with. With agent forwarding, each
+SSH connection gets a new socket path, so after a reconnect, or after moving
+from the laptop to another desktop, `git` in an existing pane would fail while a
+new pane works.
+
+On a Linux host where dalftui is installed and the tmux server has loaded its
+configuration, each session that the SSH launcher creates gets a private, stable
+*agent alias*: a symbolic link such as
+`$XDG_RUNTIME_DIR/dalftui-agent/<random key>`. Every shell in the session,
+including the first one, starts with `SSH_AUTH_SOCK` set to the alias, and the
+alias points at the forwarded agent of the client attached now:
+
+| Event | Alias |
+| --- | --- |
+| The launcher creates the session | Points at this connection's forwarded agent before the first shell starts |
+| A client takes the session over, attaches or switches into it | Replaced atomically with that client's agent |
+| The attached client detaches, disconnects or switches away | Removed |
+| The attached client has no forwarded agent (`ssh -a`, `ForwardAgent no`) | Absent; never borrowed from another client |
+| The session closes | Removed with its record |
+
+Existing shells and background jobs follow the attached desktop from their next
+agent connection; connections already open keep their agent. While the session
+is detached, new agent connections through the alias fail until a client
+reattaches. This is intended: a detached session has no desktop to ask.
+
+Details:
+
+- The key is random for each new session and is recorded in the session's
+  `@dalftui_agent_alias` option, so a tmux server restart or a second server
+  never reuses another session's alias.
+- The directory is `$XDG_RUNTIME_DIR/dalftui-agent`, or `/tmp/dalftui-agent-<uid>`
+  without a runtime directory. It must be a real directory that you own with
+  mode 0700; otherwise no alias is used.
+- The target is read from the attaching tmux client's own process environment,
+  never from the session environment or from helper connections. The global
+  `update-environment` keeps tmux's default, which sessions without an alias and
+  older desktops rely on. An alias session gets its own copy without
+  `SSH_AUTH_SOCK`, so attaching never puts a raw socket in its environment, and
+  new panes and windows, even one created in the attach command itself, inherit
+  the alias. A later change to the global list reaches alias sessions at their
+  next attach, detach or switch.
+- A record next to the alias (`<key>.json`) names the owner client (tty, PID,
+  start time) and a generation. Updates take a lock and follow tmux's current
+  state, so a late detach from a dead laptop cannot remove the alias that the
+  other desktop now uses. Cleanup removes only the alias, never OpenSSH's socket.
+
+Scope: only sessions created by the SSH launcher (the SSH picker, `dssh`, or
+`bin/tmux-start.sh` run over SSH) on hosts with `python3` and `/proc`. Local
+kitty sessions, ops sessions, sessions started with a plain `tmux new`, hosts
+without dalftui, and servers not reloaded since an update keep tmux's usual
+`SSH_AUTH_SOCK`. A window moved or linked into another session keeps the alias
+of the session where its shell started. Outside tmux, a login shell keeps the
+socket that SSH gave it.
+
+To see where a session's agent requests go, run in one of its panes:
+
+```sh
+python3 ~/.config/dalftui/bin/session_owner.py status
+```
+
+```text
+Session:      $0
+Agent alias:  /run/user/1000/dalftui-agent/3f9c…
+Alias target: /tmp/ssh-XXXXabcd/agent.4242 (socket)
+Owner client: /dev/pts/4, pid 4243, from 10.8.0.2, owner for 12m, generation 3
+This shell:   uses the alias
+The alias routes to the attached client; it does not prove which agent or keys answer.
+```
+
+`ssh-add -l` lists the identities that the agent behind it offers.
+
+**Migration.** After updating dalftui on a server, run `./bin/reload` there.
+Sessions created by the updated launcher need nothing else. A session created
+before has no alias, and its shells still hold the raw socket of the connection
+that started them. In such a session, run once:
+
+```sh
+python3 ~/.config/dalftui/bin/session_owner.py enable
+```
+
+From a shell outside tmux, name the session instead, for example
+`enable --session '$3'` (`tmux list-sessions -F '#{session_id} #{session_name}'`
+shows the IDs). New panes then use the alias. In each existing shell of that session, run the
+`export SSH_AUTH_SOCK=…` line it prints. Programs that are already running, such
+as editors, keep their old socket until restarted.
+
+**Overrides.** Nothing rewrites a running shell's environment. To use another
+agent in one shell, set or unset `SSH_AUTH_SOCK` there. To follow the session
+again, run `export SSH_AUTH_SOCK="$(tmux show-options -v @dalftui_agent_alias)"`.
+
+The alias routes requests; it is not isolation. Processes of the same account,
+and root, can use whichever agent is reachable, and removing the alias does not
+close agent connections that are already open or revoke anything. Editor bridge
+credentials stay specific to each attachment and are not affected.
 
 ## Theme and claude-tabstatus
 

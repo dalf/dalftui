@@ -3,12 +3,14 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -177,8 +179,76 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         check = SimpleNamespace(name='system', command=ops.system_status_script(), timeout=20)
         self.assert_session_credentials((('system-check', 'check', check), ('ops-system', 'ops', None)))
 
-    def assert_session_credentials(self, cases, *, rgb=False):
+    def test_reattaching_policy_preserves_historical_remote_editor_access(self):
+        # Issue 17: a lone detached session is reattached with attach-session -d.
+        # The attachment still carries this window's credentials to a pane's
+        # historical client; neither the wire format nor delivery changes.
+        self.assert_session_credentials((('reattach', 'normal', None),), rows='$5 0 work\n')
+
+    def test_policy_refusal_without_a_terminal_removes_credentials_on_historical_installation(self):
+        # Issue 17: several sessions, or one attached over SSH, need a choice.
+        # Without a terminal the policy exits before tmux starts a client, and
+        # the bootstrap's EXIT trap still removes the consumed credentials.
         self.install_historical(version=2)
+        log = self.directory / 'tmux-commands'
+        (self.bin / 'tmux').write_text('#!/bin/sh\n'
+                                       'printf "%s\\n" "$1" >> "$TEST_TMUX_COMMANDS"\n'
+                                       '[ "$1" = list-sessions ] || exit 99\n'
+                                       'printf "%s" "$TEST_SESSION_ROWS"\n')
+        self.env.update(TEST_TMUX_COMMANDS=str(log), SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22')
+        for transport, rows in (('unix', '$5 1 0\n'), ('tcp', '$5 0 work\n$9 1 0\n')):
+            with self.subTest(transport=transport, rows=rows):
+                log.unlink(missing_ok=True)
+                bridge = self.bridge(transport)
+                prepared = self.run_script(remote_bootstrap.prepare_credentials_script(
+                    bridge, check_installation=True), token=legacy.TOKEN + '\n')
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                result = subprocess.run([str(self.bin / 'sh'), '-c', remote_bootstrap.session_script(
+                    bridge, host_label='alice@historical-host')], input='1\ny\n',
+                    env=dict(self.env, TEST_SESSION_ROWS=rows), cwd=self.directory,
+                    capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('needs a terminal', result.stderr)
+                self.assertNotIn(legacy.TOKEN, result.stdout + result.stderr)
+                self.assertEqual(log.read_text().splitlines(), ['list-sessions'])
+                self.assertFalse(Path(bridge.remote_directory).exists())
+
+    def test_agent_alias_sessions_keep_historical_remote_editor_access(self):
+        # Issue 17: when the host's tmux has loaded the dalftui hooks, the SSH
+        # launcher starts a new session with a private agent alias. Credentials
+        # still come only from this attachment and reach the pane's historical
+        # client; they never enter the session's -e environment.
+        if not Path('/proc/self/environ').exists():
+            self.skipTest('Agent aliases need Linux /proc')
+        runtime = self.directory / 'run'
+        runtime.mkdir(mode=0o700)
+        arguments = self.directory / 'tmux-arguments'
+        self.env.update(SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22', XDG_RUNTIME_DIR=str(runtime),
+                        SSH_AUTH_SOCK='/tmp/ssh-forwarded/agent.1', TEST_TMUX_ARGUMENTS=str(arguments))
+        self.assert_session_credentials((('alias', 'normal', None),), current=True)
+        words = arguments.read_text()
+        self.assertRegex(words, r'\[new-session\]\[-e\]\[SSH_AUTH_SOCK=' + re.escape(str(runtime))
+                         + r'/dalftui-agent/[0-9a-f]{32}\]\[-A\]\[-D\]\[-s\]\[0\]')
+        self.assertNotIn('DALFTUI_EDITOR', words)
+
+    def test_historical_installation_keeps_the_raw_agent_socket(self):
+        # Issue 17: a frozen v2 installation has no agent helper, so the current
+        # launcher keeps tmux's usual SSH_AUTH_SOCK handling there.
+        arguments = self.directory / 'tmux-arguments'
+        self.env.update(SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22',
+                        SSH_AUTH_SOCK='/tmp/ssh-forwarded/agent.1', TEST_TMUX_ARGUMENTS=str(arguments))
+        self.assert_session_credentials((('historical', 'normal', None),))
+        words = arguments.read_text()
+        self.assertIn('[new-session][-A][-D][-s][0][;][set-option]', words)
+        self.assertNotIn('SSH_AUTH_SOCK', words)
+
+    def assert_session_credentials(self, cases, *, rgb=False, rows='', current=False):
+        if current:
+            installed = self.home / '.config/dalftui'
+            installed.parent.mkdir()
+            installed.symlink_to(ROOT, target_is_directory=True)
+        else:
+            self.install_historical(version=2)
         (self.bin / 'timeout').symlink_to(shutil.which('timeout'))
         (self.bin / 'awk').symlink_to(shutil.which('awk'))
         client = self.directory / 'historical-client.py'
@@ -199,8 +269,14 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                         '  rgb=yes\n  shift 2\n'
                         'fi\n'
                         'printf "%s %s\\n" "$rgb" "$1" >> "$TEST_TMUX_COMMANDS"\n'
+                        '[ -z "${TEST_TMUX_ARGUMENTS:-}" ] || printf "[%s]" "$@" >> "$TEST_TMUX_ARGUMENTS"\n'
                         'case "$1" in\n'
-                        '-V|list-sessions) exit 0 ;;\n'
+                        '-V) exit 0 ;;\n'
+                        # A current installation asks whether the server loaded the hooks.
+                        'show-options) printf "on\\n"; exit 0 ;;\n'
+                        'list-sessions) printf "%s" "$TEST_SESSION_ROWS"; exit 0 ;;\n'
+                        # The session policy reattaches with -d; ops attaches its new session.
+                        'attach-session) [ "$2" != -d ] || exec "$SHELL" -l ;;\n'
                         'new-session)\n'
                         '  if [ "$2" = -d ]; then\n'
                         "    printf '$42 %%70\\n'\n"
@@ -211,7 +287,7 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                         '    sh -c "$argument" > "$TEST_SYSTEM_REPORT" || exit $?\n'
                         '  fi\n'
                         "  printf '%%71\\n' ;;\nesac\n")
-        self.env.update(SHELL=str(shell), TEST_HISTORICAL_CLIENT=str(client))
+        self.env.update(SHELL=str(shell), TEST_HISTORICAL_CLIENT=str(client), TEST_SESSION_ROWS=rows)
         for name, mode, check in cases:
             with (self.subTest(mode=name), patch.object(vscode, 'launch') as launch,
                   vscode.EditorBridge('alice@historical-host', transport='tcp') as bridge):
@@ -242,7 +318,8 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                 if mode in ('normal', 'ops'):
                     commands = command_log.read_text().splitlines()
                     hint = 'yes' if rgb else 'no'
-                    self.assertIn(f'{hint} new-session', commands)
+                    self.assertIn(f'{hint} new-session' if mode == 'ops' or not rows else
+                                  f'{hint} attach-session', commands)
                     if mode == 'ops':
                         self.assertIn(f'{hint} attach-session', commands)
                 if mode == 'ops' or name == 'system-check':
@@ -274,6 +351,102 @@ class BootstrapCompatibilityTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 4, result.stderr)
                     self.assertEqual(result.stdout + result.stderr, '')
                     self.assertFalse(Path(bridge.remote_directory).exists())
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'Client routing reads Linux /proc')
+@unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
+class HookedServerCompatibilityTests(unittest.TestCase):
+    """Old desktops on a server whose tmux keeps one client per session (issue 17)."""
+    def old_laptop(self, token):
+        """A frozen v1 laptop listener that records the one request it may receive."""
+        listener = socket.socket(socket.AF_INET)
+        self.addCleanup(listener.close)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(1)
+        listener.settimeout(0.1)
+        outcome = {}
+        stop = threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    connection, _ = listener.accept()
+                except OSError:
+                    continue
+                with connection:
+                    connection.settimeout(5)
+                    outcome['message'] = legacy.serve_connection(connection, token)
+                return
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        self.addCleanup(worker.join, 10)
+        self.addCleanup(stop.set)
+        return f'tcp:127.0.0.1:{listener.getsockname()[1]}', worker, outcome
+
+    def test_hooked_takeover_routes_the_editor_to_the_old_desktop_that_attached_last(self):
+        # An older desktop's chooser attaches without -d, so the server's hook
+        # performs the takeover. Credentials stay attachment-specific: the
+        # remaining client's F3 reaches its own historical laptop, never the
+        # evicted one's.
+        from dalftui.linux.setup import MARKER, tmux_quote
+        from test_session_owner import Client
+        directory = Path(tempfile.mkdtemp(prefix='dalftui-hooked-', dir='/tmp'))
+        self.addCleanup(shutil.rmtree, directory, True)
+        home = directory / 'home'
+        (home / '.config').mkdir(parents=True)
+        (home / '.config/dalftui').symlink_to(ROOT, target_is_directory=True)
+        (home / '.tmux.conf').write_text(f'{MARKER}\nset -g @dalftui_profile server\n'
+                                         f'source-file {tmux_quote(ROOT / "config/tmux.conf")}\n',
+                                         encoding='utf-8')
+        runtime = directory / 'run'
+        runtime.mkdir(mode=0o700)
+        env = dict(os.environ, HOME=str(home), TMUX_TMPDIR=str(directory), XDG_RUNTIME_DIR=str(runtime),
+                   SHELL='/bin/sh', TERM='xterm-256color')
+        for name in ('TMUX', 'TMUX_PANE', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_AUTH_SOCK',
+                     'XDG_CONFIG_HOME', protocol.SOCKET_ENV, protocol.TOKEN_ENV):
+            env.pop(name, None)
+
+        def tmux(*args):
+            return subprocess.run(['tmux', *args], env=env, capture_output=True, text=True,
+                                  timeout=10).stdout.strip()
+
+        def wait_for(predicate, message):
+            deadline = time.monotonic() + 10
+            while not (value := predicate()):
+                if time.monotonic() > deadline:
+                    self.fail(message)
+                time.sleep(0.05)
+            return value
+
+        self.addCleanup(tmux, 'kill-server')
+        folder = directory / 'project.with.dot "quoted" $cash'
+        folder.mkdir()
+        session = tmux('new-session', '-d', '-s', 'work', '-c', str(folder), '-P', '-F',
+                       '#{session_id}').lstrip('\\')
+        laptops, clients = [], []
+        for address, token in (('10.8.0.2', 'aa' * 32), ('10.8.0.3', 'bb' * 32)):
+            endpoint, worker, outcome = self.old_laptop(token)
+            laptops.append((worker, outcome))
+            client_env = dict(env, SSH_CONNECTION=f'{address} 51000 10.8.0.1 22',
+                              **{protocol.SOCKET_ENV: endpoint, protocol.TOKEN_ENV: token})
+            client = Client(self, ['tmux', 'attach-session', '-t', session], client_env)
+            clients.append(client)
+            wait_for(lambda client=client: str(client.process.pid) in tmux(
+                'list-clients', '-t', session, '-F', '#{client_pid}').split(), 'no client attached')
+        evicted = laptops[0][1]
+        remaining, received = laptops[1]
+        clients[0].process.wait(10)
+        self.assertIn('Another terminal took over this tmux session.', clients[0].text())
+        wait_for(lambda: tmux('list-clients', '-t', session, '-F', '#{client_pid}')
+                 == str(clients[1].process.pid), 'the hook did not leave one client')
+        clients[1].send('\x02\x1bOR')  # Ctrl+B, then F3.
+        remaining.join(10)
+        self.assertEqual(received['message']['folder'], str(folder))
+        self.assertEqual(received['message']['token'], 'bb' * 32)
+        self.assertEqual(received['message']['protocol_version'], 1)
+        self.assertNotIn('message', evicted)
+        self.assertIsNone(clients[1].process.poll())
 
 
 class MemoryConnection:

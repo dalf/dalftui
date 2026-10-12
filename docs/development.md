@@ -30,6 +30,7 @@ needed. Representative layout:
 │   │   ├── ssh_picker.py
 │   │   ├── tmux_editor.py
 │   │   ├── tmux_label.py
+│   │   ├── session_owner.py
 │   │   ├── remote_bootstrap.py
 │   │   ├── ops.py
 │   │   ├── package-status.sh
@@ -53,6 +54,7 @@ needed. Representative layout:
 │   ├── reload
 │   ├── shortcuts.py
 │   ├── ssh_picker.py
+│   ├── session_owner.py
 │   ├── vscode.py
 │   ├── terminal_settings.py
 │   ├── tmux_label.py
@@ -104,6 +106,7 @@ live in `bin/`:
 | [bin/reload](../bin/reload) | Linux configuration reload CLI |
 | [bin/shortcuts.py](../bin/shortcuts.py) | Shortcut-guide launcher |
 | [bin/ssh_picker.py](../bin/ssh_picker.py) | Shared SSH launcher |
+| [bin/session_owner.py](../bin/session_owner.py) | tmux hooks for one client per session and the SSH agent alias; `status` and `enable` commands |
 | [bin/vscode.py](../bin/vscode.py) | Shared editor launcher and remote discovery target |
 | [bin/profile.ps1](../bin/profile.ps1) | PowerShell profile loader |
 | [bin/ssh-tab.ps1](../bin/ssh-tab.ps1) | Windows Terminal Ctrl+Shift+F2 SSH-tab launcher |
@@ -256,7 +259,13 @@ and resource isolation. SSH startup tests cover silent shell fallback, native
 tmux without dalftui, installation detection with custom configuration paths,
 and connections that never start or forward a bridge. Real tmux tests route
 separate clients' endpoints and tokens even with deliberately stale server
-environment values.
+environment values. `tests/test_session_owner.py` loads the installed tmux
+hooks into a disposable server with a private runtime directory and fake agents
+that answer with their own name. It checks the first pane, handover between
+desktops in the same shell, the first shell's startup files, panes created while
+attaching, takeovers, racing arrivals, clients that tmux moves out of a closed
+session, switching, missing forwarding, dead and
+late-detaching clients, session close and server restart.
 System overview tests use fake tools and local files to cover unavailable tools,
 permission failures, timeouts, empty journal matches, overlay roots, disk/inode
 warnings, and degraded software RAID without contacting an SSH server.

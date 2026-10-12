@@ -5,8 +5,9 @@ recursive = yes
 persistent = no
 # Upstream code and frozen historical peers must remain unchanged.
 ignore = vendor,fixtures,__pycache__,.venv
-# Only Linux integration tests import this Unix-only standard library module.
-ignored-modules = termios
+# Unix-only standard library modules: termios in Linux integration tests, and
+# fcntl for the Linux tmux session-owner lock. Windows Python lacks both.
+ignored-modules = termios,fcntl
 
 [REPORTS]
 # Show actionable diagnostics only, without reports or a numeric score.

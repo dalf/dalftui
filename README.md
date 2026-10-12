@@ -170,9 +170,18 @@ integration tests, and GitHub Actions.
 - **Remote mouse selection uses the server's tmux configuration.** With the
   shared configuration, plain dragging selects through history. Updating the
   local checkout does not update servers; update and reload each remote checkout.
-- **Startup avoids automatically sharing an occupied session.** With no tmux
-  session, it creates one. With one detached session, it reattaches. With one
-  attached session, it creates another. With several, it asks which to use.
+- **Startup keeps one terminal per tmux session.** With no tmux session, it
+  creates one. With one detached session, it reattaches. Otherwise it lists the
+  sessions and asks: attach, take over a session in use (its other window
+  closes), or create another. A local kitty window with one attached session
+  creates another without asking. On hosts with dalftui's tmux configuration,
+  hooks also detach a session's other clients when any client joins it. See
+  [tmux.md](docs/tmux.md#session-policy).
+- **A tmux session follows the attached desktop's SSH agent.** On installed
+  Linux servers, shells in sessions started by the SSH launcher use a stable
+  per-session alias that points at the attached client's forwarded agent, and
+  is absent while the session is detached. Sessions from before the update need
+  a one-time migration. See [tmux.md](docs/tmux.md#ssh-agent-in-tmux-sessions).
 
 ## Installed software
 

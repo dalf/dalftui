@@ -70,7 +70,7 @@ What it does:
 - The first three lines let you type `ssh monitoring` instead of `ssh monitoring.lan.text-analytics.ch`.
 - Each `Host` block sends one key to one place: the LAN key to the VMs, the GitHub key to GitHub.
 - `AddKeysToAgent yes` loads the key into your agent the first time you use it.
-- `ForwardAgent yes` lets you use your GitHub key from a VM, for example `git pull` on the VM, without copying the key there. While you are connected, root on that VM can use your agent, but cannot copy the key. Forward only to VMs you trust. A stricter option is described in [secrets-and-keys.md](../secrets-and-keys.md#servers).
+- `ForwardAgent yes` lets you use your GitHub key from a VM, for example `git pull` on the VM, without copying the key there. While you are connected, root on that VM can use your agent, but cannot copy the key. Forward only to VMs you trust. A stricter option is described in [secrets-and-keys.md](../secrets-and-keys.md#servers). In tmux sessions started by dalftui on a VM, existing shells follow the agent of the desktop attached now; see [SSH agent in tmux sessions](../tmux.md#ssh-agent-in-tmux-sessions).
 
 Some setups change a line, for example to name their own agent (`IdentityAgent`) or to point `IdentityFile` to the `.pub` files. The setup page shows its version and says why.
 
