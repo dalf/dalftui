@@ -340,7 +340,9 @@ function Test-DalftuiWindowsPlatform {
 
 function Find-DalftuiPython {
     # uv runs dalftui's Python, downloading a suitable version when none is installed.
-    $uv = Find-DalftuiApplication 'uv'
+    # A batch shim such as mise's uv.cmd would let cmd.exe read >=3.11 as a redirection.
+    $uv = Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
     if (-not $uv) { throw 'Install uv first (scoop install uv), then open a new terminal.' }
     return [pscustomobject]@{Source = $uv.Source; Arguments = @('run', '--no-project', '--python', '>=3.11')}
 }

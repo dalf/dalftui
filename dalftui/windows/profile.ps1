@@ -5,12 +5,17 @@ param(
 
 # Loaded by the PowerShell profile; the implementation follows this checkout.
 $dalftuiPickerPath = Join-Path $Checkout 'bin/ssh_picker.py'
+# A batch shim such as mise's uv.cmd passes arguments through cmd.exe, which
+# reads >=3.11 as a redirection; only uv.exe receives them intact.
+$dalftuiFindUv = {
+    Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+}
 $dalftuiCommand = {
     [CmdletBinding()]
     param([Parameter(Position = 0)][ValidateNotNullOrEmpty()][string]$HostName)
 
-    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    $uv = & $dalftuiFindUv
     if (-not $uv) {
         throw 'uv is required. Install it (scoop install uv), then open a new PowerShell window.'
     }
@@ -236,8 +241,7 @@ $dalftuiOpenFolder = {
     if ($location.Provider.Name -ne 'FileSystem') {
         throw 'VS Code needs a filesystem directory. Change to a folder first.'
     }
-    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    $uv = & $dalftuiFindUv
     if (-not $uv) { throw 'uv is required to open VS Code.' }
     # Keep the editor's error text: a key handler discards a program's error output.
     # Under Stop, Windows PowerShell 5.1 would throw on the first captured error line.
@@ -253,8 +257,7 @@ $dalftuiOpenFolder = {
 Set-Item -Path Function:\global:Open-DalftuiCurrentFolder -Value $dalftuiOpenFolder
 # A key handler's output is redirected, so the picker runs as its own console process.
 $dalftuiPick = {
-    $uv = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    $uv = & $dalftuiFindUv
     if (-not $uv) { throw 'uv is required. Install it (scoop install uv), then open a new PowerShell window.' }
     Start-Process -FilePath $uv.Source -NoNewWindow -Wait -ArgumentList @(
         'run', '--no-project', '--python', '>=3.11', ('"' + $dalftuiPickerPath + '"'), '--pick')

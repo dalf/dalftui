@@ -375,7 +375,8 @@ function Invoke-DalftuiWindowsSetup {
 
     # The moved implementation must derive its default checkout from its own
     # package location when callers invoke the setup function directly.
-    $uvCommand = Get-Command uv -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $uvCommand = Get-Command uv -CommandType Application -All -ErrorAction Stop |
+        Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
     $script:directSetupCheckout = $null
     $previousSystemRoot = $env:SystemRoot
     try {
@@ -569,6 +570,17 @@ function Invoke-DalftuiWindowsSetup {
     $argumentJson = dssh
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "dssh without a host must open the picker: $argumentJson"
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        # cmd.exe would read >=3.11 as a redirection in a batch shim such as mise's uv.cmd.
+        $shimBin = Join-Path $root 'fake uv shim'
+        [IO.Directory]::CreateDirectory($shimBin) | Out-Null
+        [IO.File]::WriteAllLines((Join-Path $shimBin 'uv.cmd'), @('@echo off', 'echo ["shim"]'))
+        $previousPath = $env:PATH
+        $env:PATH = $shimBin + [IO.Path]::PathSeparator + $env:PATH
+        try { $argumentJson = dssh } finally { $env:PATH = $previousPath }
+        $arguments = ConvertFrom-Json -InputObject $argumentJson
+        Assert-True (($arguments -join ' ') -eq '--pick') "dssh must run uv.exe, not a batch shim: $argumentJson"
+    }
     Assert-Throws { dssh server unexpected } 'Unsupported positional arguments must not be silently ignored'
     $previousPath = $env:PATH
     $env:PATH = ''
