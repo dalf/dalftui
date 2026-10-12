@@ -13,7 +13,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | **Terminal window**: text, keyboard, clipboard | kitty | the terminal you connect from | Windows Terminal (installed separately) | Terminal.app or iTerm2 |
 | **tmux**: windows (shown as tabs), splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
-| **Hack Nerd Font** | yes | no; your local terminal draws the glyphs | yes | yes; select it in Terminal.app or iTerm2 |
+| **Nerd Font** | Hack | no; your local terminal draws the glyphs | FiraCode | Hack; select it in Terminal.app or iTerm2 |
 | **SSH host picker** | F2, opens a kitty tab | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
 | **VS Code (F3 or v)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
 
@@ -199,7 +199,7 @@ Bootstrap and installation also handle the following:
 - **Python:** uv downloads it when needed.
 - **OpenSSH:** Windows capability if missing; ssh-agent service configured.
 - **VC++ runtime:** Scoop download; elevated installer when needed.
-- **Hack Nerd Font:** Oh My Posh, if missing.
+- **FiraCode Nerd Font:** Oh My Posh, if missing.
 - **claude-tabstatus:** pinned release, checksum-verified, in `%USERPROFILE%\.local\bin`.
 
 Install [Windows Terminal separately](#windows-10-or-11), then open it once.
@@ -306,7 +306,7 @@ cd ~/code/dalftui
 On an existing checkout, skip the clone. This still adds GitHub CLI's repository
 but skips the `[desktop]` package section and the VS Code and DVC repositories, configures tmux and the bash prompt,
 leaves kitty alone, and installs no font; the terminal you connect from
-needs Hack Nerd Font for the prompt's glyphs. `./install` remembers the server profile; `./bootstrap`
+needs a Nerd Font for the prompt's glyphs. `./install` remembers the server profile; `./bootstrap`
 does not, so keep passing `--server`.
 
 Remote tmux startup itself does not require a dalftui installation. Install on

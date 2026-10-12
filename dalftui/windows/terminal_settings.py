@@ -1,4 +1,4 @@
-"""Set the Terminal and VS Code fonts and PowerShell 7 profiles, preserving other settings."""
+"""Set the Terminal defaults, VS Code font and PowerShell 7 profiles, preserving other settings."""
 import argparse
 import json
 import os
@@ -16,10 +16,21 @@ EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 PROMPT_FONT = 'Hack Nerd Font'
 # Also applied by ./install on Linux desktops and macOS.
 VSCODE_SETTINGS = {'terminal.integrated.fontFamily': PROMPT_FONT, 'terminal.integrated.fontSize': 12}
+# Windows uses FiraCode; setup replaces the PROMPT_FONT that earlier Windows versions set.
+WINDOWS_FONT = 'FiraCode Nerd Font Mono'
+WINDOWS_VSCODE_SETTINGS = {**VSCODE_SETTINGS, 'terminal.integrated.fontFamily': WINDOWS_FONT}
+# The values uninstall treats as dalftui's, including the earlier Windows font.
+WINDOWS_VSCODE_VALUES = {'terminal.integrated.fontFamily': (WINDOWS_FONT, PROMPT_FONT),
+                         'terminal.integrated.fontSize': (12,)}
+TERMINAL_DEFAULTS = {'font': {'face': WINDOWS_FONT}, 'cursorShape': 'bar',
+                     'padding': '8, 8, 8, 8', 'bellStyle': 'none'}
 # Windows Terminal's own PowerShell 7 profile, and a dalftui-owned elevated copy.
 PWSH_GUID = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+PWSH_SOURCE = 'Windows.Terminal.PowershellCore'
 ADMIN_GUID = '{267e52e6-0ec9-495c-a8b0-e4437770bc55}'
 ADMIN_NAME = 'Windows PowerShell 7 (Admin)'
+# Profiles from the old setup gist, replaced by the two above.
+GIST_NAMES = ('Windows PowerShell 7', 'Windows PowerShell 7 (Administrator)')
 DECODER = json.JSONDecoder()
 JSONC_PARTS = re.compile(r'"(?:\\.|[^"\\])*"|//[^\r\n]*|/\*[\s\S]*?\*/')
 TRAILING_COMMAS = re.compile(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])')
@@ -73,8 +84,63 @@ def members(text, start, object_mode=False):
 
 
 def updated_settings(text, pwsh=None):
-    text = font_settings(removed_actions(text))
-    return profile_settings(text, pwsh) if pwsh else text
+    text = default_settings(removed_actions(text))
+    return profile_settings(removed_gist_profiles(text), pwsh) if pwsh else text
+
+
+def runs_pwsh(commandline):
+    """Return whether a profile command line starts pwsh.exe, quoted or not."""
+    if not isinstance(commandline, str):
+        return False
+    commandline = commandline.strip()
+    if commandline.startswith('"'):
+        program = commandline[1:].partition('"')[0]
+    else:
+        program = (commandline.split() or [''])[0]
+        if re.search(r'[\\/]', program):
+            # Like CreateProcess, an unquoted path may contain spaces: the shortest prefix
+            # ending in .exe, such as C:\Program Files\PowerShell\7\pwsh.exe.
+            program = re.match(r'(?i)\S*?(?:\s+\S+?)*?\.exe(?=\s|$)|\S*', commandline).group()
+    return re.split(r'[\\/]', program)[-1].lower() == 'pwsh.exe'
+
+
+def is_gist_profile(entry):
+    # Exact names and no source: Terminal's generated profiles and dalftui's never match.
+    return (isinstance(entry, dict) and entry.get('name') in GIST_NAMES and 'source' not in entry
+            and str(entry.get('guid')).lower() not in (PWSH_GUID, ADMIN_GUID)
+            and runs_pwsh(entry.get('commandline')))
+
+
+def gist_profiles(settings):
+    profiles = settings.get('profiles')
+    entries = profiles.get('list') if isinstance(profiles, dict) else None
+    return [entry for entry in entries if is_gist_profile(entry)] if isinstance(entries, list) else []
+
+
+def removed_gist_profiles(text):
+    """Remove the old gist's PowerShell 7 profiles in favor of Terminal's, which also becomes
+    the default in place of a removed one."""
+    removed = gist_profiles(json.loads(clean_jsonc(text), object_pairs_hook=unique_object))
+    if not removed:
+        return text
+    text = remove_matching(text, ('profiles', 'list'), lambda item: is_gist_profile(item[1]))
+    clean = clean_jsonc(text)
+    remaining = json.loads(clean, object_pairs_hook=unique_object)['profiles']['list']
+    names = {entry.get('name') for entry in remaining if isinstance(entry, dict)}
+    # Terminal accepts a GUID, or a name, which may still match a remaining profile.
+    guids = {str(entry.get('guid')).lower() for entry in removed}
+    gone = {entry['name'] for entry in removed} - names
+    for name, value, begin, finish in container_items(clean, ()):
+        if name == 'defaultProfile' and isinstance(value, str) and (value.lower() in guids or value in gone):
+            text = text[:begin] + json.dumps(PWSH_GUID) + text[finish:]
+    # Show Terminal's profile again if it was hidden, or its source disabled, as a duplicate.
+    text = remove_matching(text, ('disabledProfileSources',), lambda item: item[1] == PWSH_SOURCE)
+    for number, item in enumerate(container_items(clean_jsonc(text), ('profiles', 'list')) or []):
+        if has_guid(item, PWSH_GUID):
+            text = remove_matching(text, ('profiles', 'list', number),
+                                   lambda member: member[0] == 'hidden' and member[1] is True)
+    json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    return text
 
 
 def profile_settings(text, pwsh):
@@ -87,7 +153,7 @@ def profile_settings(text, pwsh):
     begin = next(begin for name, _, begin, _ in root_items if name == 'profiles')
     items, end = members(clean, begin, object_mode=True)
     cleartype = '"antialiasingMode": "cleartype"'
-    stub = {'guid': PWSH_GUID, 'source': 'Windows.Terminal.PowershellCore'}
+    stub = {'guid': PWSH_GUID, 'source': PWSH_SOURCE}
     admin = {'guid': ADMIN_GUID, 'name': ADMIN_NAME, 'commandline': pwsh, 'elevate': True,
              'startingDirectory': '%USERPROFILE%', 'icon': 'ms-appx:///ProfileIcons/pwsh.png'}
     defaults = profiles.get('defaults')
@@ -118,22 +184,22 @@ def profile_settings(text, pwsh):
                 entry_items, entry_end = members(clean, owned[0][2], object_mode=True)
                 append_entry(text, entry_items, entry_end, cleartype, newline, edits)
         if additions:
-            append_entry(text, items, end, (',' + newline + '    ').join(additions), newline, edits)
+            append_entry(text, items, end, additions, newline, edits)
     for begin, end, replacement in sorted(edits, reverse=True):
         text = text[:begin] + replacement + text[end:]
     json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
     return text
 
 
-def font_settings(text):
+def default_settings(text):
+    """Set dalftui's profiles.defaults values, replacing other values of the same keys."""
     clean = clean_jsonc(text)
-    settings = json.loads(clean, object_pairs_hook=unique_object)
+    json.loads(clean, object_pairs_hook=unique_object)
     root_items, root_end = members(clean, skip_space(clean, 0), object_mode=True)
     edits = []
     newline = '\r\n' if '\r\n' in text else '\n'
-    font = font_edit(text, clean, settings, root_items, newline, edits)
-    if font:
-        append_entry(text, root_items, root_end, font, newline, edits)
+    nested_edits(text, clean, (root_items, root_end), {'profiles': {'defaults': TERMINAL_DEFAULTS}},
+                 newline, edits)
     for begin, end, replacement in sorted(edits, reverse=True):
         text = text[:begin] + replacement + text[end:]
     # Validate the result before creating a backup or changing anything.
@@ -141,43 +207,34 @@ def font_settings(text):
     return text
 
 
-def prompt_font_face(settings):
-    """Return the prompt font for the default profile face, or None when already set."""
-    defaults = settings.get('profiles', {})
-    defaults = defaults.get('defaults', {}) if isinstance(defaults, dict) else None
-    if not isinstance(defaults, dict):
-        return None  # The legacy profiles array has no defaults to change.
-    font = defaults.get('font', {})
-    face = font.get('face') if isinstance(font, dict) else None
-    return None if face == PROMPT_FONT else PROMPT_FONT
-
-
-def font_edit(text, clean, settings, root_items, newline, edits):
-    """Set the default face to the prompt font; return a missing root property."""
-    face = prompt_font_face(settings)
-    items, end = root_items, None
-    path = ('profiles', 'defaults', 'font', 'face')
-    for depth, key in enumerate(path if face else ()):
+def nested_edits(text, clean, container, wanted, newline, edits):
+    """Add edits giving the object whose members() are container the wanted nested values."""
+    items, end = container
+    missing = []
+    for key, value in wanted.items():
         found = [item for item in items if item[0] == key]
         if not found:
-            value = face
-            for name in reversed(path[depth + 1:]):
-                value = {name: value}
-            encoded = json.dumps(key) + ': ' + json.dumps(value, ensure_ascii=False)
-            if end is None:
-                return encoded
-            append_entry(text, items, end, encoded, newline, edits)
-            break
-        _, value, begin, finish = found[0]
-        if key == 'face':
-            edits.append((begin, finish, json.dumps(face, ensure_ascii=False)))
-        if key == 'face' or not isinstance(value, dict):
-            break
-        items, end = members(clean, begin, object_mode=True)
-    return None
+            missing.append(json.dumps(key) + ': ' + json.dumps(value, ensure_ascii=False))
+        elif isinstance(value, dict):
+            # The legacy profiles array, or another non-object, is left unchanged.
+            if isinstance(found[0][1], dict):
+                nested = members(clean, found[0][2], object_mode=True)
+                nested_edits(text, clean, nested, value, newline, edits)
+        elif found[0][1] != value:
+            edits.append((found[0][2], found[0][3], json.dumps(value, ensure_ascii=False)))
+    if missing:
+        append_entry(text, items, end, missing, newline, edits)
 
 
-def append_entry(text, items, end, encoded, newline, edits):
+def line_indent(text, index):
+    """Return the whitespace before index on its line, or None when other text precedes it."""
+    line = text.rfind('\n', 0, index) + 1
+    return None if text[line:index].strip() else text[line:index]
+
+
+def append_entry(text, items, end, entries, newline, edits):
+    """Append encoded entries to the container closing at end, indented like their siblings."""
+    entries = [entries] if isinstance(entries, str) else entries
     prefix = ''
     if items:
         last_end = items[-1][3]
@@ -187,7 +244,16 @@ def append_entry(text, items, end, encoded, newline, edits):
                 prefix = ','
             else:
                 edits.append((last_end, last_end, ','))
-    edits.append((end, end, prefix + newline + '    ' + encoded + newline))
+    closing = line_indent(text, end)
+    if closing is None:  # The closing bracket follows other text on its line.
+        indent = '    '
+        edits.append((end, end, prefix + newline + indent + (',' + newline + indent).join(entries) + newline))
+        return
+    sibling = line_indent(text, item_start(without_comments(text), items[-1][2])) if items else None
+    indent = closing + '    ' if sibling is None else sibling
+    # Insert before the closing bracket's own indentation so it stays aligned.
+    line = end - len(closing)
+    edits.append((line, line, prefix + indent + (',' + newline + indent).join(entries) + newline))
 
 
 def item_start(clean, begin):
@@ -287,23 +353,30 @@ def removed_settings(text):
         if has_guid(item, PWSH_GUID):
             text = remove_matching(text, (*profiles, number),
                                    lambda member: member[0] == 'antialiasingMode' and member[1] == 'cleartype')
+    # Earlier Windows versions set PROMPT_FONT.
     text = remove_matching(text, ('profiles', 'defaults', 'font'),
-                           lambda item: item[0] == 'face' and item[1] == PROMPT_FONT)
+                           lambda item: item[0] == 'face' and item[1] in (WINDOWS_FONT, PROMPT_FONT))
+    text = remove_matching(text, ('profiles', 'defaults'), lambda item: item[0] != 'font' and
+                           item[0] in TERMINAL_DEFAULTS and item[1] == TERMINAL_DEFAULTS[item[0]])
     json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
     return text
 
 
-def removed_vscode_settings(text):
-    """Remove the effective VS Code terminal font values while they are dalftui's."""
+def removed_vscode_settings(text, values=None):
+    """Remove the effective VS Code terminal font values while they are dalftui's.
+
+    values maps each key to the values that count as dalftui's, by default VSCODE_SETTINGS.
+    """
+    values = values or {key: (value,) for key, value in VSCODE_SETTINGS.items()}
     if not clean_jsonc(text).strip():
         return text
     if not isinstance(json.loads(clean_jsonc(text)), dict):
         raise ValueError('VS Code settings must be a JSON object.')
-    for key, value in VSCODE_SETTINGS.items():
+    for key, owned in values.items():
         clean = clean_jsonc(text)
         items = container_items(clean, ())
         found = [number for number, item in enumerate(items) if item[0] == key]
-        if found and items[found[-1]][1] == value:
+        if found and items[found[-1]][1] in owned:
             text = remove_item(text, items, found[-1])
     json.loads(clean_jsonc(text))
     return text
@@ -330,7 +403,8 @@ def uninstall(paths, vscode, dry_run):
     status = 0
     if vscode and vscode.is_file():
         try:
-            unconfigure(vscode, 'VS Code', removed_vscode_settings, dry_run)
+            unconfigure(vscode, 'VS Code', lambda text: removed_vscode_settings(text, WINDOWS_VSCODE_VALUES),
+                        dry_run)
         except (OSError, UnicodeError, ValueError) as error:
             print(f'VS Code settings were not changed: {error}', file=sys.stderr)
             status = 1
@@ -365,34 +439,37 @@ def configure(path, pwsh=None):
     if updated == text:
         print(f'Terminal already configured: {path}')
         return
+    gist = gist_profiles(json.loads(clean_jsonc(text), object_pairs_hook=unique_object)) if pwsh else []
     backup = save(path, original, updated, 'Terminal')
     print(f'Terminal backup: {backup}')
     print(f'Terminal configured: {path}')
-    print(f'Default profile font: {PROMPT_FONT}')
+    print(f'Default profile font: {WINDOWS_FONT}; bar cursor, padding 8, no bell')
     if pwsh:
         print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
+    for entry in gist:
+        print(f'Removed profile from an old setup: {entry["name"]}')
 
 
-def vscode_settings(text):
-    """Set the VS Code terminal font, replacing the effective top-level values."""
+def vscode_settings(text, settings=None):
+    """Set the VS Code terminal font (VSCODE_SETTINGS by default), replacing the effective top-level values."""
     newline = '\r\n' if '\r\n' in text else '\n'
     if not clean_jsonc(text).strip():  # VS Code reads an empty file as no settings.
         text = (text + newline if text.strip() else '') + '{}'
     clean = clean_jsonc(text)
-    settings = json.loads(clean)  # VS Code accepts duplicate keys; the last one wins.
-    if not isinstance(settings, dict):
+    # VS Code accepts duplicate keys; the last one wins.
+    if not isinstance(json.loads(clean), dict):
         raise ValueError('VS Code settings must be a JSON object.')
     edits = []
     missing = []
     items, end = members(clean, skip_space(clean, 0), object_mode=True)
-    for key, value in VSCODE_SETTINGS.items():
+    for key, value in (settings or VSCODE_SETTINGS).items():
         found = [item for item in items if item[0] == key]
         if not found:
             missing.append(json.dumps(key) + ': ' + json.dumps(value))
         elif found[-1][1] != value:
             edits.append((found[-1][2], found[-1][3], json.dumps(value)))
     if missing:
-        append_entry(text, items, end, (',' + newline + '    ').join(missing), newline, edits)
+        append_entry(text, items, end, missing, newline, edits)
     for begin, finish, replacement in sorted(edits, reverse=True):
         text = text[:begin] + replacement + text[finish:]
     json.loads(clean_jsonc(text))
@@ -402,7 +479,7 @@ def vscode_settings(text):
 def configure_vscode(path):
     original = path.read_bytes() if path.exists() else None
     text = (original or b'').decode('utf-8-sig')
-    updated = vscode_settings(text)
+    updated = vscode_settings(text, WINDOWS_VSCODE_SETTINGS)
     if updated == text:
         print(f'VS Code terminal font already set: {path}')
         return
@@ -413,7 +490,7 @@ def configure_vscode(path):
         print(f'VS Code settings created: {path}')
     else:
         print(f'VS Code backup: {save(path, original, updated, "VS Code")}')
-    print(f'VS Code terminal font: {PROMPT_FONT}, size 12')
+    print(f'VS Code terminal font: {WINDOWS_FONT}, size 12')
 
 
 def settings_paths(local_app_data):

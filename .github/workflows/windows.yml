@@ -52,12 +52,12 @@ jobs:
           iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
           scoop install oh-my-posh
           Add-Content -Path $env:GITHUB_PATH -Value "$HOME\scoop\shims"
-      - name: Pre-register Hack Nerd Font
+      - name: Pre-register FiraCode Nerd Font
         # A registered font makes setup skip oh-my-posh's download, which hits shared GitHub API rate limits.
         run: |
           $fonts = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
           if (-not (Test-Path $fonts)) { $null = New-Item -Path $fonts }
-          $null = New-ItemProperty -Path $fonts -Name 'Hack Nerd Font Regular (TrueType)' -Value 'HackNerdFont-Regular.ttf' -Force
+          $null = New-ItemProperty -Path $fonts -Name 'FiraCode Nerd Font Mono Reg (TrueType)' -Value 'FiraCodeNerdFontMono-Regular.ttf' -Force
       - name: Verify installation in an isolated profile
         timeout-minutes: 3  # Usually seconds; a hang should fail fast, not use the whole job.
         run: mise run install:windows -- -ProfilePath "$env:RUNNER_TEMP\dalftui-profile.ps1" -SkipTerminal

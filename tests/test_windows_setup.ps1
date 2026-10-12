@@ -408,7 +408,7 @@ function Invoke-DalftuiWindowsSetup {
             Invoke-DalftuiWindowsSetup -TargetProfile (Join-Path $root 'direct profile.ps1') `
                 -NoTerminal -WarningAction SilentlyContinue
             Assert-True ($script:fontInstaller -eq 'fake-oh-my-posh') `
-                'Setup must install the Hack Nerd Font with the discovered oh-my-posh'
+                'Setup must install the FiraCode Nerd Font with the discovered oh-my-posh'
             $script:missingOhMyPosh = $true
             $script:directSetupCheckout = $null
             $message = ''
@@ -485,12 +485,12 @@ function Invoke-DalftuiWindowsSetup {
         $global:dalftuiFontInstalled = $true
         function Test-DalftuiNerdFont { return $global:dalftuiFontInstalled }
         Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
-        Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed Hack Nerd Font must not be reinstalled'
+        Assert-True (-not [IO.File]::Exists($fontLog)) 'An installed FiraCode Nerd Font must not be reinstalled'
         $global:dalftuiFontInstalled = $false
         Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh
         Assert-True ([IO.File]::ReadAllText($fontLog) -eq `
-                     'font install https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip') `
-            'A missing Hack Nerd Font must use the direct official asset URL, avoiding GitHub API discovery'
+                     'font install https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip') `
+            'A missing FiraCode Nerd Font must use the direct official asset URL, avoiding GitHub API discovery'
         [IO.File]::WriteAllText($fakeOhMyPosh, '$global:LASTEXITCODE = 0')
         $global:dalftuiFontInstalled = $false
         Assert-Throws { Install-DalftuiNerdFont -OhMyPosh $fakeOhMyPosh } `
@@ -500,11 +500,16 @@ function Invoke-DalftuiWindowsSetup {
         function Get-ItemProperty { return $global:dalftuiRegisteredFonts }
         $global:dalftuiRegisteredFonts = [pscustomobject]@{
             'Hack Nerd Font Mono Regular (TrueType)' = 'HackNerdFontMono-Regular.ttf'
-            'Hack Nerd Font Propo Bold (TrueType)' = 'HackNerdFontPropo-Bold.ttf' }
-        Assert-True (-not (Test-DalftuiNerdFont)) 'Only the Mono or Propo family must not count as Hack Nerd Font'
-        $global:dalftuiRegisteredFonts = [pscustomobject]@{
-            'Hack Nerd Font Regular (TrueType)' = 'HackNerdFont-Regular.ttf' }
-        Assert-True (Test-DalftuiNerdFont) 'A registered Hack Nerd Font must be detected'
+            'FiraCode Nerd Font Reg (TrueType)' = 'FiraCodeNerdFont-Regular.ttf'
+            'FiraCode Nerd Font Propo Reg (TrueType)' = 'FiraCodeNerdFontPropo-Regular.ttf'
+            'FiraCodeNerdFont-Regular (TrueType)' = 'FiraCodeNerdFont-Regular.ttf'
+            'FiraCodeNerdFontPropo-Regular (TrueType)' = 'FiraCodeNerdFontPropo-Regular.ttf' }
+        Assert-True (-not (Test-DalftuiNerdFont)) 'Hack or other FiraCode families must not count as FiraCode Nerd Font Mono'
+        # Scoop registers the file-stem name rather than the full font name.
+        foreach ($name in @('FiraCode Nerd Font Mono Reg (TrueType)', 'FiraCodeNerdFontMono-Regular (TrueType)')) {
+            $global:dalftuiRegisteredFonts = [pscustomobject]@{ $name = 'FiraCodeNerdFontMono-Regular.ttf' }
+            Assert-True (Test-DalftuiNerdFont) "A registered FiraCode Nerd Font Mono must be detected: $name"
+        }
     }
 
     $profile = Join-Path (Join-Path $root 'profile directory') 'profile.ps1'
@@ -723,10 +728,13 @@ function Invoke-DalftuiWindowsSetup {
 
     $settingsPath = Join-Path $root 'terminal-settings.json'
     # Earlier versions installed Ctrl+Shift+F2/F3 actions; setup removes them.
+    # The old setup gist's PowerShell 7 profile is replaced once PowerShell 7 is found.
     [IO.File]::WriteAllText($settingsPath, '{"actions":[{"id":"User.DalftuiSshPicker","command":{"action":"newTab"}},' +
         '{"id":"User.DalftuiOpenFolderInCode","command":{"action":"sendInput","input":"x"}}],' +
         '"keybindings":[{"id":"User.DalftuiSshPicker","keys":"ctrl+shift+f2"},' +
-        '{"id":"User.DalftuiOpenFolderInCode","keys":"ctrl+shift+f3"}]}')
+        '{"id":"User.DalftuiOpenFolderInCode","keys":"ctrl+shift+f3"}],' +
+        '"defaultProfile":"Windows PowerShell 7","profiles":{"list":[' +
+        '{"guid":"{6c1d3b1e-0000-4000-8000-000000000001}","name":"Windows PowerShell 7","commandline":"pwsh.exe"}]}}')
     $python = Find-DalftuiPython
     $pythonArguments = $python.Arguments
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
@@ -734,6 +742,10 @@ function Invoke-DalftuiWindowsSetup {
     $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
     Assert-True (@($settings.actions).Count -eq 0 -and @($settings.keybindings).Count -eq 0) `
         'Setup must remove the Terminal actions of earlier versions'
+    $defaults = $settings.profiles.defaults
+    Assert-True ($defaults.font.face -eq 'FiraCode Nerd Font Mono' -and $defaults.cursorShape -eq 'bar' -and
+                 $defaults.padding -eq '8, 8, 8, 8' -and $defaults.bellStyle -eq 'none') `
+        "Setup must set the Terminal profile defaults: $($defaults | ConvertTo-Json -Compress)"
     $installedSettings = [IO.File]::ReadAllBytes($settingsPath)
     $terminalBackups = @(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak')
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
@@ -744,15 +756,15 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True (@(Get-ChildItem -LiteralPath $root -Filter 'terminal-settings.json*.bak').Count -eq
                  $terminalBackups.Count) `
         'An idempotent Terminal rerun must not create another backup'
-    Assert-True (-not $settings.profiles.PSObject.Properties['list']) `
-        'Without PowerShell 7, setup must not add Terminal profiles'
+    Assert-True (@($settings.profiles.list).Count -eq 1 -and $settings.defaultProfile -eq 'Windows PowerShell 7') `
+        'Without PowerShell 7, setup must neither add nor replace Terminal profiles'
     $vscodeSettingsPath = Join-Path $root 'vscode-settings.json'
     [IO.File]::WriteAllText($vscodeSettingsPath, "{`r`n    // personal`r`n}`r`n")
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath) -VSCodeSettingsPath $vscodeSettingsPath
     $vscodeText = [IO.File]::ReadAllText($vscodeSettingsPath)
     Assert-True ($vscodeText.Contains('// personal') -and
-                 $vscodeText.Contains('"terminal.integrated.fontFamily": "Hack Nerd Font"') -and
+                 $vscodeText.Contains('"terminal.integrated.fontFamily": "FiraCode Nerd Font Mono"') -and
                  $vscodeText.Contains('"terminal.integrated.fontSize": 12')) `
         "Setup must set the VS Code terminal font and keep comments: $vscodeText"
     $fakePwsh = Join-Path $root 'Power Shell\pwsh.exe'
@@ -764,11 +776,14 @@ function Invoke-DalftuiWindowsSetup {
     Assert-True ([Convert]::ToBase64String($installedSettings) -eq
                  [Convert]::ToBase64String([IO.File]::ReadAllBytes($settingsPath))) `
         'A PowerShell 7 profile rerun must not rewrite Terminal settings'
-    $profiles = @((ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))).profiles.list)
+    $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
+    $profiles = @($settings.profiles.list)
     Assert-True ($profiles.Count -eq 2 -and $profiles[0].source -eq 'Windows.Terminal.PowershellCore' -and
                  $profiles[1].name -eq 'Windows PowerShell 7 (Admin)' -and $profiles[1].elevate -and
                  $profiles[1].commandline -eq ('"' + $fakePwsh + '"')) `
-        "Setup must customize PowerShell 7 and add an elevated copy: $($profiles | ConvertTo-Json -Compress)"
+        "Setup must customize PowerShell 7, add an elevated copy and remove the gist's: $($profiles | ConvertTo-Json -Compress)"
+    Assert-True ($settings.defaultProfile -eq $profiles[0].guid) `
+        "A default gist profile must be replaced by PowerShell 7: $($settings.defaultProfile)"
     # Uninstall removes only setup's block, keeps the rest and reports a second run.
     $uninstallProfile = Join-Path $root 'uninstall profile.ps1'
     $personalText = "# personal " + [char]0xe9 + "`r`nfunction dssh { 'old' }`r`n"
@@ -810,7 +825,8 @@ function Invoke-DalftuiWindowsSetup {
     }
     Assert-True ([IO.File]::ReadAllText($uninstallProfile) -eq "# mine`n") 'Uninstall must remove the profile block'
     $terminalText = [IO.File]::ReadAllText($settingsPath)
-    Assert-True (-not $terminalText.Contains('Dalftui') -and -not $terminalText.Contains('Hack Nerd Font') -and
+    Assert-True (-not $terminalText.Contains('Dalftui') -and -not $terminalText.Contains('FiraCode Nerd Font') -and
+                 -not $terminalText.Contains('cursorShape') -and
                  -not $terminalText.Contains('Windows PowerShell 7 (Admin)')) "Uninstall must remove Terminal entries: $terminalText"
     $vscodeText = [IO.File]::ReadAllText($vscodeSettingsPath)
     Assert-True ($vscodeText.Contains('// personal') -and -not $vscodeText.Contains('terminal.integrated')) `

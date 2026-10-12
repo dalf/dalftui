@@ -57,18 +57,142 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(len(result['actions']), 1)
         self.assertNotIn('keybindings', result)
 
-    def test_default_face_uses_prompt_font_once(self):
+    def test_default_face_uses_windows_font_once(self):
         for profiles in ('{"defaults": {"font": {"face": "Cascadia Code"}}, "list": []}',
                          '{"defaults": {"fontFace": "Consolas"}, "list": []}',
                          '{"defaults": {"font": {"size": 11}}, "list": []}',
                          '{"list": []}',
+                         # Earlier Windows versions set Hack Nerd Font.
                          '{"defaults": {"font": {"face": "Hack Nerd Font"}}}'):
             with self.subTest(profiles=profiles):
                 updated = terminal.updated_settings('{"profiles": ' + profiles + '}')
-                self.assertEqual(self.settings(updated)['profiles']['defaults']['font']['face'], 'Hack Nerd Font')
+                face = self.settings(updated)['profiles']['defaults']['font']['face']
+                self.assertEqual(face, 'FiraCode Nerd Font Mono')
                 self.assertEqual(terminal.updated_settings(updated), updated)
         legacy = self.settings(terminal.updated_settings('{"profiles": []}'))
         self.assertEqual(legacy['profiles'], [])
+
+    def test_profile_defaults_are_set_once_keeping_other_defaults(self):
+        expected = {'font': {'face': 'FiraCode Nerd Font Mono'}, 'cursorShape': 'bar',
+                    'padding': '8, 8, 8, 8', 'bellStyle': 'none'}
+        for personal in ('{}', '{"profiles": {}}', '{"profiles": {"defaults": {}}}',
+                         '{"profiles": {"defaults": {"cursorShape": "filledBox", "padding": "0",'
+                         ' "bellStyle": "audible", "opacity": 90, // mine\n}}}',
+                         '{\r\n  "profiles": {\r\n    "defaults": {\r\n      "font": {"size": 11}\r\n    }\r\n  }\r\n}\r\n'):
+            with self.subTest(personal=personal):
+                updated = terminal.updated_settings(personal)
+                defaults = self.settings(updated)['profiles']['defaults']
+                self.assertEqual(defaults['font']['face'], expected['font']['face'])
+                self.assertEqual({key: defaults[key] for key in expected if key != 'font'},
+                                 {key: value for key, value in expected.items() if key != 'font'})
+                if 'opacity' in personal:
+                    self.assertEqual(defaults['opacity'], 90)
+                    self.assertIn('// mine', updated)
+                if 'size' in personal:
+                    self.assertEqual(defaults['font']['size'], 11)
+                    self.assertNotIn('\n', updated.replace('\r\n', ''))
+                self.assertEqual(terminal.updated_settings(updated), updated)
+        self.assertEqual(self.settings(terminal.updated_settings('{}'))['profiles'], {'defaults': expected})
+
+    def test_added_entries_follow_sibling_indentation(self):
+        personal = ('{\n    "profiles": \n    {\n        "defaults": \n        {\n            "font": \n'
+                    '            {\n                "face": "Hack Nerd Font"\n            }\n        },\n'
+                    '        "list": []\n    }\n}\n')
+        self.assertEqual(terminal.updated_settings(personal), (
+            '{\n    "profiles": \n    {\n        "defaults": \n        {\n            "font": \n'
+            '            {\n                "face": "FiraCode Nerd Font Mono"\n            },\n'
+            '            "cursorShape": "bar",\n            "padding": "8, 8, 8, 8",\n'
+            '            "bellStyle": "none"\n        },\n        "list": []\n    }\n}\n'))
+
+    def gist_settings(self, default, *extra):
+        return json.dumps({'defaultProfile': default, 'profiles': {'list': [
+            {'guid': '{7e1e3c38-0000-4000-8000-000000000001}', 'name': 'Windows PowerShell 7',
+             'commandline': 'pwsh.exe', 'hidden': False},
+            {'guid': '{7e1e3c38-0000-4000-8000-000000000002}', 'name': 'Windows PowerShell 7 (Administrator)',
+             'commandline': '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo', 'elevate': True},
+            {'guid': '{7e1e3c38-0000-4000-8000-000000000003}', 'name': 'Windows PowerShell 7',
+             'commandline': 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'},
+            *extra]}}, indent=4)
+
+    def test_old_gist_profiles_are_replaced_and_default_follows(self):
+        mine = {'guid': '{mine}', 'name': 'Mine'}
+        for default in ('{7E1E3C38-0000-4000-8000-000000000001}', '{7e1e3c38-0000-4000-8000-000000000002}',
+                        'Windows PowerShell 7', 'Windows PowerShell 7 (Administrator)', '{mine}', 'Mine'):
+            with self.subTest(default=default):
+                personal = self.gist_settings(default, mine).replace('"name": "Mine"', '"name": "Mine" // keep')
+                installed = terminal.updated_settings(personal, 'pwsh.exe')
+                self.assertIn('// keep', installed)
+                result = self.settings(installed)
+                self.assertEqual([entry.get('guid') for entry in result['profiles']['list']],
+                                 ['{mine}', terminal.PWSH_GUID, terminal.ADMIN_GUID])
+                moved = 'mine' not in default.lower()
+                self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID if moved else default)
+                self.assertEqual(terminal.updated_settings(installed, 'pwsh.exe'), installed)
+        # Without PowerShell 7, nothing replaces them.
+        personal = self.gist_settings('Windows PowerShell 7')
+        self.assertEqual(self.settings(terminal.updated_settings(personal))['profiles']['list'],
+                         self.settings(personal)['profiles']['list'])
+
+    def test_old_gist_profile_matching_is_narrow(self):
+        kept = [{'guid': '{a}', 'name': 'Windows PowerShell 7', 'commandline': 'pwsh.exe', 'source': 'x'},
+                {'guid': '{b}', 'name': 'windows powershell 7', 'commandline': 'pwsh.exe'},
+                {'guid': '{c}', 'name': 'Windows PowerShell 7 (Administrator)', 'commandline': 'powershell.exe'},
+                {'guid': '{d}', 'name': 'Windows PowerShell 7', 'commandline': 'C:\\tools\\mypwsh.exe'},
+                {'guid': '{e}', 'name': 'Windows PowerShell 7'},
+                {'guid': '{f}', 'name': 'Windows PowerShell 7 (Administrator)', 'commandline': 'cmd /c pwsh.exe'},
+                {'guid': '{g}', 'name': 'Windows PowerShell 7',
+                 'commandline': 'C:\\Windows\\System32\\cmd.exe /c C:\\x\\pwsh.exe'}]
+        personal = self.gist_settings('Windows PowerShell 7', *kept)
+        result = self.settings(terminal.updated_settings(personal, 'pwsh.exe'))
+        self.assertEqual(result['profiles']['list'][:len(kept)], kept)
+        self.assertEqual(len(result['profiles']['list']), len(kept) + 2)
+        # A remaining profile with the default's name still resolves it.
+        self.assertEqual(result['defaultProfile'], 'Windows PowerShell 7')
+        self.assertTrue(terminal.runs_pwsh(' C:/tools/PWSH.EXE -NoLogo'))
+        # Like CreateProcess, an unquoted path may contain spaces.
+        self.assertTrue(terminal.runs_pwsh('C:\\Program Files\\PowerShell\\7\\pwsh.exe'))
+        self.assertTrue(terminal.runs_pwsh('C:\\Program Files\\PowerShell\\7\\pwsh.exe -NoLogo'))
+        self.assertTrue(terminal.runs_pwsh('%ProgramFiles%\\PowerShell\\7\\pwsh.exe'))
+        self.assertFalse(terminal.runs_pwsh('C:\\Program Files\\tools\\mypwsh.exe'))
+        self.assertFalse(terminal.runs_pwsh(None))
+
+    def test_terminal_and_dalftui_profiles_are_never_old_gist_profiles(self):
+        for guid in (terminal.PWSH_GUID, terminal.ADMIN_GUID.upper()):
+            for name in terminal.GIST_NAMES:
+                with self.subTest(guid=guid, name=name):
+                    entry = {'guid': guid, 'name': name, 'commandline': 'pwsh.exe'}
+                    self.assertFalse(terminal.is_gist_profile(entry))
+                    personal = json.dumps({'defaultProfile': name, 'profiles': {'list': [entry]}})
+                    result = self.settings(terminal.updated_settings(personal, 'pwsh.exe'))
+                    self.assertIn(guid, [profile['guid'] for profile in result['profiles']['list']])
+                    self.assertEqual(result['defaultProfile'], name)
+
+    def test_old_gist_replacement_shows_terminal_profile_again(self):
+        # Old gist users may have hidden Terminal's duplicate PowerShell 7 profile.
+        stub = {'guid': terminal.PWSH_GUID.upper(), 'hidden': True, 'source': terminal.PWSH_SOURCE}
+        personal = json.loads(self.gist_settings('{7e1e3c38-0000-4000-8000-000000000001}', stub))
+        personal['disabledProfileSources'] = ['Windows.Terminal.Wsl', terminal.PWSH_SOURCE]
+        installed = terminal.updated_settings(json.dumps(personal, indent=4), 'pwsh.exe')
+        result = self.settings(installed)
+        self.assertEqual(result['disabledProfileSources'], ['Windows.Terminal.Wsl'])
+        shown = {'guid': stub['guid'], 'source': terminal.PWSH_SOURCE, 'antialiasingMode': 'cleartype'}
+        self.assertEqual(result['profiles']['list'][0], shown)
+        self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID)
+        self.assertEqual(terminal.updated_settings(installed, 'pwsh.exe'), installed)
+        # Without old gist profiles, a hidden or disabled Terminal profile is left alone.
+        hidden = json.dumps({'disabledProfileSources': [terminal.PWSH_SOURCE], 'profiles': {'list': [stub]}})
+        result = self.settings(terminal.updated_settings(hidden, 'pwsh.exe'))
+        self.assertIs(result['profiles']['list'][0]['hidden'], True)
+        self.assertEqual(result['disabledProfileSources'], [terminal.PWSH_SOURCE])
+
+    def test_cli_reports_removed_gist_profiles(self):
+        self.path.write_text(self.gist_settings('Windows PowerShell 7'), encoding='utf-8')
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--settings',
+                                 str(self.path), '--pwsh', 'pwsh.exe'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Removed profile from an old setup: Windows PowerShell 7 (Administrator)', result.stdout)
+        self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['defaultProfile'], terminal.PWSH_GUID)
+        self.assertEqual(len(list(self.root.glob('*.bak'))), 1)
 
     def test_rerun_removes_shortcuts_from_earlier_versions_and_keeps_personal_entries(self):
         copy = {'id': 'Personal.Copy', 'command': 'copy'}
@@ -221,7 +345,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         result = self.settings(installed.decode())
         self.assertEqual((result['actions'], result['keybindings']), ([], []))
-        self.assertEqual(result['profiles']['defaults']['font']['face'], terminal.PROMPT_FONT)
+        self.assertEqual(result['profiles']['defaults']['font']['face'], terminal.WINDOWS_FONT)
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -243,7 +367,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertIn('// personal', text)
         self.assertIn('// mine', text)
         self.assertEqual(self.settings(text), {'editor.fontSize': 13, 'files.eol': '\n',
-                                               **terminal.VSCODE_SETTINGS})
+                                               **terminal.WINDOWS_VSCODE_SETTINGS})
         with patch.object(Path, 'write_bytes') as write:
             terminal.configure_vscode(self.path)
         write.assert_not_called()
@@ -252,10 +376,20 @@ class TerminalSetupTests(unittest.TestCase):
     def test_vscode_font_chosen_by_user_is_replaced(self):
         personal = ('{"terminal.integrated.fontFamily": "Consolas", // mine\n'
                     ' "terminal.integrated.fontSize": 14}')
-        updated = terminal.vscode_settings(personal)
-        self.assertEqual(updated, '{"terminal.integrated.fontFamily": "Hack Nerd Font", // mine\n'
+        updated = terminal.vscode_settings(personal, terminal.WINDOWS_VSCODE_SETTINGS)
+        self.assertEqual(updated, '{"terminal.integrated.fontFamily": "FiraCode Nerd Font Mono", // mine\n'
                                   ' "terminal.integrated.fontSize": 12}')
-        self.assertEqual(terminal.vscode_settings(updated), updated)
+        self.assertEqual(terminal.vscode_settings(updated, terminal.WINDOWS_VSCODE_SETTINGS), updated)
+        # ./install on Linux desktops and macOS keeps Hack Nerd Font.
+        self.assertEqual(self.settings(terminal.vscode_settings(updated))['terminal.integrated.fontFamily'],
+                         'Hack Nerd Font')
+
+    def test_vscode_earlier_windows_font_is_migrated(self):
+        self.path.write_text('{"terminal.integrated.fontFamily": "Hack Nerd Font",'
+                             ' "terminal.integrated.fontSize": 12}', encoding='utf-8')
+        terminal.configure_vscode(self.path)
+        self.assertEqual(self.settings(self.path.read_text(encoding='utf-8')), terminal.WINDOWS_VSCODE_SETTINGS)
+        self.assertEqual(len(list(self.root.glob('*.bak'))), 1)
 
     def test_vscode_duplicate_keys_replace_the_effective_value_only(self):
         personal = ('{"terminal.integrated.fontSize": 10, "terminal.integrated.fontSize": 11,\n'
@@ -291,7 +425,7 @@ class TerminalSetupTests(unittest.TestCase):
         result = subprocess.run(command, env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('VS Code settings created', result.stdout)
-        self.assertEqual(self.settings(missing.read_text(encoding='utf-8')), terminal.VSCODE_SETTINGS)
+        self.assertEqual(self.settings(missing.read_text(encoding='utf-8')), terminal.WINDOWS_VSCODE_SETTINGS)
         self.assertFalse(list(missing.parent.glob('*.bak')))
         missing.write_text('{broken}', encoding='utf-8')
         result = subprocess.run(command, env=environment, capture_output=True, text=True)
@@ -369,7 +503,8 @@ class TerminalSetupTests(unittest.TestCase):
             self.assertTrue(content.startswith(b'\xef\xbb\xbf{\r\n'))
             self.assertNotIn(b'\n', content.replace(b'\r\n', b''))
             self.assertIn(comment, content)
-            self.assertNotIn(b'Hack Nerd Font', content)
+            self.assertNotIn(terminal.WINDOWS_FONT.encode(), content)
+            self.assertNotIn(b'cursorShape', content)
         self.assertEqual(self.settings(vscode.read_text(encoding='utf-8-sig')), {'editor.fontSize': 14})
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -386,6 +521,33 @@ class TerminalSetupTests(unittest.TestCase):
             self.assertEqual(terminal.removed_vscode_settings(unchanged), unchanged)
         with self.assertRaises(ValueError):
             terminal.removed_vscode_settings('{broken')
+
+    def test_uninstall_vscode_font_values_depend_on_the_platform(self):
+        values = terminal.WINDOWS_VSCODE_VALUES
+        for font, kept_linux, kept_windows in (('FiraCode Nerd Font Mono', True, False),
+                                               ('Hack Nerd Font', False, False), ('Consolas', True, True)):
+            with self.subTest(font=font):
+                text = json.dumps({'terminal.integrated.fontFamily': font})
+                # Windows also removes the font that earlier Windows versions set.
+                self.assertEqual('fontFamily' in terminal.removed_vscode_settings(text), kept_linux)
+                self.assertEqual('fontFamily' in terminal.removed_vscode_settings(text, values), kept_windows)
+
+    def test_uninstall_removes_profile_defaults_only_while_they_are_dalftui_values(self):
+        installed = self.settings(terminal.updated_settings('{"profiles": {"defaults": {"opacity": 90}}}'))
+        defaults = installed['profiles']['defaults']
+        self.assertEqual(self.settings(terminal.removed_settings(json.dumps(installed)))['profiles']['defaults'],
+                         {'opacity': 90, 'font': {}})
+        defaults.update(cursorShape='vintage', padding='0', bellStyle='all')
+        defaults['font']['face'] = 'Hack Nerd Font'  # Set by earlier Windows versions.
+        removed = self.settings(terminal.removed_settings(json.dumps(installed)))['profiles']['defaults']
+        self.assertEqual(removed, {'opacity': 90, 'font': {}, 'cursorShape': 'vintage', 'padding': '0',
+                                   'bellStyle': 'all'})
+
+    def test_uninstall_keeps_replaced_gist_profiles_removed(self):
+        installed = terminal.updated_settings(self.gist_settings('Windows PowerShell 7'), 'pwsh.exe')
+        result = self.settings(terminal.removed_settings(installed))
+        self.assertEqual(result['profiles']['list'], [])
+        self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID)
 
     def test_uninstall_cli_reports_malformed_settings_without_writing(self):
         self.path.write_text('{"actions": [}', encoding='utf-8')

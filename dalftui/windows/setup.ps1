@@ -313,25 +313,27 @@ function Test-DalftuiNerdFont {
     foreach ($hive in @('HKCU:', 'HKLM:')) {
         $fonts = Get-ItemProperty -LiteralPath ($hive + '\Software\Microsoft\Windows NT\CurrentVersion\Fonts') `
             -ErrorAction SilentlyContinue
-        # 'Hack Nerd Font Bold (TrueType)', not the Mono or Propo families.
-        if ($fonts -and @($fonts.PSObject.Properties.Name -match '^Hack Nerd Font (?!Mono\b|Propo\b)').Count) { return $true }
+        # 'FiraCode Nerd Font Mono Reg (TrueType)', or 'FiraCodeNerdFontMono-Regular (TrueType)' from
+        # installers such as Scoop; not the FiraCode Nerd Font or Propo families.
+        if ($fonts -and @($fonts.PSObject.Properties.Name -match '^FiraCode ?Nerd ?Font ?Mono[ -]').Count) { return $true }
     }
     return $false
 }
 
 function Install-DalftuiNerdFont([string]$OhMyPosh) {
+    # Hack Nerd Font, which earlier versions installed, is kept.
     if (Test-DalftuiNerdFont) {
-        Write-Host 'Hack Nerd Font already installed.'
+        Write-Host 'FiraCode Nerd Font already installed.'
         return
     }
     # Installs for the current user; no administrator rights are needed.
     # A direct release asset avoids the named-font GitHub API lookup, which can
     # fail on shared CI runners before the font download even starts.
-    & $OhMyPosh font install 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Hack.zip' | Out-Host
+    & $OhMyPosh font install 'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip' | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-DalftuiNerdFont)) {
-        throw 'Hack Nerd Font installation failed; see the message above.'
+        throw 'FiraCode Nerd Font installation failed; see the message above.'
     }
-    Write-Host 'Hack Nerd Font installed.'
+    Write-Host 'FiraCode Nerd Font installed.'
 }
 
 function Test-DalftuiWindowsPlatform {

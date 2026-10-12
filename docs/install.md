@@ -456,8 +456,12 @@ This removes the managed block from each PowerShell profile (or the one given
 with `-ProfilePath`). A block that contains other lines is kept and reported. It
 removes from Windows Terminal the Ctrl+Shift+F2 and F3 actions and keybindings
 that earlier versions installed, the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
-PowerShell 7 profile, and the default `Hack Nerd Font` face, and the VS Code font
-settings above, in each case while they still hold the values setup wrote.
+PowerShell 7 profile, the default `FiraCode Nerd Font Mono` face (or the `Hack Nerd Font`
+face of earlier versions), the bar cursor, padding and bell style defaults, and VS Code's
+`terminal.integrated.fontFamily` (`FiraCode Nerd Font Mono`, or the earlier `Hack Nerd Font`)
+and `terminal.integrated.fontSize` (`12`), in each case while they still hold the values
+setup wrote. The old setup gist's profiles that setup removed are not restored, nor is
+Terminal's PowerShell 7 profile hidden again; the Terminal backups keep the earlier settings.
 `-TerminalSettingsPath`, `-VSCodePath` and `-SkipTerminal` work as for setup;
 `-VSCodePath` may name a directory whose `Code.exe` was removed.
 Each changed file is first copied to `<file>.dalftui-<id>.bak`, where earlier
@@ -536,10 +540,12 @@ PowerShell session to use `dssh`, **Ctrl+B, then F2** and **Ctrl+B, then F3**. U
 configure only a specific profile, including a different PowerShell host.
 
 The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
-Setup installs Hack Nerd Font for the current user when it is missing, and sets
-it as the font face in Windows Terminal's `profiles.defaults`. A profile with its
-own font face keeps it.
-It also sets `terminal.integrated.fontFamily` to Hack Nerd Font and
+Setup installs FiraCode Nerd Font for the current user when it is missing; Hack
+Nerd Font, which earlier versions installed, is kept. In Windows Terminal's
+`profiles.defaults`, setup sets the font face to `FiraCode Nerd Font Mono`, a bar
+cursor (`cursorShape`), `padding` of 8 on each side and no bell (`bellStyle`),
+replacing other values there on each run. A profile with its own value keeps it.
+It also sets `terminal.integrated.fontFamily` to FiraCode Nerd Font Mono and
 `terminal.integrated.fontSize` to 12 in the configured VS Code's `settings.json`
 (in `data\user-data` for a portable installation), creating the file when needed.
 
@@ -579,7 +585,12 @@ and adds no duplicates on repeated runs. It removes the Ctrl+Shift+F2 and F3
 actions installed by earlier versions.
 When PowerShell 7 is installed, setup turns on ClearType in Terminal's own PowerShell
 profile and adds **Windows PowerShell 7 (Admin)**, which opens it as administrator
-(Terminal 1.13+). Profiles you already have, or later edit, are kept.
+(Terminal 1.13+). Profiles you already have, or later edit, are kept, except the
+**Windows PowerShell 7** and **Windows PowerShell 7 (Administrator)** profiles of
+an old setup gist: setup removes them when they have that exact name, no `source`
+and a `pwsh.exe` command line. Terminal's PowerShell 7 profile replaces them: setup
+shows it again if it was hidden or its source was in `disabledProfileSources`, and
+makes it the default if one of the removed profiles was.
 If no settings are found, open Windows Terminal once and rerun setup. For a
 portable installation, pass its settings path explicitly:
 
