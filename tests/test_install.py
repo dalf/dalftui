@@ -185,7 +185,7 @@ class InstallationTests(DisposableSetup):
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(command_log.read_text().splitlines(),
-                         ['new-session', '-A', '-s', '0', *UNLABELLED])
+                         ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
 
     def test_dry_run_does_not_create_files_or_backups(self):
         self.paths.tmux.write_text('set -g mouse off\n')
@@ -485,7 +485,10 @@ class TmuxFixture(DisposableSetup):
         super().setUp()
         self.install(profile=self.profile)
         self.socket = self.directory / 'tmux.socket'
-        self.env = dict(os.environ)
+        # The session-owner hooks keep their lock and records in the runtime directory.
+        runtime = self.directory / 'run'
+        runtime.mkdir(mode=0o700)
+        self.env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
         self.env.pop('TMUX', None)
         self.env.pop('TMUX_PANE', None)
         self.command = ['tmux', '-N', '-S', str(self.socket)]

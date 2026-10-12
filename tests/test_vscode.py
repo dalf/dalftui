@@ -19,7 +19,7 @@ import unittest
 from unittest.mock import patch
 
 from test_install import DisposableSetup, TmuxFixture
-from test_tmux_start import UNLABELLED
+from test_tmux_start import UNLABELLED, Terminal
 from dalftui import vscode
 from dalftui.linux import tmux_editor
 
@@ -296,8 +296,11 @@ class EditorTests(DisposableSetup):
     def test_remote_session_policy_and_forwarded_socket_cleanup(self):
         tmux = self.bin / 'tmux'
         tmux.write_text('#!/bin/sh\n'
-                        'if [ "$1" = list-sessions ]; then printf "%s" "$TEST_SESSIONS"; exit; fi\n'
-                        'if [ "$1" = has-session ]; then exit 0; fi\n'
+                        'case $1 in\n'
+                        '  list-sessions) printf "%s" "$TEST_SESSIONS"; exit ;;\n'
+                        '  list-clients|detach-client) exit 0 ;;\n'
+                        '  display-message) [ "$3" != -t ] || printf "1\\n"; exit 0 ;;\n'
+                        'esac\n'
                         'printf "%s\\n" "$DALFTUI_EDITOR_SOCKET" > "$TEST_SOCKET_ENV"\n'
                         'printf "%s\\n" "$@" > "$TEST_TMUX_ARGS"\n')
         tmux.chmod(0o755)
@@ -306,12 +309,17 @@ class EditorTests(DisposableSetup):
         def local_ssh(args, **kwargs):
             return real_run(shlex.split(args[-1]), **kwargs, timeout=5)
 
-        for sessions, selection, expected in [('', '', ['new-session', '-A', '-s', '0', *UNLABELLED]),
-                                              ('$5 0\n', '', ['attach-session', '-t', '$5', *UNLABELLED]),
-                                              ('$5 1\n', '', ['new-session', *UNLABELLED]),
-                                              ('$5 0\n$9 1\n', '$9\n',
-                                               ['attach-session', '-t', '$9', *UNLABELLED])]:
-            with self.subTest(sessions=sessions):
+        remote = {'SSH_CONNECTION': '10.8.0.2 51000 10.8.0.1 22'}
+        local = {'SSH_CONNECTION': ''}
+        for sessions, origin, keys, expected in [
+                ('', remote, None, ['new-session', '-A', '-D', '-s', '0', *UNLABELLED]),
+                ('$5 0 work\n', remote, None, ['attach-session', '-d', '-t', '$5', *UNLABELLED]),
+                ('$5 1 0\n', local, None, ['new-session', *UNLABELLED]),
+                # Without a terminal the menu refuses; it never takes over.
+                ('$5 1 0\n', remote, None, None),
+                ('$5 0 work\n$9 1 0\n', remote, '2y',
+                 ['attach-session', '-d', '-t', '$9', *UNLABELLED])]:
+            with self.subTest(sessions=sessions, origin=origin):
                 bridge = vscode.EditorBridge('server', self.editor_env)
                 bridge.local_socket = '/tmp/local.sock'
                 bridge.remote_directory = str(self.directory / 'remote-bridge')
@@ -323,13 +331,28 @@ class EditorTests(DisposableSetup):
                 socket_file = Path(bridge.remote_socket)
                 socket_file.touch()
                 command = shlex.split(picker.ssh_command('server', bridge=bridge)[-1])
+                arguments = self.directory / 'tmux-args'
+                arguments.unlink(missing_ok=True)
                 env = dict(self.editor_env, TEST_SESSIONS=sessions,
                            TEST_SOCKET_ENV=str(self.directory / 'socket-env'),
-                           TEST_TMUX_ARGS=str(self.directory / 'tmux-args'))
-                subprocess.run(command, env=env, input=selection, text=True, check=True,
-                               capture_output=True, timeout=5)
-                self.assertEqual((self.directory / 'tmux-args').read_text().splitlines(), expected)
-                self.assertEqual((self.directory / 'socket-env').read_text().strip(), str(socket_file))
+                           TEST_TMUX_ARGS=str(arguments), **origin)
+                if keys:
+                    terminal = Terminal(self, command, env=env, cwd=self.directory)
+                    for key, prompt in zip(keys, ('Choice [n]: ', '[y/N] ')):
+                        terminal.expect(prompt)
+                        terminal.send(key)
+                    status = terminal.finish()
+                else:
+                    status = subprocess.run(command, env=env, input='1\ny\n', text=True,
+                                            capture_output=True, timeout=5).returncode
+                if expected is None:
+                    self.assertEqual(status, 1)
+                    self.assertFalse(arguments.exists())
+                else:
+                    self.assertEqual(status, 0)
+                    self.assertEqual(arguments.read_text().splitlines(), expected)
+                    self.assertEqual((self.directory / 'socket-env').read_text().strip(),
+                                     str(socket_file))
                 self.assertFalse(socket_file.exists())
                 self.assertFalse(Path(bridge.remote_token_file).exists())
                 self.assertFalse(Path(bridge.remote_directory).exists())
@@ -357,6 +380,7 @@ class RemoteCredentialsTests(unittest.TestCase):
         tmux.write_text(f'#!{sys.executable}\nimport hashlib, json, os, pathlib, sys, time\n'
                         'if sys.argv[1] == "list-sessions":\n'
                         '    print(os.environ.get("TEST_SESSION_ROWS", ""), end=""); sys.exit(0)\n'
+                        'if sys.argv[1] in ("list-clients", "display-message"): sys.exit(0)\n'
                         'pathlib.Path(os.environ["TEST_ATTACH"]).write_text(json.dumps({\n'
                         '"endpoint": os.environ["DALFTUI_EDITOR_SOCKET"],\n'
                         '"digest": hashlib.sha256(os.environ["DALFTUI_EDITOR_TOKEN"].encode()).hexdigest(),\n'
@@ -429,20 +453,30 @@ class RemoteCredentialsTests(unittest.TestCase):
                 self.assertNotIn(bridge.token.encode(), result.stdout + result.stderr)
                 self.assertFalse(Path(bridge.remote_directory).exists())
 
-    def test_cancel_and_eof_clean_up_credentials_for_both_transports(self):
+    def test_cancel_eof_and_missing_terminal_clean_up_credentials_for_both_transports(self):
+        # The policy's Ctrl+C handler exits through the bootstrap's cleanup trap.
         for transport in ('unix', 'tcp'):
-            for selection, status in ((b'q\n', 0), (b'', 1)):
-                with self.subTest(transport=transport, selection=selection):
+            for key, status in (('q', 0), ('\x03', 0), ('\x04', 1), (None, 1)):
+                with self.subTest(transport=transport, key=key):
                     bridge = self.bridge(transport)
                     self.prepare(bridge)
                     with socket.socket(socket.AF_UNIX) as forwarded:
                         forwarded.bind(bridge.remote_socket)
-                    result = self.real_run(
-                        shlex.split(picker.ssh_command('server', bridge=bridge)[-1]),
-                        env=dict(self.env, TEST_SESSION_ROWS='$5 0\n$9 1\n'),
-                        input=selection, capture_output=True, timeout=5)
-                    self.assertEqual(result.returncode, status, result.stderr)
-                    self.assertNotIn(bridge.token.encode(), result.stdout + result.stderr)
+                    command = shlex.split(picker.ssh_command('server', bridge=bridge)[-1])
+                    env = dict(self.env, TEST_SESSION_ROWS='$5 0 work\n$9 1 0\n',
+                               SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22')
+                    if key is None:
+                        result = self.real_run(command, env=env, input=b'1\ny\n',
+                                               capture_output=True, timeout=5)
+                        self.assertEqual(result.returncode, status, result.stderr)
+                        output = result.stdout + result.stderr
+                    else:
+                        terminal = Terminal(self, command, env=env, cwd=self.directory)
+                        terminal.expect('Choice [n]: ')
+                        terminal.send(key)
+                        self.assertEqual(terminal.finish(), status, terminal.text())
+                        output = terminal.output
+                    self.assertNotIn(bridge.token.encode(), output)
                     self.assertFalse(Path(self.env['TEST_ATTACH']).exists())
                     self.assertFalse(Path(bridge.remote_directory).exists())
 
@@ -604,9 +638,14 @@ class EditorTmuxTests(TmuxFixture):
         self.editor_env.pop(vscode.TOKEN_ENV, None)
 
     def attach(self, env):
+        # The hooks keep one client per session, so each client gets its own
+        # session in the group of "verify", which shares its windows.
+        session = self.tmux('new-session', '-d', '-t', 'verify', '-P', '-F', '#{session_name}')
+        window = self.tmux('display-message', '-p', '-t', 'verify', '#{window_index}')
+        self.tmux('select-window', '-t', f'{session}:{window}')
         master, slave = os.openpty()
         termios.tcsetwinsize(slave, (40, 140))
-        process = subprocess.Popen([*self.command, 'attach-session', '-t', 'verify'],
+        process = subprocess.Popen([*self.command, 'attach-session', '-t', session],
                                    stdin=slave, stdout=slave, stderr=slave,
                                    env=env, start_new_session=True)
         os.close(slave)

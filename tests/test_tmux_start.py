@@ -1,10 +1,13 @@
-"""Exercise the local and remote tmux session-start policy without a live server."""
+"""Exercise the local and remote tmux session-start policy."""
+import json
 import os
 from pathlib import Path
+import select
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.dont_write_bytecode = True
@@ -12,6 +15,110 @@ ROOT = Path(__file__).resolve().parents[1]
 STARTER = ROOT / 'bin/tmux-start.sh'
 # Without an SSH host label the session drops any label an earlier launch left.
 UNLABELLED = [';', 'set-option', '-u', '@dalftui_host']
+REMOTE = '10.8.0.9 50000 10.8.0.1 22'
+TAKEOVER_MESSAGE = "printf '%s\\n' 'Another terminal took over this tmux session.'"
+
+# Make the pseudo-terminal the child's controlling terminal, so Ctrl+C sends SIGINT.
+CONTROLLING_TERMINAL = ('import fcntl, os, sys, termios\n'
+                        'fcntl.ioctl(0, termios.TIOCSCTTY, 0)\n'
+                        'os.execvp(sys.argv[1], sys.argv[1:])\n')
+
+FAKE_TMUX = '''import json, os, sys
+args = sys.argv[1:]
+if 'TMUX' in os.environ or 'TMUX_PANE' in os.environ:
+    sys.exit(99)
+rows = os.environ.get('TEST_SESSION_ROWS', '')
+if args[0] == 'list-sessions':
+    print(rows, end='')
+    sys.exit(0)
+if args[0] == 'list-clients':
+    print(os.environ.get('TEST_CLIENT_ROWS', ''), end='')
+    sys.exit(0)
+if args[0] == 'display-message':
+    if '-t' not in args:
+        print('vm')
+        sys.exit(0)
+    target = args[args.index('-t') + 1]
+    if target in os.environ.get('TEST_GONE', '').split():
+        sys.exit(1)
+    for row in rows.splitlines():
+        session, attached = row.split(' ')[:2]
+        if session == target:
+            print(os.environ.get('TEST_CURRENT_CLIENTS', attached))
+            sys.exit(0)
+    sys.exit(1)
+if args[0] == 'detach-client':
+    with open(os.environ['TEST_DETACH_LOG'], 'a', encoding='utf-8') as log:
+        log.write(json.dumps(args) + '\\n')
+    sys.exit(0)
+with open(os.environ['TEST_COMMAND_LOG'], 'wb') as log:
+    log.write(b''.join(os.fsencode(arg) + b'\\n' for arg in args))
+sys.exit(int(os.environ.get('TEST_TMUX_STATUS', '0')))
+'''
+
+
+class Terminal:
+    """Run a command on a pseudo-terminal and type into it like a user."""
+    def __init__(self, test, command, *, env, cwd, size=None):
+        # These modules exist only on POSIX; this file is also imported on Windows.
+        import pty
+        import termios
+        self.test = test
+        self.master, self.slave = pty.openpty()
+        test.addCleanup(os.close, self.master)
+        test.addCleanup(os.close, self.slave)
+        if size:
+            termios.tcsetwinsize(self.slave, size)
+        self.process = subprocess.Popen(
+            [sys.executable, '-c', CONTROLLING_TERMINAL, *command],
+            stdin=self.slave, stdout=self.slave, stderr=self.slave,
+            env=env, cwd=cwd, start_new_session=True)
+        test.addCleanup(self.stop)
+        self.output = b''
+        self.position = 0
+
+    def stop(self):
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait(5)
+
+    def read(self, timeout):
+        ready, _, _ = select.select([self.master], [], [], timeout)
+        if not ready:
+            return False
+        try:
+            data = os.read(self.master, 65536)
+        except OSError:
+            return False
+        self.output += data
+        return bool(data)
+
+    def expect(self, text, timeout=5):
+        """Wait for text after the previous expectation."""
+        expected = text.encode()
+        deadline = time.monotonic() + timeout
+        while (found := self.output.find(expected, self.position)) < 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or (not self.read(remaining) and self.process.poll() is not None):
+                self.test.fail(f'{text!r} not shown; output: {self.text()!r}')
+        self.position = found + len(expected)
+
+    def send(self, data):
+        os.write(self.master, data.encode() if isinstance(data, str) else data)
+
+    def finish(self, timeout=5):
+        status = self.process.wait(timeout)
+        while self.read(0.1):
+            pass
+        return status
+
+    def text(self):
+        return self.output.decode(errors='replace').replace('\r\n', '\n')
+
+    def line_mode_restored(self):
+        import termios
+        flags = termios.tcgetattr(self.slave)[3]
+        return bool(flags & termios.ICANON and flags & termios.ECHO)
 
 
 @unittest.skipIf(sys.platform == 'win32', 'The tmux entrypoint runs in a POSIX shell')
@@ -23,86 +130,314 @@ class TmuxStartTests(unittest.TestCase):
         self.bin = self.directory / 'bin'
         self.bin.mkdir()
         self.log = self.directory / 'command'
+        self.detach_log = self.directory / 'detach'
 
         tmux = self.bin / 'tmux'
-        tmux.write_text(
-            '#!/bin/sh\n'
-            'case "$1" in\n'
-            '  list-sessions) printf "%b" "$TEST_SESSION_ROWS"; exit 0 ;;\n'
-            '  has-session) [ "$3" = "$TEST_VALID_SESSION" ]; exit ;;\n'
-            'esac\n'
-            'printf "%s\\n" "$@" > "$TEST_COMMAND_LOG"\n'
-            '[ "${TMUX-unset}" = unset ] && [ "${TMUX_PANE-unset}" = unset ] || exit 99\n'
-            'exit "${TEST_TMUX_STATUS:-0}"\n')
+        tmux.write_text(f'#!{sys.executable}\n' + FAKE_TMUX, encoding='utf-8')
         tmux.chmod(0o755)
 
-        shell = self.bin / 'test-shell'
-        shell.write_text('#!/bin/sh\nprintf "shell\\n%s\\n" "$@" > "$TEST_COMMAND_LOG"\n'
-                         'exit "${TEST_SHELL_STATUS:-0}"\n')
-        shell.chmod(0o755)
+        # No installed agent-alias helper unless a test adds one.
+        self.config = self.directory / 'config'
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.defpath,
-                        SHELL=str(shell), TEST_COMMAND_LOG=str(self.log),
-                        TEST_SESSION_ROWS='', TEST_VALID_SESSION='',
-                        TMUX='stale', TMUX_PANE='%9')
+                        TEST_COMMAND_LOG=str(self.log), TEST_DETACH_LOG=str(self.detach_log),
+                        TEST_SESSION_ROWS='', TMUX='stale', TMUX_PANE='%9',
+                        XDG_CONFIG_HOME=str(self.config))
+        for name in ('SSH_CONNECTION', 'SSH_CLIENT', 'dalftui_host_label'):
+            self.env.pop(name, None)
 
-    def run_starter(self, rows, selection='', valid_session=''):
-        env = dict(self.env, TEST_SESSION_ROWS=rows, TEST_VALID_SESSION=valid_session)
+    def run_starter(self, rows, selection='', **env):
+        env = dict(self.env, TEST_SESSION_ROWS=rows, **env)
         return subprocess.run(['/bin/sh', str(STARTER)], input=selection, env=env,
                               cwd=self.directory, capture_output=True, text=True, timeout=5)
+
+    def terminal(self, rows, **env):
+        return Terminal(self, ['/bin/sh', str(STARTER)],
+                        env=dict(self.env, TEST_SESSION_ROWS=rows, **env), cwd=self.directory)
 
     def command(self):
         return self.log.read_text().splitlines()
 
-    def test_no_session_creates_zero(self):
-        result = self.run_starter('')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['new-session', '-A', '-s', '0', *UNLABELLED])
+    def detached(self):
+        return [json.loads(line) for line in self.detach_log.read_text().splitlines()]
 
-    def test_one_detached_session_attaches_it(self):
-        result = self.run_starter('$5 0\n')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
+    def assert_nothing_started(self):
+        self.assertFalse(self.log.exists())
+        self.assertFalse(self.detach_log.exists())
 
-    def test_one_attached_session_creates_an_independent_session(self):
-        result = self.run_starter('$5 1\n')
+    def test_no_session_creates_zero_without_mirroring_a_racing_first_client(self):
+        for env in ({}, {'SSH_CONNECTION': REMOTE}):
+            with self.subTest(env=env):
+                result = self.run_starter('', **env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
+
+    def test_one_detached_session_attaches_it_and_detaches_late_clients(self):
+        for env in ({}, {'SSH_CONNECTION': REMOTE}):
+            with self.subTest(env=env):
+                result = self.run_starter('$5 0 work\n', **env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), ['attach-session', '-d', '-t', '$5', *UNLABELLED])
+                self.assertEqual(result.stdout, '')
+
+    def test_ops_sessions_never_count(self):
+        ops = '$7 0 dalftui-ops-123\n$8 1 dalftui-ops-456\n'
+        for rows, expected in ((ops, ['new-session', '-A', '-D', '-s', '0']),
+                               ('$5 0 work\n' + ops, ['attach-session', '-d', '-t', '$5'])):
+            with self.subTest(rows=rows):
+                result = self.run_starter(rows, SSH_CONNECTION=REMOTE)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), expected + UNLABELLED)
+
+    def test_one_attached_session_creates_an_independent_session_only_locally(self):
+        result = self.run_starter('$5 1 0\n')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.command(), ['new-session', *UNLABELLED])
-
-    def test_multiple_sessions_default_to_new(self):
-        result = self.run_starter('$5 0\n$9 1\n', '\n')
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.log.unlink()
+        # Over SSH the attached client may be a connection that died while its laptop slept.
+        terminal = self.terminal('$5 1 0\n', SSH_CONNECTION=REMOTE)
+        terminal.expect('[1] attach   [n] new session (default)   [q] cancel')
+        terminal.expect('Choice [n]: ')
+        self.assertFalse(self.log.exists())
+        terminal.send('\r')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
         self.assertEqual(self.command(), ['new-session', *UNLABELLED])
-        self.assertIn('[s] shell', result.stdout)
+        self.assertFalse(self.detach_log.exists())
 
-    def test_multiple_sessions_can_attach_by_id(self):
-        result = self.run_starter('$5 0\n$9 1\n', '$5\n', '$5')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
+    def test_without_a_terminal_the_menu_refuses_and_never_takes_over(self):
+        for rows, env in (('$5 1 0\n', {'SSH_CONNECTION': REMOTE}),
+                          ('$5 0 work\n$9 1 0\n', {}),
+                          ('$5 0 work\n$9 1 0\n', {'SSH_CONNECTION': REMOTE})):
+            with self.subTest(rows=rows, env=env):
+                result = self.run_starter(rows, '1\ny\n', **env)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(result.stderr,
+                                 'Choosing a tmux session needs a terminal; nothing was started.\n')
+                self.assert_nothing_started()
+
+    def test_menu_lists_sessions_and_client_details_without_a_shell_option(self):
+        if not Path('/proc/self/environ').exists():
+            self.skipTest('Client origins are read from /proc')
+        remote_env = dict(self.env, SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22')
+        local_env = dict(self.env)
+        clients = []
+        for env in (remote_env, local_env):
+            process = subprocess.Popen(['sleep', '30'], env=env)
+            self.addCleanup(process.wait)
+            self.addCleanup(process.kill)
+            clients.append(process.pid)
+        now = int(time.time())
+        client_rows = (f'$5 {clients[0]} {now - 11130} {now - 7990} /dev/pts/4\n'
+                       f'$9 {clients[1]} {now - 200000} {now - 330} /dev/pts/7\n'
+                       f'$9 999999999 {now - 150} {now - 150} /dev/pts/8\n'
+                       '$7 1 1 1 /dev/pts/9\n')
+        terminal = self.terminal('$5 1 0\n$6 0 work\n$9 2 long name\n$7 1 dalftui-ops-1\n',
+                                 TEST_CLIENT_ROWS=client_rows, SSH_CONNECTION=REMOTE)
+        terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        lines = terminal.text().splitlines()
+        start = lines.index('tmux sessions on vm:')
+        self.assertEqual(lines[start + 1:start + 6], [
+            '  1  0          attached  pts/4 from 10.8.0.2, connected 3h05m ago, last key 2h13m ago',
+            '  2  work       detached',
+            '  3  long name  attached  pts/7 local, connected 2d07h ago, last key 5m ago',
+            '                          pts/8, connected 2m ago, last key 2m ago',
+            '[1-3] attach   [n] new session (default)   [q] cancel'])
+        self.assertNotIn('dalftui-ops', terminal.text())
+        self.assertNotIn('[s]', terminal.text())
+        self.assert_nothing_started()
+
+    def test_single_keystrokes_attach_a_detached_session_with_d(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE)
+        terminal.expect('[1-2] attach')
+        terminal.expect('Choice [n]: ')
+        terminal.send('1')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assertEqual(self.command(), ['attach-session', '-d', '-t', '$5', *UNLABELLED])
+        self.assertFalse(self.detach_log.exists())
+        self.assertTrue(terminal.line_mode_restored())
+
+    def test_declining_a_takeover_returns_to_the_list(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE)
+        terminal.expect('Choice [n]: ')
+        terminal.send('2')
+        terminal.expect('Session 0 has a client. Take it over (its window closes)? [y/N] ')
+        terminal.send('\r')
+        terminal.expect('tmux sessions on vm:')
+        terminal.expect('Choice [n]: ')
+        terminal.send('2')
+        terminal.expect('[y/N] ')
+        terminal.send('x')
+        terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assert_nothing_started()
+
+    def test_takeover_detaches_only_that_sessions_clients_with_a_message(self):
+        label = "alice@prod-é;$x #{host}"
+        terminal = self.terminal('$5 0 work\n$9 2 0\n', SSH_CONNECTION=REMOTE,
+                                 dalftui_host_label=label)
+        terminal.expect('Choice [n]: ')
+        terminal.send('2')
+        terminal.expect('Session 0 has 2 clients. Take it over (their windows close)? [y/N] ')
+        terminal.send('Y')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assertEqual(self.detached(), [['detach-client', '-s', '$9', '-E', TAKEOVER_MESSAGE]])
+        self.assertEqual(self.command(), ['attach-session', '-d', '-t', '$9',
+                                          ';', 'set-option', '@dalftui_host', label])
+
+    def test_current_state_decides_between_attach_and_takeover(self):
+        # The list said detached, but another terminal attached meanwhile.
+        terminal = self.terminal('$5 0 work\n$9 0 0\n', SSH_CONNECTION=REMOTE,
+                                 TEST_CURRENT_CLIENTS='1')
+        terminal.expect('Choice [n]: ')
+        terminal.send('1')
+        terminal.expect('Session work has a client.')
+        terminal.send('n')
+        terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assert_nothing_started()
+
+    def test_vanished_session_returns_to_the_list(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE, TEST_GONE='$5')
+        terminal.expect('Choice [n]: ')
+        terminal.send('1')
+        terminal.expect('Session work no longer exists.')
+        terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assert_nothing_started()
+
+    def test_enter_and_n_create_a_new_session(self):
+        for key in ('\r', 'n', 'N'):
+            with self.subTest(key=key):
+                terminal = self.terminal('$5 0 work\n$9 1 0\n')
+                terminal.expect('Choice [n]: ')
+                terminal.send(key)
+                self.assertEqual(terminal.finish(), 0, terminal.text())
+                self.assertEqual(self.command(), ['new-session', *UNLABELLED])
+                self.assertTrue(terminal.line_mode_restored())
+
+    def test_q_and_ctrl_c_cancel_and_restore_the_terminal(self):
+        for key, prompt in (('q', 'Choice [n]: '), ('\x03', 'Choice [n]: '),
+                            ('\x03', '[y/N] ')):
+            with self.subTest(key=key, prompt=prompt):
+                terminal = self.terminal('$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE)
+                terminal.expect('Choice [n]: ')
+                if prompt != 'Choice [n]: ':
+                    terminal.send('2')
+                    terminal.expect(prompt)
+                terminal.send(key)
+                self.assertEqual(terminal.finish(), 0, terminal.text())
+                self.assertTrue(terminal.line_mode_restored())
+                self.assert_nothing_started()
+
+    def test_end_of_input_exits_with_an_error(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n')
+        terminal.expect('Choice [n]: ')
+        terminal.send('\x04')
+        self.assertEqual(terminal.finish(), 1, terminal.text())
+        self.assert_nothing_started()
+
+    def test_invalid_keys_return_to_the_list(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n')
+        for key, message in (('x', 'Not a choice: x'), ('7', 'Not a choice: 7'),
+                             ('0', 'Not a choice: 0'), ('\x1b[A', 'Not a choice.'),
+                             # Shells differ on whether a multi-byte letter is printable.
+                             ('é', 'Not a choice')):
+            with self.subTest(key=key):
+                terminal.expect('Choice [n]: ')
+                terminal.send(key)
+                terminal.expect(message)
+        terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assertEqual(terminal.text().count('tmux sessions on vm:'), 6)
+        self.assert_nothing_started()
+
+    def test_more_than_nine_sessions_use_a_typed_line(self):
+        rows = ''.join(f'${number} 0 s{number}\n' for number in range(1, 13))
+        # Leading zeros name the same row; the number never reaches tmux as a target.
+        for typed, expected in (('12\n', ['attach-session', '-d', '-t', '$12']),
+                                ('01\n', ['attach-session', '-d', '-t', '$1']),
+                                ('0012\n', ['attach-session', '-d', '-t', '$12']),
+                                (' n \n', ['new-session'])):
+            with self.subTest(typed=typed):
+                terminal = self.terminal(rows)
+                terminal.expect('[1-12] attach')
+                terminal.expect('Choice [n]: ')
+                terminal.send(typed)
+                self.assertEqual(terminal.finish(), 0, terminal.text())
+                self.assertEqual(self.command(), expected + UNLABELLED)
+                self.assertIn(' 12  s12  detached', terminal.text())
+        terminal = self.terminal(rows)
+        for typed in ('13', '00', '013'):
+            terminal.expect('Choice [n]: ')
+            terminal.send(typed + '\n')
+            terminal.expect(f'Not a choice: {typed}\r\n')
+        terminal.expect('Choice [n]: ')
+        terminal.send('\x04')
+        self.assertEqual(terminal.finish(), 1, terminal.text())
 
     def test_ssh_host_label_is_set_on_the_new_or_attached_session(self):
         label = "alice@prod-é;$x #{host}"
         suffix = [';', 'set-option', '@dalftui_host', label]
         self.env['dalftui_host_label'] = label
-        for rows, selection, valid, expected in (
-                ('', '', '', ['new-session', '-A', '-s', '0']),
-                ('$5 0\n', '', '', ['attach-session', '-t', '$5']),
-                ('$5 1\n', '', '', ['new-session']),
-                ('$5 0\n$9 1\n', '$5\n', '$5', ['attach-session', '-t', '$5'])):
+        for rows, expected in (('', ['new-session', '-A', '-D', '-s', '0']),
+                               ('$5 0 work\n', ['attach-session', '-d', '-t', '$5']),
+                               ('$5 1 0\n', ['new-session'])):
             with self.subTest(rows=rows):
-                result = self.run_starter(rows, selection, valid)
+                result = self.run_starter(rows)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.command(), expected + suffix)
 
-    def test_multiple_sessions_can_start_a_plain_login_shell(self):
-        result = self.run_starter('$5 0\n$9 1\n', 's\n')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.command(), ['shell', '-l'])
+    def install_alias_helper(self, output, status=0):
+        helper = self.config / 'dalftui/bin/session_owner.py'
+        helper.parent.mkdir(parents=True)
+        helper.write_text('import os, sys\n'
+                          'assert sys.argv[1:] == ["new"] and "TMUX" not in os.environ\n'
+                          f'print({output!r})\nsys.exit({status})\n')
 
-    def test_invalid_session_returns_to_the_prompt(self):
-        result = self.run_starter('$5 0\n$9 1\n', 'missing\nq\n')
+    def test_ssh_sessions_on_installed_hosts_start_with_an_agent_alias(self):
+        if not Path('/proc/self/environ').exists():
+            self.skipTest('Agent aliases need /proc')
+        alias = '/run/user/1000/dalftui-agent/' + '0123456789abcdef' * 2
+        self.install_alias_helper(alias)
+        # The first pane inherits the alias; the option records it unless -A
+        # attached an existing session that already has one.
+        record = [';', 'if-shell', '-F', '#{?@dalftui_agent_alias,,1}',
+                  f'set-option @dalftui_agent_alias {alias}']
+        for rows, expected in (('', ['new-session', '-e', f'SSH_AUTH_SOCK={alias}',
+                                     '-A', '-D', '-s', '0', *record]),
+                               ('$5 0 work\n', ['attach-session', '-d', '-t', '$5'])):
+            with self.subTest(rows=rows):
+                result = self.run_starter(rows, SSH_CONNECTION=REMOTE)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), expected + UNLABELLED)
+        terminal = self.terminal('$5 1 0\n', SSH_CONNECTION=REMOTE)
+        terminal.expect('Choice [n]: ')
+        terminal.send('n')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assertEqual(self.command(), ['new-session', '-e', f'SSH_AUTH_SOCK={alias}', *record,
+                                          *UNLABELLED])
+        # Local terminals keep tmux's usual handling.
+        result = self.run_starter('$5 1 0\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(self.log.exists())
-        self.assertIn('No such tmux session: missing', result.stderr)
+        self.assertEqual(self.command(), ['new-session', *UNLABELLED])
+
+    def test_unavailable_or_unsafe_aliases_keep_the_raw_socket(self):
+        if not Path('/proc/self/environ').exists():
+            self.skipTest('Agent aliases need /proc')
+        for output, status in (('/run/user/1000/dalftui-agent/' + 'a' * 32, 1), ('', 0),
+                               ('relative/path', 0), ('/tmp/x y', 0), ("/tmp/$(probe);'", 0)):
+            with self.subTest(output=output, status=status):
+                shutil.rmtree(self.config, ignore_errors=True)
+                self.install_alias_helper(output, status)
+                result = self.run_starter('', SSH_CONNECTION=REMOTE)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.command(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
 
     def test_copied_and_installed_entrypoints_forward_arguments_from_an_unrelated_directory(self):
         checkout = self.directory / "checkout's $cash ; & é $(probe)"
@@ -129,24 +464,17 @@ class TmuxStartTests(unittest.TestCase):
                 self.assertEqual(result.stdout + result.stderr, '')
                 self.assertEqual(argument_log.read_bytes().split(b'\0')[:-1],
                                  [argument.encode('utf-8') for argument in arguments])
-                self.assertEqual(self.command(), ['new-session', '-A', '-s', '0', *UNLABELLED])
+                self.assertEqual(self.command(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
 
-    def test_entrypoint_propagates_attach_and_plain_shell_status(self):
+    def test_entrypoint_propagates_attach_and_menu_statuses(self):
         self.env['TEST_TMUX_STATUS'] = '17'
-        result = self.run_starter('$5 0\n')
+        result = self.run_starter('$5 0 work\n')
         self.assertEqual(result.returncode, 17, result.stderr)
-        self.assertEqual(self.command(), ['attach-session', '-t', '$5', *UNLABELLED])
-        self.env['TEST_SHELL_STATUS'] = '23'
-        result = self.run_starter('$5 0\n$9 1\n', 's\n')
-        self.assertEqual(result.returncode, 23, result.stderr)
-        self.assertEqual(self.command(), ['shell', '-l'])
-
-    def test_cancel_and_eof_keep_their_exit_statuses(self):
-        for selection, status in (('q\n', 0), ('', 1)):
-            with self.subTest(selection=selection):
-                result = self.run_starter('$5 0\n$9 1\n', selection)
-                self.assertEqual(result.returncode, status, result.stderr)
-                self.assertFalse(self.log.exists())
+        self.assertEqual(self.command(), ['attach-session', '-d', '-t', '$5', *UNLABELLED])
+        terminal = self.terminal('$5 0 work\n$9 1 0\n')
+        terminal.expect('Choice [n]: ')
+        terminal.send('1')
+        self.assertEqual(terminal.finish(), 17, terminal.text())
 
     def test_missing_tmux_keeps_the_local_error_and_status(self):
         (self.bin / 'tmux').unlink()
@@ -158,6 +486,87 @@ class TmuxStartTests(unittest.TestCase):
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, 'tmux is not installed on this host.\n')
         self.assertFalse(self.log.exists())
+
+
+@unittest.skipIf(sys.platform == 'win32', 'The tmux entrypoint runs in a POSIX shell')
+@unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
+class RealTmuxStartTests(unittest.TestCase):
+    """Run the policy against a disposable tmux server with real clients."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='dalftui-tmux-start-real-', dir='/tmp')
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        self.bin = self.directory / 'bin'
+        self.bin.mkdir()
+        # A private TMUX_TMPDIR keeps the default socket away from real servers;
+        # -f /dev/null keeps personal configuration out of the server.
+        tmux = self.bin / 'tmux'
+        tmux.write_text(f'#!/bin/sh\nexec {shutil.which("tmux")} -f /dev/null "$@"\n')
+        tmux.chmod(0o755)
+        home = self.directory / 'home'
+        home.mkdir()
+        self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.defpath,
+                        HOME=str(home), TMUX_TMPDIR=str(self.directory), SHELL='/bin/sh',
+                        TERM='xterm-256color')
+        for name in ('TMUX', 'TMUX_PANE', 'SSH_CONNECTION', 'SSH_CLIENT', 'dalftui_host_label',
+                     'XDG_CONFIG_HOME'):
+            self.env.pop(name, None)
+        self.addCleanup(self.tmux, 'kill-server')
+
+    def tmux(self, *args):
+        return subprocess.run(['tmux', *args], env=self.env, capture_output=True, text=True,
+                              timeout=5).stdout
+
+    def wait_for(self, predicate, message):
+        deadline = time.monotonic() + 5
+        while not predicate():
+            if time.monotonic() > deadline:
+                self.fail(message)
+            time.sleep(0.05)
+
+    def clients(self, session):
+        return self.tmux('list-clients', '-t', session, '-F', '#{client_pid}').split()
+
+    def test_takeover_replaces_the_old_client_and_leaves_other_sessions_alone(self):
+        self.tmux('new-session', '-d', '-s', 'work', 'sleep 600')
+        self.tmux('new-session', '-d', '-s', 'other', 'sleep 600')
+        laptop = Terminal(self, [shutil.which('tmux'), '-f', '/dev/null', 'attach-session', '-t', 'work'],
+                          env=dict(self.env, SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22'),
+                          cwd=self.directory)
+        other = Terminal(self, [shutil.which('tmux'), '-f', '/dev/null', 'attach-session', '-t', 'other'],
+                         env=self.env, cwd=self.directory)
+        self.wait_for(lambda: self.clients('work') and self.clients('other'), 'clients did not attach')
+        box = Terminal(self, ['/bin/sh', str(STARTER)],
+                       env=dict(self.env, SSH_CONNECTION='10.8.0.3 52000 10.8.0.1 22'),
+                       cwd=self.directory)
+        box.expect('work')
+        box.expect('attached  ')
+        if Path('/proc/self/environ').exists():
+            box.expect('from 10.8.0.2, connected ')
+        box.expect('Choice [n]: ')
+        lines = box.text().splitlines()
+        number = next(line.split()[0] for line in lines if ' work ' in line)
+        box.send(number)
+        box.expect('Session work has a client. Take it over (its window closes)? [y/N] ')
+        box.send('y')
+        self.assertEqual(laptop.finish(), 0, laptop.text())
+        self.assertIn('Another terminal took over this tmux session.', laptop.text())
+        # The policy shell starts the new client as its child.
+        self.wait_for(lambda: len(self.clients('work')) == 1 and
+                      self.clients('work') != [str(laptop.process.pid)],
+                      'the new client did not take over')
+        self.assertEqual(self.clients('other'), [str(other.process.pid)])
+        self.assertIsNone(other.process.poll())
+
+    def test_a_lone_detached_session_is_attached_automatically(self):
+        self.tmux('new-session', '-d', '-s', 'work', 'sleep 600')
+        self.tmux('new-session', '-d', '-s', 'dalftui-ops-1', 'sleep 600')
+        box = Terminal(self, ['/bin/sh', str(STARTER)],
+                       env=dict(self.env, SSH_CONNECTION='10.8.0.3 52000 10.8.0.1 22'),
+                       cwd=self.directory)
+        self.wait_for(lambda: len(self.clients('work')) == 1, 'the session was not attached')
+        self.assertEqual(self.clients('dalftui-ops-1'), [])
+        self.assertNotIn(b'tmux sessions', box.output)
 
 
 if __name__ == '__main__':

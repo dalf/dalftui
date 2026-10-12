@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import time
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ import test_install as install_tests
 from test_install import setup
 
 UV_RUN = 'uv run --no-project --python ">=3.11" '
+SESSION_HOOKS = ('client-session-changed', 'client-detached', 'session-closed')
 
 
 class UvDependencyTests(unittest.TestCase):
@@ -41,8 +43,27 @@ class UvBindingFixture(install_tests.TmuxFixture):
         return {shlex.split(line)[3]: shlex.split(line)[-1].replace('\\$', '$')
                 for line in self.tmux('list-keys', '-T', table).splitlines()}
 
+    def session_hooks(self):
+        """Each session-owner hook, with show-hooks' escapes removed."""
+        hooks = {}
+        for hook in SESSION_HOOKS:
+            # Within double quotes show-hooks escapes ", and $ twice.
+            hooks[hook] = (self.tmux('show-hooks', '-g', hook).replace('\\\\', '\\')
+                           .replace('\\"', '"').replace('\\$', '$'))
+            self.assertIn('/bin/session_owner.py sync', hooks[hook])
+        return hooks
+
+    def assert_session_hooks_use_python3(self):
+        # Linux hosts run the helper like the bridge's remote side: plain python3.
+        for hook, command in self.session_hooks().items():
+            self.assertIn("run-shell -b 'python3 ", command.replace('"', "'"), hook)
+            self.assertNotIn('uv run', command, hook)
+
 
 class DesktopUvTests(UvBindingFixture):
+    def test_session_owner_hooks_use_python3(self):
+        self.assert_session_hooks_use_python3()
+
     def test_desktop_keys_run_through_uv(self):
         commands = self.commands('prefix')
         for key, script in [('F1', 'bin/shortcuts.py'), ('F3', '/bin/vscode.py')]:
@@ -54,6 +75,9 @@ class DesktopUvTests(UvBindingFixture):
 
 class ServerUvTests(UvBindingFixture):
     profile = 'server'
+
+    def test_session_owner_hooks_use_python3(self):
+        self.assert_session_hooks_use_python3()
 
     def test_server_guide_uses_uv_and_the_bridge_keeps_python3(self):
         commands = self.commands('prefix')
@@ -101,6 +125,28 @@ class MacUvTests(UvBindingFixture):
         prefix = self.commands('prefix')
         for command in (prefix['F1'], prefix['F3']):
             self.assertIn(UV_RUN, command)
+
+    def test_session_owner_hooks_run_through_uv(self):
+        for hook, command in self.session_hooks().items():
+            self.assertIn('PATH="$PATH:$HOME/.local/bin" ' + UV_RUN, command, hook)
+
+    @unittest.skipUnless(shutil.which('uv'), 'uv is required')
+    def test_uv_hook_keeps_one_client_per_session(self):
+        # The hook command itself runs, through uv, as tmux expands it on macOS.
+        from test_session_owner import Client
+        env = dict(self.env, TERM='xterm-256color')
+        clients = []
+        for _ in range(2):
+            clients.append(Client(self, [*self.command, 'attach-session', '-t', 'verify'], env))
+            client = clients[-1]
+            until = time.monotonic() + 10
+            while str(client.process.pid) not in self.tmux('list-clients', '-F', '#{client_pid}').split():
+                self.assertLess(time.monotonic(), until, 'the client did not attach')
+                time.sleep(0.05)
+        # uv may need a while to start the helper the first time.
+        clients[0].process.wait(60)
+        self.assertIn('Another terminal took over this tmux session.', clients[0].text())
+        self.assertEqual(self.tmux('list-clients', '-F', '#{client_pid}'), str(clients[1].process.pid))
 
 
 if __name__ == '__main__':

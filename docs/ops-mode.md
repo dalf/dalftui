@@ -59,8 +59,10 @@ existing permissions; it never invokes sudo automatically. Stop following with
 Ctrl+C. Missing monitoring tools or journal errors leave a shell in that pane.
 Missing tmux, a terminal smaller than 40 columns by 12 rows, or failed pane
 creation falls back to a shell. Other sessions and their panes are unchanged.
-Detaching leaves the new ops session running; a later normal connection can
-select it through the existing tmux session picker. Standard tmux pane navigation
+The ops session belongs to its window: tmux's `destroy-unattached` option
+removes it, with its panes, once its client detaches or disconnects, so it never
+affects the normal [session policy](tmux.md#session-policy). Ops sessions left by
+older versions are ignored by that policy; close them with `tmux kill-session`. Standard tmux pane navigation
 works even without dalftui installed on the server (`Ctrl+B`, then an arrow).
 
 The shell pane starts with a compact, read-only snapshot: host and timestamp,

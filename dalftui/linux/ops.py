@@ -113,6 +113,8 @@ tmux select-pane -t "$ops_monitor" -T Processes
 tmux select-pane -t "$ops_journal" -T Journal
 tmux select-pane -t "$ops_shell" -T 'Shell / system'
 tmux select-pane -t "$ops_shell"
-tmux attach-session -t "$ops_session"
+# Ops sessions end with their window, so they never affect the normal session
+# policy. Set this once attached: tmux destroys an unattached session at once.
+tmux attach-session -t "$ops_session" \\; set-option -t "$ops_session" destroy-unattached on
 exit $?
 """

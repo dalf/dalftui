@@ -7,10 +7,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_tmux_start import Terminal
 from dalftui import ssh
 from dalftui.linux import ops, remote_bootstrap
 
@@ -128,8 +130,14 @@ elif sys.argv[1] == 'split-window':
         commands = self.commands()
         self.assertEqual(commands[0][0], 'new-session')
         self.assertNotIn('-A', commands[0])
+        # Short-lived ops panes keep tmux's usual SSH_AUTH_SOCK; no agent alias.
+        self.assertNotIn('-e', commands[0])
+        self.assertNotIn('@dalftui_agent_alias', str(commands))
         self.assertEqual([command[0] for command in commands].count('split-window'), 2)
-        self.assertEqual(commands[-2:], [['select-pane', '-t', '%71'], ['attach-session', '-t', '$42']])
+        # The session is destroyed once unattached, so it never affects the normal policy.
+        self.assertEqual(commands[-2:], [['select-pane', '-t', '%71'],
+                                         ['attach-session', '-t', '$42', ';', 'set-option',
+                                          '-t', '$42', 'destroy-unattached', 'on']])
         self.assertFalse(any(command[0] in ('kill-session', 'kill-server', 'list-sessions') for command in commands))
         for command in commands[1:]:
             if '-t' in command:
@@ -217,6 +225,50 @@ elif sys.argv[1] == 'split-window':
         existing = tmux('list-panes', '-t', 'existing', '-F', '#{pane_id}:#{pane_pid}')
         self.assertEqual(existing.stdout, created.stdout)
 
+
+    @unittest.skipUnless(shutil.which('tmux'), 'tmux is required for the private-server lifecycle test')
+    def test_real_ops_session_is_destroyed_once_its_client_detaches(self):
+        executable = shutil.which('tmux')
+        # A private TMUX_TMPDIR keeps the default socket away from real servers.
+        private = tempfile.mkdtemp(prefix='dalftui-ops-tmux-', dir='/tmp')
+        self.addCleanup(shutil.rmtree, private, True)
+        env = dict(self.env, TMUX_TMPDIR=private, TERM='xterm-256color')
+        env.pop('TMUX', None)
+        env.pop('TMUX_PANE', None)
+        self.tmux.write_text(f'#!/bin/sh\nexec {shlex.quote(executable)} -f /dev/null "$@"\n')
+
+        def tmux(*args):
+            return subprocess.run([str(self.tmux), *args], env=env, capture_output=True,
+                                  text=True, timeout=5).stdout
+
+        self.addCleanup(tmux, 'kill-server')
+        self.shell.write_text('#!/bin/sh\nexec /bin/sleep 60\n')
+        tmux('new-session', '-d', '-s', 'existing', '/bin/sleep 60')
+        tmux('set-option', '-g', 'default-shell', '/bin/sh')
+        (self.bin / 'stty').symlink_to(shutil.which('stty'))
+        terminal = Terminal(self, ['sh', '-c', remote_bootstrap.session_script(mode='ops')],
+                            env=env, cwd=self.directory, size=(36, 120))
+
+        def ops_sessions():
+            return [line for line in tmux('list-sessions', '-F', '#{session_name}').split()
+                    if line.startswith('dalftui-ops-')]
+
+        def wait_for(predicate, message):
+            deadline = time.monotonic() + 5
+            while not predicate():
+                if time.monotonic() > deadline:
+                    self.fail(f'{message}; output: {terminal.text()!r}')
+                time.sleep(0.05)
+
+        wait_for(lambda: tmux('list-clients', '-F', '#{session_name}').startswith('dalftui-ops-'),
+                 'the ops session was not attached')
+        [name] = ops_sessions()
+        self.assertEqual(tmux('show-options', '-v', '-t', name, 'destroy-unattached').strip(), 'on')
+        self.assertEqual(tmux('show-options', '-v', '-t', 'existing', 'destroy-unattached').strip(), '')
+        tmux('detach-client', '-s', name)
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        wait_for(lambda: not ops_sessions(), 'the ops session survived detaching')
+        self.assertEqual(tmux('list-sessions', '-F', '#{session_name}').split(), ['existing'])
 
 if __name__ == '__main__':
     unittest.main()

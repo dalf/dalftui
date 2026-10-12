@@ -20,7 +20,10 @@ class TmuxColorTests(install_tests.TmuxFixture):
         env = dict(self.env, TERM='xterm-256color', TERM_PROGRAM='Apple_Terminal')
         env.pop('COLORTERM', None)
         options = ['-T', 'RGB'] if rgb else []
-        process = subprocess.Popen([*self.command, *options, 'attach-session', '-t', 'verify'],
+        # The hooks keep one client per session, so each client gets its own
+        # session in the group of "verify", which shares its windows.
+        session = self.tmux('new-session', '-d', '-t', 'verify', '-P', '-F', '#{session_name}')
+        process = subprocess.Popen([*self.command, *options, 'attach-session', '-t', session],
                                    stdin=slave, stdout=slave, stderr=slave, env=env,
                                    start_new_session=True)
         os.close(slave)
@@ -43,6 +46,10 @@ class TmuxColorTests(install_tests.TmuxFixture):
             if str(process.pid) in clients and output:
                 return process, master, bytes(output) + self.redraw(master, process.pid)
         self.fail(f'The tmux client did not attach: {output!r}')
+
+    def panes(self):
+        # Grouped sessions list the same panes once per session.
+        return set(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}').splitlines())
 
     def client_tty(self, pid):
         clients = dict(line.split(' ', 1) for line in
@@ -77,7 +84,7 @@ class TmuxColorTests(install_tests.TmuxFixture):
         self.assert_colors(output, rgb=True)
         plain, plain_tty, output = self.attach()
         self.assert_colors(output, rgb=False)
-        before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
+        before = self.panes()
         self.do_reload()
         self.do_reload()
         self.assert_colors(self.redraw(capable_tty, capable.pid), rgb=True)
@@ -86,7 +93,7 @@ class TmuxColorTests(install_tests.TmuxFixture):
                        self.tmux('list-clients', '-F', '#{client_pid}:#{client_termfeatures}').splitlines())
         self.assertIn('RGB', clients[str(capable.pid)].split(','))
         self.assertNotIn('RGB', clients[str(plain.pid)].split(','))
-        self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
+        self.assertEqual(self.panes(), before)
 
     def test_reload_and_reconnect_clear_legacy_rgb_without_losing_sessions(self):
         self.start()
@@ -94,7 +101,7 @@ class TmuxColorTests(install_tests.TmuxFixture):
         self.tmux('set-option', '-s', 'terminal-overrides[100]', '*:Tc')
         client, master, output = self.attach()
         self.assert_colors(output, rgb=True)
-        before = self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}')
+        before = self.panes()
         self.do_reload()
         self.do_reload()
         # tmux retains the capabilities of an already attached client until it reconnects.
@@ -105,7 +112,7 @@ class TmuxColorTests(install_tests.TmuxFixture):
         client.wait(timeout=5)
         _, _, output = self.attach()
         self.assert_colors(output, rgb=False)
-        self.assertEqual(self.tmux('list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}'), before)
+        self.assertEqual(self.panes(), before)
 
 
 @unittest.skipIf(os.name == 'nt', 'tmux panes require a POSIX host')

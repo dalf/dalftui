@@ -4,8 +4,10 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -15,7 +17,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from test_tmux_start import UNLABELLED
+from test_tmux_start import REMOTE, TAKEOVER_MESSAGE, UNLABELLED, Terminal
 import dalftui.linux.setup as setup
 from dalftui.vscode import EditorBridge
 
@@ -119,7 +121,7 @@ class SshAutoTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_rgb_hint_reaches_new_and_attached_clients_without_changing_credentials(self):
@@ -138,8 +140,8 @@ fi
 printf '%s\\n' "$hint" "$@" > "$TEST_COMMAND_LOG"
 printf '%s\\n' "${DALFTUI_EDITOR_SOCKET-unset}" "${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"
 ''')
-        for rows, expected in (('', ['new-session', '-A', '-s', '0', *UNLABELLED]),
-                               ('$5 0\n', ['attach-session', '-t', '$5', *UNLABELLED])):
+        for rows, expected in (('', ['new-session', '-A', '-D', '-s', '0', *UNLABELLED]),
+                               ('$5 0\n', ['attach-session', '-d', '-t', '$5', *UNLABELLED])):
             with self.subTest(rows=rows):
                 result = self.remote_command(rgb=True, TEST_SESSION_ROWS=rows)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -153,8 +155,89 @@ printf '%s\\n' "${DALFTUI_EDITOR_SOCKET-unset}" "${DALFTUI_EDITOR_TOKEN-unset}" 
         result = self.remote_command(rgb=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout + result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+
+    def test_installed_server_with_hooks_starts_ssh_sessions_with_an_agent_alias(self):
+        if not Path('/proc/self/environ').exists():
+            self.skipTest('Agent aliases need Linux /proc')
+        self.install()
+        runtime = self.directory / 'run'
+        runtime.mkdir(mode=0o700)
+        self.tmux.write_text('#!/bin/sh\n'
+                             'case $1 in\n'
+                             '    list-sessions) exit 0 ;;\n'
+                             '    show-options)\n'
+                             '        [ "$TEST_HOOKS" != none ] || { echo "no server running" >&2; exit 1; }\n'
+                             '        printf "%s\\n" "$TEST_HOOKS"; exit 0 ;;\n'
+                             'esac\n'
+                             'printf "%s\\n" "$@" > "$TEST_COMMAND_LOG"\n'
+                             'printf "%s\\n" "${DALFTUI_EDITOR_SOCKET-unset}" '
+                             '"${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"\n')
+        env = dict(SSH_CONNECTION=REMOTE, XDG_RUNTIME_DIR=str(runtime), SSH_AUTH_SOCK='/tmp/ssh-x/agent.1')
+        # A running server that loaded the hooks, or none yet with the installed loader.
+        for hooks in ('on', 'none'):
+            with self.subTest(hooks=hooks):
+                result = self.remote_command(TEST_HOOKS=hooks, **env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout + result.stderr, '')
+                command = self.log.read_text().splitlines()
+                alias = command[2].removeprefix('SSH_AUTH_SOCK=')
+                self.assertRegex(alias, '^' + re.escape(str(runtime / 'dalftui-agent')) + '/[0-9a-f]{32}$')
+                self.assertEqual(command, ['new-session', '-e', f'SSH_AUTH_SOCK={alias}',
+                                           '-A', '-D', '-s', '0', ';', 'if-shell', '-F',
+                                           '#{?@dalftui_agent_alias,,1}',
+                                           f'set-option @dalftui_agent_alias {alias}', *UNLABELLED])
+                self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
+        self.assertEqual(stat.S_IMODE((runtime / 'dalftui-agent').stat().st_mode), 0o700)
+        # A server still running an older configuration, or a replaced loader: no alias.
+        (self.home / '.tmux.conf').write_text('# personal configuration\n', encoding='utf-8')
+        for hooks in ('', 'none'):
+            with self.subTest(hooks=hooks):
+                result = self.remote_command(TEST_HOOKS=hooks, **env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.log.read_text().splitlines(),
+                                 ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
+
+    def test_remote_menu_needs_a_terminal_and_falls_back_to_typed_lines(self):
+        self.tmux.write_text('''#!/bin/sh
+hint=none
+if [ "$1" = -T ]; then
+    hint=$2
+    shift 2
+fi
+case $1 in
+    -V) exit 0 ;;
+    list-sessions) printf '%s' "$TEST_SESSION_ROWS"; exit 0 ;;
+    list-clients) exit 0 ;;
+    display-message) [ "$3" != -t ] || printf '1\\n'; exit 0 ;;
+    detach-client) printf '%s\\n' "$hint" "$@" > "$TEST_DETACH_LOG"; exit 0 ;;
+esac
+printf '%s\\n' "$hint" "$@" > "$TEST_COMMAND_LOG"
+''')
+        detach_log = self.directory / 'detach'
+        command = shlex.split(picker.ssh_command('server', rgb=True)[-1])
+        env = dict(self.env, TEST_SESSION_ROWS='$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE,
+                   TEST_DETACH_LOG=str(detach_log))
+        result = self.real_run(command, env=env, input='2\ny\n', capture_output=True,
+                               text=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('needs a terminal', result.stderr)
+        self.assertFalse(self.log.exists())
+        self.assertFalse(detach_log.exists())
+        # This PATH has no stty or dd, so the menu reads typed lines.
+        terminal = Terminal(self, command, env=env, cwd=self.directory)
+        terminal.expect('[1-2] attach   [n] new session (default)   [q] cancel')
+        terminal.expect('Choice [n]: ')
+        terminal.send('2\n')
+        terminal.expect('Session 0 has a client. Take it over (its window closes)? [y/N] ')
+        terminal.send('y\n')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assertEqual(detach_log.read_text().splitlines(),
+                         ['RGB', 'detach-client', '-s', '$9', '-E', TAKEOVER_MESSAGE])
+        self.assertEqual(self.log.read_text().splitlines(),
+                         ['RGB', 'attach-session', '-d', '-t', '$9', *UNLABELLED])
 
     def test_installed_picker_dispatches_and_embeds_its_copied_canonical_policy(self):
         checkout = self.directory / "checkout's $cash ; é"
@@ -207,7 +290,7 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         for command in commands:
             self.assertEqual(command[command.index('--') + 1], host)
         self.assertEqual(self.log.read_text().splitlines(),
-                         ['new-session', '-A', '-s', '0', ';', 'set-option', '@dalftui_host',
+                         ['new-session', '-A', '-D', '-s', '0', ';', 'set-option', '@dalftui_host',
                           "alice@prod-é;$(probe)'"])
         self.assertEqual(policy_log.read_text(), 'copied-policy\n')
         self.assertFalse(policy.exists())
@@ -253,7 +336,7 @@ os.execv(os.environ['TEST_SH'], shlex.split(sys.argv[-1]))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, '')
         self.assertEqual(result.stderr, '')
-        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-s', '0', *UNLABELLED])
+        self.assertEqual(self.log.read_text().splitlines(), ['new-session', '-A', '-D', '-s', '0', *UNLABELLED])
         self.assertEqual(self.editor_env.read_text().splitlines(), ['unset', 'unset'])
 
     def test_unversioned_remote_dalftui_suggests_github_update_and_keeps_tmux(self):
