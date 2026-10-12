@@ -7,7 +7,7 @@ VS Code window; **Ctrl+B, then v** does the same.
 Install VS Code's `code` command on your desktop.
 
 In an SSH window opened through the picker (**Ctrl+B, then F2**; **Ctrl+B, then h**
-on macOS) to a server with a compatible
+on macOS; **Ctrl+Shift+F2** or `dssh` in Windows Terminal) to a server with a compatible
 dalftui bridge installed, the same shortcut opens the remote pane's directory
 in local VS Code using Microsoft's **Remote - SSH** extension. VS Code uses
 the same SSH host alias and login as the picker, so your

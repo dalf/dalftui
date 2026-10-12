@@ -1,4 +1,5 @@
-"""Set the Terminal defaults, VS Code font and PowerShell 7 profiles, preserving other settings."""
+"""Add the Ctrl+Shift+F2 SSH tab and set the Terminal defaults, VS Code font and PowerShell 7
+profiles, preserving other settings."""
 import argparse
 import json
 import os
@@ -10,8 +11,11 @@ import sys
 import uuid
 
 sys.dont_write_bytecode = True
-# Ctrl+Shift+F2/F3 actions installed by earlier versions; setup removes them.
+CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
+# Terminal handles Ctrl+Shift+F2 before the running program: it opens a new tab with the picker.
 ACTION_ID = 'User.DalftuiSshPicker'
+SHORTCUT = 'ctrl+shift+f2'
+# The Ctrl+Shift+F3 action installed by earlier versions; setup removes it.
 EDITOR_ACTION_ID = 'User.DalftuiOpenFolderInCode'
 PROMPT_FONT = 'Hack Nerd Font'
 # Also applied by ./install on Linux desktops and macOS.
@@ -83,9 +87,124 @@ def members(text, start, object_mode=False):
     return result, index
 
 
-def updated_settings(text, pwsh=None):
-    text = default_settings(removed_actions(text))
+def normalized_key(key):
+    return tuple(sorted(part.strip().lower() for part in key.split('+')))
+
+
+def has_shortcut(entry, shortcut=SHORTCUT):
+    keys = entry.get('keys', [])
+    if isinstance(keys, str):
+        keys = [keys]
+    return isinstance(keys, list) and any(
+        isinstance(key, str) and normalized_key(key) == normalized_key(shortcut)
+        for key in keys)
+
+
+class ShortcutSkipped(ValueError):
+    """The Ctrl+Shift+F2 action was not added; the rest of Terminal setup still applies."""
+
+
+def updated_settings(text, commandline, pwsh=None, skipped=None):
+    """Return the updated settings. When the shortcut cannot be added, the reason is appended
+    to skipped (a list) and the other settings are still updated."""
+    text = removed_actions(text)
+    try:
+        text = shortcut_settings(text, commandline)
+    except ShortcutSkipped as reason:
+        if skipped is not None:
+            skipped.append(str(reason))
+    text = default_settings(text)
     return profile_settings(removed_gist_profiles(text), pwsh) if pwsh else text
+
+
+def updated_keys(keys):
+    """Return inline action keys with SHORTCUT added, keeping the user's other keys."""
+    if isinstance(keys, str):
+        keys = [keys]
+    if isinstance(keys, list) and keys and all(isinstance(key, str) for key in keys):
+        return [*keys, SHORTCUT]
+    return SHORTCUT
+
+
+def shortcut_settings(text, commandline):
+    """Add the Ctrl+Shift+F2 action that runs commandline in a new tab, or update it.
+
+    Only dalftui's values change: other members, keys and comments in its entries are kept.
+    Raises ShortcutSkipped, leaving the text unchanged, when the shortcut cannot be added.
+    """
+    clean = clean_jsonc(text)
+    if not isinstance(json.loads(clean, object_pairs_hook=unique_object), dict):
+        raise ValueError('Terminal settings must be a JSON object.')
+    root_items, root_end = members(clean, skip_space(clean, 0), object_mode=True)
+    properties = {name: (value, begin, finish) for name, value, begin, finish in root_items}
+    arrays = {}
+    for name in ('actions', 'keybindings'):
+        if name not in properties:
+            continue
+        value, begin, finish = properties[name]
+        if value is None:  # Like an empty array; replaced below.
+            arrays[name] = (begin, finish)
+            continue
+        if not isinstance(value, list):
+            raise ShortcutSkipped(f'Terminal {name} is not an array.')
+        arrays[name] = members(clean, begin)
+        if any(isinstance(entry, dict) and has_shortcut(entry) and entry.get('id') != ACTION_ID
+               for entry in value):
+            raise ShortcutSkipped('Ctrl+Shift+F2 already has a binding, which was kept. To use the '
+                                  'SSH picker tab, remove that binding in Terminal settings, then rerun setup.')
+
+    modern = 'keybindings' in properties
+    command = {
+        'action': 'newTab', 'commandline': commandline,
+        'startingDirectory': '%USERPROFILE%', 'tabTitle': 'SSH',
+        'suppressApplicationTitle': False, 'elevate': False,
+    }
+    action = {'id': ACTION_ID, 'name': 'SSH host picker (dssh)', 'command': command}
+    desired = {'actions': action}
+    if modern:
+        desired['keybindings'] = {'id': ACTION_ID, 'keys': SHORTCUT}
+    else:
+        action['keys'] = SHORTCUT  # Inline keys, which older Terminal versions also read.
+    edits = []
+    missing = []
+    newline = '\r\n' if '\r\n' in text else '\n'
+    for name, entry in desired.items():
+        if name not in arrays:
+            missing.append(json.dumps(name) + ': ' + json.dumps([entry], ensure_ascii=False))
+            continue
+        if isinstance(arrays[name][0], int):  # null
+            edits.append((*arrays[name], json.dumps([entry], ensure_ascii=False)))
+            continue
+        items, end = arrays[name]
+        owned = [item for item in items if isinstance(item[1], dict) and item[1].get('id') == ACTION_ID]
+        if name == 'keybindings':
+            # Any binding of Ctrl+Shift+F2 to the action will do; other keys bound to it are the user's.
+            if not any(has_shortcut(item[1]) for item in owned):
+                append_entry(text, items, end, json.dumps(entry, ensure_ascii=False), newline, edits)
+            continue
+        if len(owned) > 1:
+            raise ShortcutSkipped('Terminal actions has duplicate dalftui entries; remove the duplicates, '
+                                  'then rerun setup.')
+        if not owned:
+            append_entry(text, items, end, json.dumps(entry, ensure_ascii=False), newline, edits)
+            continue
+        # Update only dalftui's values, such as the command line after moving the checkout.
+        _, previous, begin, _ = owned[0]
+        entry_items, entry_end = members(clean, begin, object_mode=True)
+        wanted = {'name': action['name'], 'command': command}
+        if not isinstance(previous.get('command', {}), dict):
+            found = [item for item in entry_items if item[0] == 'command']
+            edits.append((found[-1][2], found[-1][3], json.dumps(command, ensure_ascii=False)))
+            del wanted['command']
+        if not modern and not has_shortcut(previous):
+            wanted['keys'] = updated_keys(previous.get('keys'))
+        nested_edits(text, clean, (entry_items, entry_end), wanted, newline, edits)
+    if missing:
+        append_entry(text, root_items, root_end, missing, newline, edits)
+    for begin, end, replacement in sorted(edits, reverse=True):
+        text = text[:begin] + replacement + text[end:]
+    json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    return text
 
 
 def runs_pwsh(commandline):
@@ -330,11 +449,11 @@ def has_guid(item, guid):
     return isinstance(item[1], dict) and str(item[1].get('guid')).lower() == guid
 
 
-def removed_actions(text):
-    """Remove the actions and key bindings that earlier setup versions added."""
+def removed_actions(text, ids=(EDITOR_ACTION_ID,)):
+    """Remove dalftui's actions with these ids and their key bindings; by default, the
+    Ctrl+Shift+F3 action that earlier versions added."""
     if not isinstance(json.loads(clean_jsonc(text), object_pairs_hook=unique_object), dict):
         raise ValueError('Terminal settings must be a JSON object.')
-    ids = (ACTION_ID, EDITOR_ACTION_ID)
     for name in ('actions', 'keybindings'):
         text = remove_matching(text, (name,), lambda item: isinstance(item[1], dict) and item[1].get('id') in ids)
     return text
@@ -342,7 +461,7 @@ def removed_actions(text):
 
 def removed_settings(text):
     """Remove what setup added to Terminal settings, while it still holds dalftui's values."""
-    text = removed_actions(text)
+    text = removed_actions(text, (ACTION_ID, EDITOR_ACTION_ID))
     profiles = ('profiles', 'list')
     text = remove_matching(text, profiles, lambda item: has_guid(item, ADMIN_GUID))
     # Terminal regenerates its own stub; keep one that has other settings.
@@ -432,22 +551,29 @@ def save(path, original, updated, label):
     return backup
 
 
-def configure(path, pwsh=None):
+def configure(path, commandline, pwsh=None):
+    """Configure one Terminal settings file; return whether the Ctrl+Shift+F2 action is set."""
     original = path.read_bytes()
     text = original.decode('utf-8-sig')
-    updated = updated_settings(text, pwsh)
+    skipped = []
+    updated = updated_settings(text, commandline, pwsh, skipped)
+    for reason in skipped:
+        print(f'Ctrl+Shift+F2 was not added to {path}: {reason}', file=sys.stderr)
     if updated == text:
         print(f'Terminal already configured: {path}')
-        return
+        return not skipped
     gist = gist_profiles(json.loads(clean_jsonc(text), object_pairs_hook=unique_object)) if pwsh else []
     backup = save(path, original, updated, 'Terminal')
     print(f'Terminal backup: {backup}')
     print(f'Terminal configured: {path}')
+    if not skipped:
+        print('Ctrl+Shift+F2 opens the SSH picker (dssh) in a new tab.')
     print(f'Default profile font: {WINDOWS_FONT}; bar cursor, padding 8, no bell')
     if pwsh:
         print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
     for entry in gist:
         print(f'Removed profile from an old setup: {entry["name"]}')
+    return not skipped
 
 
 def vscode_settings(text, settings=None):
@@ -509,6 +635,7 @@ def main():
     sys.stdout.reconfigure(errors='backslashreplace')
     sys.stderr.reconfigure(errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--shell', help='PowerShell that runs the Ctrl+Shift+F2 tab; required without --uninstall')
     parser.add_argument('--settings', action='append', type=Path)
     parser.add_argument('--pwsh', help='PowerShell 7 path for the Terminal profiles')
     parser.add_argument('--vscode-settings', type=Path, help='VS Code settings.json to set the terminal font in')
@@ -518,6 +645,8 @@ def main():
     if args.uninstall:
         return uninstall(args.settings or settings_paths(os.environ.get('LOCALAPPDATA', '')),
                          args.vscode_settings, args.dry_run)
+    if not args.shell:
+        parser.error('--shell is required')
     status = 0
     if args.vscode_settings:
         try:
@@ -525,6 +654,9 @@ def main():
         except (OSError, UnicodeError, ValueError) as error:
             print(f'VS Code font setup failed: {error}', file=sys.stderr)
             status = 1
+    # Terminal starts this command line itself; cmd.exe never parses it.
+    commandline = subprocess.list2cmdline([
+        args.shell, '-NoLogo', '-NoProfile', '-File', str(CHECKOUT_ROOT / 'bin/ssh-tab.ps1')])
     pwsh = subprocess.list2cmdline([args.pwsh]) if args.pwsh else None
     if not pwsh:
         print('PowerShell 7 not found; Windows Terminal PowerShell 7 profiles were not added.')
@@ -532,12 +664,14 @@ def main():
     if not paths:
         print('Windows Terminal settings not found. Open Terminal once, then rerun setup. For a portable installation use -TerminalSettingsPath PATH. dssh remains available in PowerShell.')
         return status
-    try:
-        for path in dict.fromkeys(paths):
-            configure(path, pwsh)
-    except (OSError, UnicodeError, ValueError) as error:
-        print(f'Terminal setup failed: {error}', file=sys.stderr)
-        return 1
+    # A problem in one installation, such as Terminal Preview, must not block the others.
+    for path in dict.fromkeys(paths):
+        try:
+            if not configure(path, commandline, pwsh):
+                status = 1
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f'Terminal setup failed: {path}: {error}', file=sys.stderr)
+            status = 1
     return status
 
 

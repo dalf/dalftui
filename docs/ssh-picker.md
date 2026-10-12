@@ -136,7 +136,10 @@ Host my-vm
 Type to filter, use the arrows to select, press **Enter** to connect, or **Esc**
 to cancel. **Ctrl+O** connects to exactly what you typed, including a destination
 outside the list. The grid uses the full tab and adds columns when space permits; resizing
-the tab immediately updates the layout. Selection connects in the current terminal window. SSH uses the
+the tab immediately updates the layout. Selection connects in the current terminal tab.
+In Windows Terminal, **Ctrl+Shift+F2** opens a new tab with the picker, even while
+another program runs in the current tab, and the chosen host connects in that new tab;
+at a PowerShell prompt, **Ctrl+B, then F2** opens the picker in the current tab. SSH uses the
 configured username; if none is configured, the launcher asks for one. It
 creates or reattaches tmux using the usual session policy when tmux is installed,
 or silently opens a plain login shell otherwise. With a compatible remote

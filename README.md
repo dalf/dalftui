@@ -14,7 +14,7 @@ shortcuts, appearance, SSH access, and VS Code integration.
 | **tmux**: windows (shown as tabs), splits, sessions that survive detaching | yes | yes | no; tmux runs on the server over SSH | yes |
 | **Shell with Oh My Posh prompt**: directory, Git state, durations, failures | bash | bash | PowerShell | zsh |
 | **Nerd Font** | Hack | no; your local terminal draws the glyphs | FiraCode | Hack; select it in Terminal.app or iTerm2 |
-| **SSH host picker** | F2, opens a kitty tab | no | F2 or `dssh` | Ctrl+B h, opens a Terminal.app or iTerm2 window |
+| **SSH host picker** | F2, opens a kitty tab | no | Ctrl+Shift+F2, opens a Terminal tab; F2 or `dssh` at the prompt | Ctrl+B h, opens a Terminal.app or iTerm2 window |
 | **VS Code (F3 or v)** | local and remote folders | server end of the bridge | local and remote folders | local and remote folders |
 
 The usual Linux arrangement is **kitty → tmux → bash**. A tmux *session*
@@ -26,7 +26,8 @@ The rule: **one terminal tab per host, one tmux window per shell on that host**.
 On Linux the local machine is one kitty tab, and each SSH host opens in its own
 tab with tmux running on the host when available, so its sessions survive a
 dropped connection and tmux never runs inside tmux. On Windows, open one Windows
-Terminal tab per host and run `dssh` in it. An SSH tab is titled `user@alias`;
+Terminal tab per host: `Ctrl+Shift+F2` opens a new tab with the picker, or run
+`dssh` in a tab. An SSH tab is titled `user@alias`;
 once Claude runs there with claude-tabstatus, Claude's status appears before it.
 
 The intended everyday workflow on a configured Linux desktop is (keys in
@@ -50,7 +51,7 @@ The table's shortcuts are tmux keys: they work in any terminal, including over S
 | Action | Keys | Notes |
 | --- | --- | --- |
 | Shortcut guide | `Ctrl+B` `F1` | |
-| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a new kitty tab in the same window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
+| Pick SSH host | `Ctrl+B` `F2` | Linux desktop profile only; opens a new kitty tab in the same window. On Windows, works at the PowerShell prompt (not in dssh tabs), or run `dssh`; Windows Terminal's `Ctrl+Shift+F2` opens it in a new tab from any tab. On macOS, `Ctrl+B` `h` opens a Terminal.app or iTerm2 window; iTerm2 asks once to confirm and may open a tab |
 | Open folder in VS Code | `Ctrl+B` `F3` or `v` | Also at the Windows PowerShell prompt. Remote needs dalftui on the server and a picker or `dssh` connection |
 | New tmux window | `Ctrl+B` `c` | |
 | Previous / next tmux window | `Ctrl+B` `p` / `n` | |
@@ -85,13 +86,14 @@ SSH picker keys:
 | `F7` | Choose a saved check, then a shell |
 | `Esc` | Cancel, or go back from `F4` / `F7` |
 
-PowerShell prompt keys (Windows):
+Windows Terminal and PowerShell prompt keys (Windows):
 
 | Key | Action |
 | --- | --- |
+| `Ctrl+Shift+F2` | Open a new Windows Terminal tab with the SSH picker; works while any program, such as `mc` or `dssh`, runs in the current tab |
 | `Ctrl+Left` / `Ctrl+Right` | Move by word |
 | `Ctrl+B` `Ctrl+B` | Move back one character |
-| `Ctrl+B` `F2` | Choose an SSH host with `dssh`, keeping the typed line |
+| `Ctrl+B` `F2` | At the prompt: choose an SSH host with `dssh` in this tab, keeping the typed line |
 | `Ctrl+B` `F3` or `v` | Open the folder in VS Code, keeping the typed line |
 | Other keys | Emacs editing, as in bash |
 

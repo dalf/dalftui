@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dalftui.windows import terminal_settings as terminal
 
+LAUNCHER = 'powershell.exe -NoLogo -NoProfile -File "C:\\dalftui\\bin\\ssh-tab.ps1"'
+SHELL = ('--shell', 'pwsh.exe')
 # The Ctrl+Shift+F2/F3 entries that earlier versions installed, in the modern form.
+# Setup keeps the Ctrl+Shift+F2 action (or restores it) and removes the F3 one.
 LEGACY_ACTIONS = [
     {'id': terminal.ACTION_ID, 'name': 'SSH host picker (dssh)', 'command': {
         'action': 'newTab', 'commandline': 'powershell.exe -NoLogo -NoProfile -File "C:\\dalftui\\bin/ssh-tab.ps1"',
@@ -47,14 +50,21 @@ class TerminalSetupTests(unittest.TestCase):
         {"command": "copy", "keys": "ctrl+shift+c"}, // my binding
     ], /* leave this here */
 }'''
-        updated = terminal.updated_settings(personal)
+        updated = terminal.updated_settings(personal, LAUNCHER)
         for line in ('// Keep my defaults and shortcuts.', '// my binding', '/* leave this here */',
                      '"theme": "\u00e9 // not a comment"', '"url": "https://example.org/*not a comment*/"'):
             self.assertIn(line, updated)
         result = self.settings(updated)
         self.assertEqual(result['defaultProfile'], 'wsl-guid')
         self.assertEqual(result['actions'][0], {'command': 'copy', 'keys': 'ctrl+shift+c'})
-        self.assertEqual(len(result['actions']), 1)
+        # Without a keybindings array, the action carries its keys, as older Terminal versions expect.
+        action = result['actions'][1]
+        self.assertEqual(action['keys'], 'ctrl+shift+f2')
+        self.assertEqual(action['command']['action'], 'newTab')
+        self.assertEqual(action['command']['commandline'], LAUNCHER)
+        self.assertNotIn('profile', action['command'])
+        self.assertFalse(action['command']['suppressApplicationTitle'])
+        self.assertEqual(len(result['actions']), 2)
         self.assertNotIn('keybindings', result)
 
     def test_default_face_uses_windows_font_once(self):
@@ -65,11 +75,11 @@ class TerminalSetupTests(unittest.TestCase):
                          # Earlier Windows versions set Hack Nerd Font.
                          '{"defaults": {"font": {"face": "Hack Nerd Font"}}}'):
             with self.subTest(profiles=profiles):
-                updated = terminal.updated_settings('{"profiles": ' + profiles + '}')
+                updated = terminal.updated_settings('{"profiles": ' + profiles + '}', LAUNCHER)
                 face = self.settings(updated)['profiles']['defaults']['font']['face']
                 self.assertEqual(face, 'FiraCode Nerd Font Mono')
-                self.assertEqual(terminal.updated_settings(updated), updated)
-        legacy = self.settings(terminal.updated_settings('{"profiles": []}'))
+                self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
+        legacy = self.settings(terminal.updated_settings('{"profiles": []}', LAUNCHER))
         self.assertEqual(legacy['profiles'], [])
 
     def test_profile_defaults_are_set_once_keeping_other_defaults(self):
@@ -80,7 +90,7 @@ class TerminalSetupTests(unittest.TestCase):
                          ' "bellStyle": "audible", "opacity": 90, // mine\n}}}',
                          '{\r\n  "profiles": {\r\n    "defaults": {\r\n      "font": {"size": 11}\r\n    }\r\n  }\r\n}\r\n'):
             with self.subTest(personal=personal):
-                updated = terminal.updated_settings(personal)
+                updated = terminal.updated_settings(personal, LAUNCHER)
                 defaults = self.settings(updated)['profiles']['defaults']
                 self.assertEqual(defaults['font']['face'], expected['font']['face'])
                 self.assertEqual({key: defaults[key] for key in expected if key != 'font'},
@@ -91,18 +101,30 @@ class TerminalSetupTests(unittest.TestCase):
                 if 'size' in personal:
                     self.assertEqual(defaults['font']['size'], 11)
                     self.assertNotIn('\n', updated.replace('\r\n', ''))
-                self.assertEqual(terminal.updated_settings(updated), updated)
-        self.assertEqual(self.settings(terminal.updated_settings('{}'))['profiles'], {'defaults': expected})
+                self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
+        self.assertEqual(self.settings(terminal.updated_settings('{}', LAUNCHER))['profiles'], {'defaults': expected})
 
     def test_added_entries_follow_sibling_indentation(self):
         personal = ('{\n    "profiles": \n    {\n        "defaults": \n        {\n            "font": \n'
                     '            {\n                "face": "Hack Nerd Font"\n            }\n        },\n'
                     '        "list": []\n    }\n}\n')
-        self.assertEqual(terminal.updated_settings(personal), (
+        self.assertEqual(terminal.default_settings(personal), (
             '{\n    "profiles": \n    {\n        "defaults": \n        {\n            "font": \n'
             '            {\n                "face": "FiraCode Nerd Font Mono"\n            },\n'
             '            "cursorShape": "bar",\n            "padding": "8, 8, 8, 8",\n'
             '            "bellStyle": "none"\n        },\n        "list": []\n    }\n}\n'))
+
+    def test_picker_entries_follow_terminal_formatting(self):
+        # Terminal writes its settings like this.
+        personal = ('{\n    "actions": \n    [\n        {\n            "command": "find",\n'
+                    '            "id": "User.find"\n        }\n    ],\n    "keybindings": \n    [\n'
+                    '        {\n            "id": "User.find",\n            "keys": "ctrl+shift+f"\n        }\n'
+                    '    ]\n}\n')
+        updated = terminal.shortcut_settings(personal, LAUNCHER)
+        self.assertIn('            "id": "User.find"\n        },\n        {"id": "User.DalftuiSshPicker", ', updated)
+        self.assertIn('        },\n        {"id": "User.DalftuiSshPicker", "keys": "ctrl+shift+f2"}\n    ]\n}\n',
+                      updated)
+        self.assertEqual(terminal.shortcut_settings(updated, LAUNCHER), updated)
 
     def gist_settings(self, default, *extra):
         return json.dumps({'defaultProfile': default, 'profiles': {'list': [
@@ -120,17 +142,17 @@ class TerminalSetupTests(unittest.TestCase):
                         'Windows PowerShell 7', 'Windows PowerShell 7 (Administrator)', '{mine}', 'Mine'):
             with self.subTest(default=default):
                 personal = self.gist_settings(default, mine).replace('"name": "Mine"', '"name": "Mine" // keep')
-                installed = terminal.updated_settings(personal, 'pwsh.exe')
+                installed = terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe')
                 self.assertIn('// keep', installed)
                 result = self.settings(installed)
                 self.assertEqual([entry.get('guid') for entry in result['profiles']['list']],
                                  ['{mine}', terminal.PWSH_GUID, terminal.ADMIN_GUID])
                 moved = 'mine' not in default.lower()
                 self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID if moved else default)
-                self.assertEqual(terminal.updated_settings(installed, 'pwsh.exe'), installed)
+                self.assertEqual(terminal.updated_settings(installed, LAUNCHER, 'pwsh.exe'), installed)
         # Without PowerShell 7, nothing replaces them.
         personal = self.gist_settings('Windows PowerShell 7')
-        self.assertEqual(self.settings(terminal.updated_settings(personal))['profiles']['list'],
+        self.assertEqual(self.settings(terminal.updated_settings(personal, LAUNCHER))['profiles']['list'],
                          self.settings(personal)['profiles']['list'])
 
     def test_old_gist_profile_matching_is_narrow(self):
@@ -143,7 +165,7 @@ class TerminalSetupTests(unittest.TestCase):
                 {'guid': '{g}', 'name': 'Windows PowerShell 7',
                  'commandline': 'C:\\Windows\\System32\\cmd.exe /c C:\\x\\pwsh.exe'}]
         personal = self.gist_settings('Windows PowerShell 7', *kept)
-        result = self.settings(terminal.updated_settings(personal, 'pwsh.exe'))
+        result = self.settings(terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe'))
         self.assertEqual(result['profiles']['list'][:len(kept)], kept)
         self.assertEqual(len(result['profiles']['list']), len(kept) + 2)
         # A remaining profile with the default's name still resolves it.
@@ -163,7 +185,7 @@ class TerminalSetupTests(unittest.TestCase):
                     entry = {'guid': guid, 'name': name, 'commandline': 'pwsh.exe'}
                     self.assertFalse(terminal.is_gist_profile(entry))
                     personal = json.dumps({'defaultProfile': name, 'profiles': {'list': [entry]}})
-                    result = self.settings(terminal.updated_settings(personal, 'pwsh.exe'))
+                    result = self.settings(terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe'))
                     self.assertIn(guid, [profile['guid'] for profile in result['profiles']['list']])
                     self.assertEqual(result['defaultProfile'], name)
 
@@ -172,67 +194,215 @@ class TerminalSetupTests(unittest.TestCase):
         stub = {'guid': terminal.PWSH_GUID.upper(), 'hidden': True, 'source': terminal.PWSH_SOURCE}
         personal = json.loads(self.gist_settings('{7e1e3c38-0000-4000-8000-000000000001}', stub))
         personal['disabledProfileSources'] = ['Windows.Terminal.Wsl', terminal.PWSH_SOURCE]
-        installed = terminal.updated_settings(json.dumps(personal, indent=4), 'pwsh.exe')
+        installed = terminal.updated_settings(json.dumps(personal, indent=4), LAUNCHER, 'pwsh.exe')
         result = self.settings(installed)
         self.assertEqual(result['disabledProfileSources'], ['Windows.Terminal.Wsl'])
         shown = {'guid': stub['guid'], 'source': terminal.PWSH_SOURCE, 'antialiasingMode': 'cleartype'}
         self.assertEqual(result['profiles']['list'][0], shown)
         self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID)
-        self.assertEqual(terminal.updated_settings(installed, 'pwsh.exe'), installed)
+        self.assertEqual(terminal.updated_settings(installed, LAUNCHER, 'pwsh.exe'), installed)
         # Without old gist profiles, a hidden or disabled Terminal profile is left alone.
         hidden = json.dumps({'disabledProfileSources': [terminal.PWSH_SOURCE], 'profiles': {'list': [stub]}})
-        result = self.settings(terminal.updated_settings(hidden, 'pwsh.exe'))
+        result = self.settings(terminal.updated_settings(hidden, LAUNCHER, 'pwsh.exe'))
         self.assertIs(result['profiles']['list'][0]['hidden'], True)
         self.assertEqual(result['disabledProfileSources'], [terminal.PWSH_SOURCE])
 
     def test_cli_reports_removed_gist_profiles(self):
         self.path.write_text(self.gist_settings('Windows PowerShell 7'), encoding='utf-8')
-        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--settings',
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL, '--settings',
                                  str(self.path), '--pwsh', 'pwsh.exe'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('Removed profile from an old setup: Windows PowerShell 7 (Administrator)', result.stdout)
         self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['defaultProfile'], terminal.PWSH_GUID)
         self.assertEqual(len(list(self.root.glob('*.bak'))), 1)
 
-    def test_rerun_removes_shortcuts_from_earlier_versions_and_keeps_personal_entries(self):
+    def test_rerun_keeps_picker_removes_editor_action_and_keeps_personal_entries(self):
         copy = {'id': 'Personal.Copy', 'command': 'copy'}
-        mine = {'id': 'Personal.Mine', 'keys': 'ctrl+shift+f2'}
+        # Ctrl+Shift+F3 is free again for a binding of the user's own.
+        mine = {'id': 'Personal.Mine', 'keys': 'ctrl+shift+f3'}
         inline = [dict(action, keys=binding['keys']) for action, binding in zip(LEGACY_ACTIONS, LEGACY_KEYBINDINGS)]
         rebound = {'id': terminal.ACTION_ID, 'keys': 'ctrl+alt+s'}
+        picker = dict(LEGACY_ACTIONS[0], command=dict(LEGACY_ACTIONS[0]['command'], commandline=LAUNCHER))
         for old in ({'actions': [copy, *LEGACY_ACTIONS], 'keybindings': [*LEGACY_KEYBINDINGS, rebound, mine]},
                     {'actions': [*inline, copy, mine]}):
             with self.subTest(old=old):
-                updated = terminal.updated_settings(json.dumps(old, indent=4))
+                updated = terminal.updated_settings(json.dumps(old, indent=4), LAUNCHER)
                 result = self.settings(updated)
-                self.assertEqual(result['actions'], [copy] if 'keybindings' in old else [copy, mine])
-                self.assertEqual(result.get('keybindings', [mine]), [mine])
-                self.assertEqual(terminal.updated_settings(updated), updated)
+                if 'keybindings' in old:
+                    self.assertEqual(result['actions'], [copy, picker])
+                    self.assertEqual(result['keybindings'], [LEGACY_KEYBINDINGS[0], rebound, mine])
+                else:
+                    self.assertEqual(result['actions'], [dict(picker, keys='ctrl+shift+f2'), copy, mine])
+                self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
 
-    def test_does_not_add_actions_or_bindings(self):
+    def test_handles_empty_missing_arrays_and_compact_settings(self):
         for personal in ('{}', '{ /* comment */ }', '{"theme":"dark"}',
                          '{"actions":[]}', '{"actions":[{"command":"copy"}]}',
                          '{"keybindings":[]}', '{"actions":[],"keybindings":[],}',
-                         '{"actions":[{"command":"copy"} // final comment\n]}',
-                         '{"actions":null}', '{"keybindings":{}}'):
+                         '{"actions":[{"command":"copy"} // final comment\n]}'):
             with self.subTest(personal=personal):
-                original = self.settings(personal)
-                result = self.settings(terminal.updated_settings(personal))
-                for name in ('actions', 'keybindings'):
-                    self.assertEqual(result.get(name), original.get(name))
+                updated = terminal.updated_settings(personal, LAUNCHER)
+                result = self.settings(updated)
+                self.assertEqual([entry['id'] for entry in result['actions'] if 'id' in entry], [terminal.ACTION_ID])
+                self.assertEqual(result['actions'][-1]['command']['commandline'], LAUNCHER)
+                # Settings with a keybindings array use the modern form.
+                modern = 'keybindings' in personal
+                self.assertEqual(result.get('keybindings'),
+                                 [{'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'}] if modern else None)
+                self.assertEqual(result['actions'][-1].get('keys'), None if modern else 'ctrl+shift+f2')
+                self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
+
+    def test_reruns_are_idempotent_and_moved_checkout_updates_managed_action(self):
+        first = terminal.updated_settings('{"actions":[],"keybindings":[]}', 'old-launcher')
+        self.assertEqual(terminal.updated_settings(first, 'old-launcher'), first)
+        result = self.settings(terminal.updated_settings(first, 'new-launcher'))
+        self.assertEqual(len(result['actions']), 1)
+        self.assertEqual(len(result['keybindings']), 1)
+        self.assertEqual(result['actions'][0]['command']['commandline'], 'new-launcher')
+
+    def test_ui_migration_and_additional_personal_shortcuts_do_not_duplicate_entries(self):
+        # Terminal moves inline keys to the keybindings array when it saves its settings.
+        actions = self.settings(terminal.updated_settings('{}', LAUNCHER))['actions']
+        for action in actions:
+            del action['keys']
+        personal = json.dumps({'actions': actions, 'keybindings': [
+            {'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'},
+            {'id': terminal.ACTION_ID, 'keys': 'ctrl+alt+s'},
+        ], 'profiles': {'defaults': terminal.TERMINAL_DEFAULTS}})
+        self.assertEqual(terminal.updated_settings(personal, LAUNCHER), personal)
+
+    def test_user_edits_to_dalftui_entries_are_kept(self):
+        # Keys, members and comments the user added to dalftui's entries survive reruns.
+        keys = ['ctrl+shift+f2', 'ctrl+alt+s']
+        old = LEGACY_ACTIONS[0]
+        legacy = ('{"actions": [{\n  "id": "User.DalftuiSshPicker", // mine\n  "keys": ' + json.dumps(keys) +
+                  ',\n  "name": "Mine",\n  "command": ' + json.dumps(dict(old['command'], profile='Mine')) + '\n}]}')
+        modern = json.dumps({'actions': [dict(old, keys='ctrl+alt+x')],
+                             'keybindings': [{'id': terminal.ACTION_ID, 'keys': keys}]}, indent=4)
+        for personal in (legacy, modern):
+            with self.subTest(personal=personal):
+                updated = terminal.shortcut_settings(personal, LAUNCHER)
+                self.assertEqual(terminal.shortcut_settings(updated, LAUNCHER), updated)
+                action = self.settings(updated)['actions'][0]
+                self.assertEqual(action['command']['commandline'], LAUNCHER)
+                if personal is legacy:
+                    self.assertIn('// mine', updated)
+                    self.assertEqual(action['keys'], keys)
+                    self.assertEqual(action['command']['profile'], 'Mine')
+                else:
+                    self.assertEqual(action['keys'], 'ctrl+alt+x')
+                    self.assertEqual(self.settings(updated)['keybindings'],
+                                     [{'id': terminal.ACTION_ID, 'keys': keys}])
+        # Without Ctrl+Shift+F2 among its inline keys, the action gets it as well.
+        for keys, expected in (('ctrl+alt+s', ['ctrl+alt+s', 'ctrl+shift+f2']), (None, 'ctrl+shift+f2'),
+                               (['ctrl+alt+s'], ['ctrl+alt+s', 'ctrl+shift+f2'])):
+            with self.subTest(keys=keys):
+                personal = json.dumps({'actions': [{'id': terminal.ACTION_ID, 'keys': keys, 'command': 'x'}]})
+                action = self.settings(terminal.shortcut_settings(personal, LAUNCHER))['actions'][0]
+                self.assertEqual(action['keys'], expected)
+                self.assertEqual(action['command']['commandline'], LAUNCHER)
+
+    def test_shortcut_conflicts_keep_the_binding_and_apply_other_settings(self):
+        for key in ('ctrl+shift+f2', 'SHIFT+CTRL+F2', ['ctrl+v', 'ctrl+shift+f2']):
+            for array in ('actions', 'keybindings'):
+                # A null id is how Terminal unbinds a key.
+                for owner in ('Personal.Action', None):
+                    with self.subTest(key=key, array=array, owner=owner):
+                        personal = json.dumps({array: [{'id': owner, 'keys': key}]})
+                        with self.assertRaisesRegex(terminal.ShortcutSkipped, r'Ctrl\+Shift\+F2 already has a binding'):
+                            terminal.shortcut_settings(personal, LAUNCHER)
+                        skipped = []
+                        result = self.settings(terminal.updated_settings(personal, LAUNCHER, None, skipped))
+                        self.assertEqual(result[array], [{'id': owner, 'keys': key}])
+                        self.assertEqual(len(result), 2)
+                        self.assertEqual(result['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+                        self.assertEqual(len(skipped), 1)
+        # Even next to dalftui's own entries from an earlier setup. Another Terminal installation,
+        # such as Preview, is still configured.
+        personal = json.dumps({'actions': LEGACY_ACTIONS, 'keybindings': [
+            *LEGACY_KEYBINDINGS, {'id': 'Personal.Action', 'keys': 'ctrl+shift+f2'}]})
+        self.path.write_text(personal, encoding='utf-8')
+        preview = self.root / 'preview.json'
+        preview.write_text('{}', encoding='utf-8')
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL,
+                                 '--settings', str(self.path), '--settings', str(preview)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f'Ctrl+Shift+F2 was not added to {self.path}: Ctrl+Shift+F2 already has a binding',
+                      result.stderr)
+        stable = self.settings(self.path.read_text(encoding='utf-8'))
+        # The earlier F3 entries are still removed.
+        self.assertEqual(stable['keybindings'], [LEGACY_KEYBINDINGS[0], {'id': 'Personal.Action', 'keys': 'ctrl+shift+f2'}])
+        self.assertEqual(stable['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+        self.assertEqual(self.settings(preview.read_text(encoding='utf-8'))['actions'][0]['keys'], 'ctrl+shift+f2')
+        self.assertEqual(len(list(self.root.glob('*.bak'))), 2)
+
+    def test_one_malformed_installation_does_not_block_the_others(self):
+        broken = self.root / 'broken.json'
+        broken.write_text('{broken}', encoding='utf-8')
+        self.path.write_text('{}', encoding='utf-8')
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL,
+                                 '--settings', str(broken), '--settings', str(self.path)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f'Terminal setup failed: {broken}:', result.stderr)
+        self.assertEqual(broken.read_text(encoding='utf-8'), '{broken}')
+        self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['actions'][0]['id'], terminal.ACTION_ID)
+
+    def test_null_or_invalid_action_arrays(self):
+        for personal, array in (('{"actions":null}', 'actions'), ('{"keybindings": null}', 'keybindings')):
+            with self.subTest(personal=personal):
+                updated = terminal.updated_settings(personal, LAUNCHER)
+                self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
+                result = self.settings(updated)
+                self.assertEqual(result[array][0]['id'], terminal.ACTION_ID)
+                self.assertEqual(result['actions'][0]['command']['commandline'], LAUNCHER)
+        # Other settings still apply when the action cannot be added.
+        for personal in ('{"keybindings":{}}', '{"actions":"x"}',
+                         json.dumps({'actions': [{'id': terminal.ACTION_ID}] * 2})):
+            with self.subTest(personal=personal):
+                skipped = []
+                result = self.settings(terminal.updated_settings(personal, LAUNCHER, None, skipped))
+                self.assertEqual(len(skipped), 1)
+                self.assertEqual(result['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+                self.assertEqual({key: value for key, value in result.items() if key != 'profiles'},
+                                 json.loads(personal))
+                self.path.write_text(personal, encoding='utf-8')
+                self.assertFalse(terminal.configure(self.path, LAUNCHER))
+
+    def test_cli_requires_shell_except_to_uninstall(self):
+        self.path.write_text('{}', encoding='utf-8')
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'),
+                                 '--settings', str(self.path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('--shell is required', result.stderr)
+        self.assertEqual(self.path.read_text(encoding='utf-8'), '{}')
+
+    def test_cli_uses_explicit_settings_path_and_native_commandline_quoting(self):
+        self.path.write_text('{}', encoding='utf-8')
+        shell = "C:\\PowerShell's unicode \u00e9\\pwsh.exe"
+        result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'),
+                                 '--shell', shell, '--settings', str(self.path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Ctrl+Shift+F2 opens the SSH picker (dssh) in a new tab.', result.stdout)
+        command = self.settings(self.path.read_text(encoding='utf-8'))['actions'][0]['command']
+        self.assertEqual(command['commandline'], subprocess.list2cmdline([
+            shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'bin/ssh-tab.ps1')]))
+        self.assertEqual(command['startingDirectory'], '%USERPROFILE%')
 
     def test_malformed_or_ambiguous_settings_remain_untouched(self):
         for personal in ('{broken}', '[]', '{"actions":[],"actions":[]}'):
             with self.subTest(personal=personal):
                 self.path.write_text(personal, encoding='utf-8')
                 with self.assertRaises(ValueError):
-                    terminal.configure(self.path)
+                    terminal.configure(self.path, LAUNCHER)
                 self.assertEqual(self.path.read_text(encoding='utf-8'), personal)
                 self.assertFalse(list(self.root.glob('*.bak')))
 
     def test_backup_preserves_bytes_bom_crlf_and_reruns_do_not_write(self):
         original = b'\xef\xbb\xbf{\r\n  // personal\r\n  "theme": "dark",\r\n}\r\n'
         self.path.write_bytes(original)
-        terminal.configure(self.path)
+        terminal.configure(self.path, LAUNCHER)
         backups = list(self.root.glob('*.bak'))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
@@ -240,7 +410,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertTrue(installed.startswith(b'\xef\xbb\xbf'))
         self.assertNotIn(b'\n', installed.replace(b'\r\n', b''))
         with patch.object(Path, 'write_bytes') as write:
-            terminal.configure(self.path)
+            terminal.configure(self.path, LAUNCHER)
         write.assert_not_called()
 
     def pwsh_profiles(self, text):
@@ -254,8 +424,8 @@ class TerminalSetupTests(unittest.TestCase):
                          '{"profiles":{"list":[{"guid":"{a}","name":"Mine"}, // keep\n],},}',
                          '{\r\n  "profiles": {\r\n    "defaults": {}\r\n  }\r\n}\r\n'):
             with self.subTest(personal=personal):
-                installed = terminal.updated_settings(personal, pwsh)
-                self.assertEqual(terminal.updated_settings(installed, pwsh), installed)
+                installed = terminal.updated_settings(personal, LAUNCHER, pwsh)
+                self.assertEqual(terminal.updated_settings(installed, LAUNCHER, pwsh), installed)
                 if '\r\n' in personal:
                     self.assertNotIn('\n', installed.replace('\r\n', ''))
                 stub, admin = self.pwsh_profiles(installed)
@@ -264,7 +434,7 @@ class TerminalSetupTests(unittest.TestCase):
                 self.assertEqual((admin['name'], admin['commandline'], admin['elevate'],
                                   admin['startingDirectory'], admin['antialiasingMode']),
                                  (terminal.ADMIN_NAME, pwsh, True, '%USERPROFILE%', 'cleartype'))
-        self.assertNotIn('list', self.settings(terminal.updated_settings('{}'))['profiles'])
+        self.assertNotIn('list', self.settings(terminal.updated_settings('{}', LAUNCHER))['profiles'])
 
     def test_powershell_7_profiles_keep_user_edits_and_gist_profiles(self):
         generated = {'guid': terminal.PWSH_GUID.upper(), 'name': 'PowerShell', 'hidden': False,
@@ -272,27 +442,27 @@ class TerminalSetupTests(unittest.TestCase):
         gist = {'guid': '{0e0b8d1a-0000-4000-8000-000000000000}', 'name': 'windows powershell 7 (admin)',
                 'commandline': 'pwsh.exe', 'elevate': True}
         personal = json.dumps({'profiles': {'list': [generated, gist]}}, indent=4)
-        installed = terminal.updated_settings(personal, 'pwsh.exe')
+        installed = terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe')
         entries = self.settings(installed)['profiles']['list']
         self.assertEqual(entries, [dict(generated, antialiasingMode='cleartype'), gist])
-        self.assertEqual(terminal.updated_settings(installed, 'pwsh.exe'), installed)
+        self.assertEqual(terminal.updated_settings(installed, LAUNCHER, 'pwsh.exe'), installed)
         edited = {'guid': terminal.PWSH_GUID, 'antialiasingMode': 'grayscale'}
         mine = {'guid': terminal.ADMIN_GUID, 'name': 'Mine', 'commandline': 'old.exe'}
-        personal = terminal.updated_settings(json.dumps({'profiles': {'list': [edited, mine]}}))
-        self.assertEqual(terminal.updated_settings(personal, 'pwsh.exe'), personal)
+        personal = terminal.updated_settings(json.dumps({'profiles': {'list': [edited, mine]}}), LAUNCHER)
+        self.assertEqual(terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe'), personal)
         personal = json.dumps({'profiles': {'defaults': {'antialiasingMode': 'aliased'},
                                             'list': [{'name': ''}, generated]}})
-        entries = self.settings(terminal.updated_settings(personal, 'pwsh.exe'))['profiles']['list']
+        entries = self.settings(terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe'))['profiles']['list']
         self.assertEqual(entries[:2], [{'name': ''}, generated])
         self.assertEqual([entry.get('antialiasingMode') for entry in entries], [None, None, None])
 
     def test_powershell_7_profiles_skip_legacy_and_reject_invalid_lists(self):
         self.assertEqual(self.settings(terminal.updated_settings(
-            '{"profiles":[]}', 'pwsh.exe'))['profiles'], [])
+            '{"profiles":[]}', LAUNCHER, 'pwsh.exe'))['profiles'], [])
         personal = '{"profiles":{"list":{}}}'
         self.path.write_text(personal, encoding='utf-8')
         with self.assertRaises(ValueError):
-            terminal.configure(self.path, 'pwsh.exe')
+            terminal.configure(self.path, LAUNCHER, 'pwsh.exe')
         self.assertEqual(self.path.read_text(encoding='utf-8'), personal)
         self.assertFalse(list(self.root.glob('*.bak')))
 
@@ -301,7 +471,7 @@ class TerminalSetupTests(unittest.TestCase):
         for arguments, expected in (([], 0), (['--pwsh', pwsh], 2)):
             with self.subTest(arguments=arguments):
                 self.path.write_text('{}', encoding='utf-8')
-                result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'),
+                result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL,
                                          '--settings', str(self.path), *arguments],
                                         capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -325,7 +495,7 @@ class TerminalSetupTests(unittest.TestCase):
         checkout = self.root / "copied checkout's unicode \u00e9"
         implementation = checkout / 'dalftui/windows'
         implementation.mkdir(parents=True)
-        for relative in ('bin/terminal_settings.py', 'dalftui/__init__.py',
+        for relative in ('bin/terminal_settings.py', 'bin/ssh-tab.ps1', 'dalftui/__init__.py',
                          'dalftui/windows/__init__.py',
                          'dalftui/windows/terminal_settings.py'):
             destination = checkout / relative
@@ -336,7 +506,9 @@ class TerminalSetupTests(unittest.TestCase):
         self.path.write_text(json.dumps({'actions': LEGACY_ACTIONS, 'keybindings': LEGACY_KEYBINDINGS}), encoding='utf-8')
         environment = os.environ.copy()
         environment.pop('PYTHONPATH', None)
-        command = [sys.executable, str(checkout / 'bin/terminal_settings.py'), '--settings', str(self.path)]
+        shell = "C:\\PowerShell's unicode \u00e9\\pwsh.exe"
+        command = [sys.executable, str(checkout / 'bin/terminal_settings.py'), '--shell', shell,
+                   '--settings', str(self.path)]
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -344,7 +516,12 @@ class TerminalSetupTests(unittest.TestCase):
         backups = list(self.root.glob('settings.json.dalftui-*.bak'))
         self.assertEqual(len(backups), 1)
         result = self.settings(installed.decode())
-        self.assertEqual((result['actions'], result['keybindings']), ([], []))
+        # The copied checkout's action replaces the earlier one; the F3 action is removed.
+        self.assertEqual([action['id'] for action in result['actions']], [terminal.ACTION_ID])
+        self.assertEqual(result['keybindings'], [LEGACY_KEYBINDINGS[0]])
+        # Windows temp paths may use an 8.3 alias; the launcher resolves it.
+        self.assertEqual(result['actions'][0]['command']['commandline'], subprocess.list2cmdline([
+            shell, '-NoLogo', '-NoProfile', '-File', str(checkout.resolve() / 'bin/ssh-tab.ps1')]))
         self.assertEqual(result['profiles']['defaults']['font']['face'], terminal.WINDOWS_FONT)
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
@@ -420,7 +597,7 @@ class TerminalSetupTests(unittest.TestCase):
 
     def test_cli_creates_vscode_settings_without_terminal_settings(self):
         missing = self.root / 'Code/User/settings.json'
-        command = [sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--vscode-settings', str(missing)]
+        command = [sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL, '--vscode-settings', str(missing)]
         environment = {**os.environ, 'LOCALAPPDATA': str(self.root / 'no terminal')}
         result = subprocess.run(command, env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -444,7 +621,7 @@ class TerminalSetupTests(unittest.TestCase):
         {"command": "copy", "keys": "ctrl+shift+c"}, // my binding
     ], /* leave this here */
 }'''
-        installed = terminal.updated_settings(personal, 'pwsh.exe')
+        installed = terminal.updated_settings(personal, LAUNCHER, 'pwsh.exe')
         removed = terminal.removed_settings(installed)
         for line in ('// Keep my defaults and shortcuts.', '// my binding', '/* leave this here */', '// mine'):
             self.assertIn(line, removed)
@@ -456,7 +633,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(terminal.removed_settings(removed), removed)
 
     def test_uninstall_keeps_values_changed_after_setup(self):
-        installed = terminal.updated_settings('{"keybindings": []}', 'pwsh.exe')
+        installed = terminal.updated_settings('{"keybindings": []}', LAUNCHER, 'pwsh.exe')
         settings = self.settings(installed)
         settings['actions'], settings['keybindings'] = LEGACY_ACTIONS, [dict(LEGACY_KEYBINDINGS[0])]
         stub, admin = settings['profiles']['list']
@@ -480,7 +657,7 @@ class TerminalSetupTests(unittest.TestCase):
     def test_uninstall_cli_backs_up_keeps_bom_crlf_and_supports_dry_run(self):
         original = b'\xef\xbb\xbf{\r\n  // personal\r\n  "theme": "dark",\r\n}\r\n'
         self.path.write_bytes(original)
-        terminal.configure(self.path, 'pwsh.exe')
+        terminal.configure(self.path, LAUNCHER, 'pwsh.exe')
         vscode = self.root / 'vscode.json'
         vscode.write_bytes(b'\xef\xbb\xbf{\r\n  "editor.fontSize": 14, // mine\r\n}\r\n')
         terminal.configure_vscode(vscode)
@@ -505,6 +682,7 @@ class TerminalSetupTests(unittest.TestCase):
             self.assertIn(comment, content)
             self.assertNotIn(terminal.WINDOWS_FONT.encode(), content)
             self.assertNotIn(b'cursorShape', content)
+            self.assertNotIn(b'Dalftui', content)
         self.assertEqual(self.settings(vscode.read_text(encoding='utf-8-sig')), {'editor.fontSize': 14})
         result = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -533,7 +711,7 @@ class TerminalSetupTests(unittest.TestCase):
                 self.assertEqual('fontFamily' in terminal.removed_vscode_settings(text, values), kept_windows)
 
     def test_uninstall_removes_profile_defaults_only_while_they_are_dalftui_values(self):
-        installed = self.settings(terminal.updated_settings('{"profiles": {"defaults": {"opacity": 90}}}'))
+        installed = self.settings(terminal.updated_settings('{"profiles": {"defaults": {"opacity": 90}}}', LAUNCHER))
         defaults = installed['profiles']['defaults']
         self.assertEqual(self.settings(terminal.removed_settings(json.dumps(installed)))['profiles']['defaults'],
                          {'opacity': 90, 'font': {}})
@@ -544,7 +722,7 @@ class TerminalSetupTests(unittest.TestCase):
                                    'bellStyle': 'all'})
 
     def test_uninstall_keeps_replaced_gist_profiles_removed(self):
-        installed = terminal.updated_settings(self.gist_settings('Windows PowerShell 7'), 'pwsh.exe')
+        installed = terminal.updated_settings(self.gist_settings('Windows PowerShell 7'), LAUNCHER, 'pwsh.exe')
         result = self.settings(terminal.removed_settings(installed))
         self.assertEqual(result['profiles']['list'], [])
         self.assertEqual(result['defaultProfile'], terminal.PWSH_GUID)

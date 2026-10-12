@@ -17,10 +17,10 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
 }
 function Copy-DalftuiWindowsCheckout([string]$Source, [string]$Destination) {
     [IO.Directory]::CreateDirectory((Join-Path $Destination 'dalftui\windows')) | Out-Null
-    foreach ($file in @('install.cmd', 'install.ps1', 'bin/profile.ps1',
+    foreach ($file in @('install.cmd', 'install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
                          'bin/terminal_settings.py', 'dalftui\__init__.py',
                          'dalftui\windows\__init__.py', 'dalftui\windows\setup.ps1',
-                         'dalftui\windows\profile.ps1',
+                         'dalftui\windows\profile.ps1', 'dalftui\windows\ssh-tab.ps1',
                          'dalftui\windows\terminal_settings.py', 'config\oh-my-posh.omp.json')) {
         $destinationPath = Join-Path $Destination $file
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destinationPath)) | Out-Null
@@ -36,8 +36,9 @@ try {
         Assert-True (Test-Path -LiteralPath ("Function:\" + $function)) `
             "Dot-sourcing root install.ps1 must expose $function without running setup"
     }
-    foreach ($file in @('install.ps1', 'bin/profile.ps1',
-                         'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1')) {
+    foreach ($file in @('install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
+                         'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1',
+                         'dalftui\windows\ssh-tab.ps1')) {
         $parseErrors = $null
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file),
             [ref]$null, [ref]$parseErrors) | Out-Null
@@ -637,6 +638,18 @@ function Invoke-DalftuiWindowsSetup {
     if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
     $terminalShell = Join-Path $PSHOME $shellName
+    # Terminal's Ctrl+Shift+F2 tab runs the bin launcher in a fresh process without a
+    # personal PowerShell profile; it must also reach uv.exe past a batch shim.
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
+    $previousPath = $env:PATH
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        $env:PATH = $shimBin + [IO.Path]::PathSeparator + $env:PATH
+    }
+    try { $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
+    finally { $env:PATH = $previousPath }
+    Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
+    $arguments = ConvertFrom-Json -InputObject $argumentJson
+    Assert-True (($arguments -join ' ') -eq '--pick') "The Terminal launcher must open the picker through uv.exe: $argumentJson"
 
     # Unix-like aliases need their tools. Load the profile at global scope in a
     # fresh shell, first without the tools, then with fakes that echo arguments.
@@ -727,7 +740,7 @@ function Invoke-DalftuiWindowsSetup {
     } finally { Pop-Location }
 
     $settingsPath = Join-Path $root 'terminal-settings.json'
-    # Earlier versions installed Ctrl+Shift+F2/F3 actions; setup removes them.
+    # Earlier versions installed Ctrl+Shift+F2/F3 actions; setup updates the F2 one and removes F3.
     # The old setup gist's PowerShell 7 profile is replaced once PowerShell 7 is found.
     [IO.File]::WriteAllText($settingsPath, '{"actions":[{"id":"User.DalftuiSshPicker","command":{"action":"newTab"}},' +
         '{"id":"User.DalftuiOpenFolderInCode","command":{"action":"sendInput","input":"x"}}],' +
@@ -740,8 +753,20 @@ function Invoke-DalftuiWindowsSetup {
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
         -Checkout $checkout -SettingsPaths @($settingsPath)
     $settings = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($settingsPath))
-    Assert-True (@($settings.actions).Count -eq 0 -and @($settings.keybindings).Count -eq 0) `
-        'Setup must remove the Terminal actions of earlier versions'
+    $actions = @($settings.actions)
+    $keybindings = @($settings.keybindings)
+    Assert-True ($actions.Count -eq 1 -and $actions[0].id -eq 'User.DalftuiSshPicker' -and
+                 $keybindings.Count -eq 1 -and $keybindings[0].id -eq 'User.DalftuiSshPicker' -and
+                 $keybindings[0].keys -eq 'ctrl+shift+f2') `
+        "Setup must keep only the Ctrl+Shift+F2 action of earlier versions: $($actions | ConvertTo-Json -Compress -Depth 4)"
+    $command = $actions[0].command
+    # The shell is quoted only when its path has spaces; Python resolves 8.3 temp paths.
+    $commandline = [string]$command.commandline
+    Assert-True ($command.action -eq 'newTab' -and
+                 ($commandline.StartsWith($terminalShell + ' -NoLogo -NoProfile -File ') -or
+                  $commandline.StartsWith('"' + $terminalShell + '" -NoLogo -NoProfile -File ')) -and
+                 $commandline.EndsWith([IO.Path]::Combine([IO.Path]::GetFileName($checkout), 'bin', 'ssh-tab.ps1') + '"')) `
+        "Ctrl+Shift+F2 must open a new tab running the bin launcher with setup's PowerShell: $commandline"
     $defaults = $settings.profiles.defaults
     Assert-True ($defaults.font.face -eq 'FiraCode Nerd Font Mono' -and $defaults.cursorShape -eq 'bar' -and
                  $defaults.padding -eq '8, 8, 8, 8' -and $defaults.bellStyle -eq 'none') `

@@ -297,7 +297,12 @@ function Set-DalftuiTerminalShortcut {
     param([string]$Python, [string[]]$PythonArguments, [string]$Checkout,
           [string[]]$SettingsPaths, [string]$PowerShell7, [string]$VSCodeSettingsPath,
           [switch]$Uninstall, [switch]$DryRun)
-    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'))
+    # The Ctrl+Shift+F2 tab uses the same PowerShell version as setup, without personal profiles.
+    $shellName = 'powershell.exe'
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $shellName = 'pwsh.exe' }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { $shellName = 'pwsh' }
+    $shellPath = Join-Path $PSHOME $shellName
+    $arguments = @($PythonArguments) + @((Join-Path $Checkout 'bin/terminal_settings.py'), '--shell', $shellPath)
     foreach ($path in $SettingsPaths) { $arguments += @('--settings', $path) }
     if ($PowerShell7) { $arguments += @('--pwsh', $PowerShell7) }
     if ($VSCodeSettingsPath) { $arguments += @('--vscode-settings', $VSCodeSettingsPath) }
@@ -305,7 +310,7 @@ function Set-DalftuiTerminalShortcut {
     if ($DryRun) { $arguments += '--dry-run' }
     & $Python @arguments | Out-Host
     if ($LASTEXITCODE -ne 0 -and $Uninstall) { throw 'Some Windows Terminal or VS Code settings were not changed; see the message above.' }
-    if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal or VS Code font setup failed; see the message above. dssh is already configured in PowerShell.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Windows Terminal or VS Code setup failed; see the message above. dssh is already configured in PowerShell.' }
 }
 
 function Test-DalftuiNerdFont {

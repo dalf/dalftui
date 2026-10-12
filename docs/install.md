@@ -454,8 +454,8 @@ On Windows:
 
 This removes the managed block from each PowerShell profile (or the one given
 with `-ProfilePath`). A block that contains other lines is kept and reported. It
-removes from Windows Terminal the Ctrl+Shift+F2 and F3 actions and keybindings
-that earlier versions installed, the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
+removes from Windows Terminal the Ctrl+Shift+F2 action and its key bindings (and the
+Ctrl+Shift+F3 action of earlier versions), the **Windows PowerShell 7 (Admin)** profile, ClearType from Terminal's
 PowerShell 7 profile, the default `FiraCode Nerd Font Mono` face (or the `Hack Nerd Font`
 face of earlier versions), the bar cursor, padding and bell style defaults, and VS Code's
 `terminal.integrated.fontFamily` (`FiraCode Nerd Font Mono`, or the earlier `Hack Nerd Font`)
@@ -561,11 +561,22 @@ are on PATH. When installed,
 `lsd`, `wget2`, `btop`, `gsudo`, `notepad++` and `bat` replace `ls`, `wget`, `htop`,
 `sudo`, `notepad` and `cat`, and a `curl` outside Windows' folder replaces `curl`; setup does not install them.
 
-At a local PowerShell prompt, **Ctrl+B, then F2** runs `dssh` to pick a host and
-connect, using remote tmux when available or a plain shell. After choosing a
-host, `dssh` sets the tab title to `username@host-alias` using the effective SSH
-username (or the login you enter). This also works when remote tmux does not set
-a terminal title; remote applications can still update it.
+In **Windows Terminal**, setup also installs **Ctrl+Shift+F2**: open a new local
+tab, pick a host, and connect in that tab using remote tmux when available or a
+plain shell. Terminal handles the key before the program in the current tab, so it
+works while that tab runs SSH, tmux, `mc` or another program. It uses Terminal's
+[new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
+and keeps your default profile and appearance. The tab runs `bin/ssh-tab.ps1` with
+the PowerShell version that ran setup, without your personal profile; it loads
+`bin/profile.ps1` and runs `dssh`, which starts the picker with `uv.exe` (never a
+batch shim such as mise's `uv.cmd`). Esc in the picker closes the new tab.
+
+At a local PowerShell prompt, **Ctrl+B, then F2** runs `dssh` in the current tab to
+pick a host and connect, keeping the typed line; it does nothing while another
+program runs. After choosing a host, `dssh` sets the tab title to
+`username@host-alias` using the effective SSH username (or the login you enter).
+This also works when remote tmux does not set a terminal title; remote
+applications can still update it.
 
 **Ctrl+B, then F3** (or **v**) opens the current directory in a new VS Code window:
 
@@ -581,8 +592,12 @@ local programs need their own handler; use a PowerShell prompt for local folders
 
 Setup finds existing Stable, Preview, Canary, and unpackaged Terminal settings.
 It backs up each changed `settings.json`, preserves comments and other settings,
-and adds no duplicates on repeated runs. It removes the Ctrl+Shift+F2 and F3
-actions installed by earlier versions.
+and adds no duplicates on repeated runs; rerunning it after moving the checkout
+updates the Ctrl+Shift+F2 action. Keys, comments and other values you add to
+dalftui's action or key binding are kept. A Ctrl+Shift+F2 binding of your own is
+preserved: setup reports the conflict and skips only that action, so you can remove
+the binding and rerun; the other Terminal settings and installations are still
+configured. Setup removes the Ctrl+Shift+F3 action installed by earlier versions.
 When PowerShell 7 is installed, setup turns on ClearType in Terminal's own PowerShell
 profile and adds **Windows PowerShell 7 (Admin)**, which opens it as administrator
 (Terminal 1.13+). Profiles you already have, or later edit, are kept, except the

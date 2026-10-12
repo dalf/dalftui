@@ -4,6 +4,8 @@
 
 - **Ctrl+B, then F1:** open the keyboard shortcut guide.
 - **Ctrl+B, then F2:** desktop mode: choose an SSH host and open it in a new tab of the current kitty window.
+- **Ctrl+Shift+F2** (Windows Terminal, not a tmux key): choose an SSH host in a new local tab,
+  even from a `dssh` tab running remote tmux.
 - **Ctrl+B, then h:** macOS mode: choose an SSH host and open a Terminal.app or iTerm2 window.
 - **Ctrl+B, then F3:** open the current pane's directory in a new VS Code window, locally or over SSH.
   **Ctrl+B, then v** does the same.
