@@ -645,8 +645,12 @@ function Invoke-DalftuiWindowsSetup {
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         $env:PATH = $shimBin + [IO.Path]::PathSeparator + $env:PATH
     }
-    try { $argumentJson = & $terminalShell -NoLogo -NoProfile -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
-    finally { $env:PATH = $previousPath }
+    # The tab must also start under Windows' default Restricted policy; the variable
+    # sets that policy for the process unless the command line overrides it.
+    $previousPolicy = $env:PSExecutionPolicyPreference
+    $env:PSExecutionPolicyPreference = 'Restricted'
+    try { $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
+    finally { $env:PATH = $previousPath; $env:PSExecutionPolicyPreference = $previousPolicy }
     Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
     $arguments = ConvertFrom-Json -InputObject $argumentJson
     Assert-True (($arguments -join ' ') -eq '--pick') "The Terminal launcher must open the picker through uv.exe: $argumentJson"
@@ -763,8 +767,8 @@ function Invoke-DalftuiWindowsSetup {
     # The shell is quoted only when its path has spaces; Python resolves 8.3 temp paths.
     $commandline = [string]$command.commandline
     Assert-True ($command.action -eq 'newTab' -and
-                 ($commandline.StartsWith($terminalShell + ' -NoLogo -NoProfile -File ') -or
-                  $commandline.StartsWith('"' + $terminalShell + '" -NoLogo -NoProfile -File ')) -and
+                 ($commandline.StartsWith($terminalShell + ' -NoLogo -NoProfile -ExecutionPolicy Bypass -File ') -or
+                  $commandline.StartsWith('"' + $terminalShell + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -File ')) -and
                  $commandline.EndsWith([IO.Path]::Combine([IO.Path]::GetFileName($checkout), 'bin', 'ssh-tab.ps1') + '"')) `
         "Ctrl+Shift+F2 must open a new tab running the bin launcher with setup's PowerShell: $commandline"
     $defaults = $settings.profiles.defaults
@@ -783,6 +787,20 @@ function Invoke-DalftuiWindowsSetup {
         'An idempotent Terminal rerun must not create another backup'
     Assert-True (@($settings.profiles.list).Count -eq 1 -and $settings.defaultProfile -eq 'Windows PowerShell 7') `
         'Without PowerShell 7, setup must neither add nor replace Terminal profiles'
+    # A Ctrl+Shift+F2 binding of the user's own is kept and reported; setup still
+    # succeeds, on reruns too, and applies the other Terminal settings.
+    $conflictPath = Join-Path $root 'conflict-settings.json'
+    [IO.File]::WriteAllText($conflictPath, '{"keybindings":[{"id":"Personal.Action","keys":"ctrl+shift+f2"}]}')
+    foreach ($run in 1, 2) {
+        try {
+            Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
+                -Checkout $checkout -SettingsPaths @($conflictPath)
+        } catch { throw "A Ctrl+Shift+F2 binding of the user's own must not fail setup (run $run): $_" }
+    }
+    $conflict = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($conflictPath))
+    Assert-True (@($conflict.keybindings).Count -eq 1 -and $conflict.keybindings[0].id -eq 'Personal.Action' -and
+                 -not $conflict.actions -and $conflict.profiles.defaults.cursorShape -eq 'bar') `
+        "Setup must keep the user's Ctrl+Shift+F2 binding and apply the other settings: $($conflict | ConvertTo-Json -Compress -Depth 4)"
     $vscodeSettingsPath = Join-Path $root 'vscode-settings.json'
     [IO.File]::WriteAllText($vscodeSettingsPath, "{`r`n    // personal`r`n}`r`n")
     Set-DalftuiTerminalShortcut -Python $python.Source -PythonArguments $pythonArguments `
