@@ -729,7 +729,8 @@ function Invoke-DalftuiWindowsSetup {
             Push-Location -LiteralPath $root
             try { $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
             finally { Pop-Location }
-            Assert-True ($LASTEXITCODE -eq 17 -and -not (Test-Path -LiteralPath (Join-Path $root 'relative app data'))) `
+            # uv may keep its own cache there; only the tab's folder must be absent.
+            Assert-True ($LASTEXITCODE -eq 17 -and -not (Test-Path -LiteralPath (Join-Path $root 'relative app data\dalftui'))) `
                 "The Terminal launcher must ignore a relative LOCALAPPDATA: $argumentJson"
             # Without uv.exe, mise or a remembered Python, the tab explains what is missing.
             $env:LOCALAPPDATA = Split-Path -Parent (Split-Path -Parent $tabCache)
