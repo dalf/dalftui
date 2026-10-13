@@ -180,8 +180,10 @@ integration tests, and GitHub Actions.
 - **A tmux session follows the attached desktop's SSH agent.** On installed
   Linux servers, shells in sessions started by the SSH launcher use a stable
   per-session alias that points at the attached client's forwarded agent, and
-  is absent while the session is detached. Sessions from before the update need
-  a one-time migration. See [tmux.md](docs/tmux.md#ssh-agent-in-tmux-sessions).
+  is absent while the session is detached. Both the server and every desktop
+  that connects to it must be updated: sessions from before the update, or
+  created by a desktop that has not been updated, need a one-time `enable`. See
+  [tmux.md](docs/tmux.md#ssh-agent-in-tmux-sessions).
 
 ## Installed software
 

@@ -1,4 +1,6 @@
 """Test installation, rollback and updates using disposable directories."""
+# The module also holds the private tmux and environment fixtures other suites share.
+# pylint: disable=too-many-lines
 from contextlib import redirect_stdout
 import io
 import importlib.util
@@ -8,10 +10,12 @@ import os
 from pathlib import Path
 import shutil
 import shlex
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -77,6 +81,69 @@ class KittyReloadTests(unittest.TestCase):
         with patch.object(setup.subprocess, 'run', return_value=subprocess.CompletedProcess([], 2, '', 'pkill: bad')):
             with self.assertRaisesRegex(RuntimeError, 'pkill: bad'):
                 setup.reload_kitty()
+
+
+# A test run from an SSH login inherits these. With SSH_CONNECTION, the launcher
+# runs the installed session helper (bin/session_owner.py), which must never
+# find the real installation or keep records beside the user's live aliases.
+SSH_LOGIN_VARIABLES = ('SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY', 'SSH_AUTH_SOCK')
+
+
+def isolated_environment(directory, env=None, **values):
+    """A copy of env without SSH login variables, using a private runtime directory.
+
+    The session helper falls back to /run/user/$UID unless XDG_RUNTIME_DIR names
+    an existing private directory, so this one lasts as long as directory.
+    Callers that run launcher scripts also set HOME and XDG_CONFIG_HOME.
+    """
+    runtime = Path(directory) / 'xdg-runtime'
+    runtime.mkdir(mode=0o700, exist_ok=True)
+    result = dict(os.environ if env is None else env, XDG_RUNTIME_DIR=str(runtime))
+    for name in SSH_LOGIN_VARIABLES:
+        result.pop(name, None)
+    result.update(values)
+    return result
+
+
+def processes_with_environment(entry):
+    """This user's other processes whose environment contains entry (bytes)."""
+    found = []
+    for name in os.listdir('/proc'):
+        if not name.isdigit() or int(name) == os.getpid():
+            continue
+        try:
+            with open(f'/proc/{name}/environ', 'rb') as source:
+                if entry in source.read().split(b'\0'):
+                    found.append(int(name))
+        except OSError:
+            continue
+    return found
+
+
+def stop_private_tmux(command, env, timeout=10):
+    """Kill a private tmux server, then wait for the background jobs it started.
+
+    kill-server stops a run-shell -b job's shell but not its children, such as
+    the session helper. One still running after the test removes its private
+    runtime directory would fall back to the real /run/user/$UID. Every child
+    inherits the server's XDG_RUNTIME_DIR, which identifies them; any still
+    running after timeout seconds is killed.
+    """
+    subprocess.run([*command, 'kill-server'], capture_output=True, env=env, timeout=15)
+    if not os.path.isdir('/proc') or not env.get('XDG_RUNTIME_DIR'):
+        return
+    entry = os.fsencode('XDG_RUNTIME_DIR=' + env['XDG_RUNTIME_DIR'])
+    deadline = time.monotonic() + timeout
+    while (remaining := processes_with_environment(entry)) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    deadline = time.monotonic() + 5
+    while processes_with_environment(entry) and time.monotonic() < deadline:
+        time.sleep(0.05)
 
 
 class DisposableSetup(unittest.TestCase):
@@ -485,10 +552,9 @@ class TmuxFixture(DisposableSetup):
         super().setUp()
         self.install(profile=self.profile)
         self.socket = self.directory / 'tmux.socket'
-        # The session-owner hooks keep their lock and records in the runtime directory.
-        runtime = self.directory / 'run'
-        runtime.mkdir(mode=0o700)
-        self.env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
+        # The session-owner hooks keep their lock and records in the runtime
+        # directory, and act on clients that arrive with SSH_CONNECTION.
+        self.env = isolated_environment(self.directory)
         self.env.pop('TMUX', None)
         self.env.pop('TMUX_PANE', None)
         self.command = ['tmux', '-N', '-S', str(self.socket)]
@@ -506,13 +572,26 @@ class TmuxFixture(DisposableSetup):
                                 capture_output=True, text=True, env=self.env, timeout=15)
         if result.returncode:
             self.fail(result.stderr.strip())
-        self.addCleanup(subprocess.run, [*self.command, 'kill-server'], capture_output=True, env=self.env)
+        self.addCleanup(stop_private_tmux, self.command, self.env)
 
     def do_reload(self):
         with redirect_stdout(io.StringIO()):
             setup.reload_config(self.paths, socket=self.socket)
 
 class TmuxTests(TmuxFixture):
+    @unittest.skipUnless(Path('/proc/self/environ').exists(), 'reads the server environment from /proc')
+    def test_private_servers_never_inherit_the_ssh_login_running_the_tests(self):
+        login = {'SSH_CONNECTION': '10.8.0.2 51000 10.8.0.1 22', 'SSH_CLIENT': '10.8.0.2 51000 22',
+                 'SSH_AUTH_SOCK': str(self.directory / 'agent')}
+        with patch.dict(os.environ, login):
+            TmuxFixture.setUp(self)  # A fresh fixture, built from that login.
+        self.start()
+        server = self.tmux('display-message', '-p', '#{pid}')
+        environment = dict(entry.split(b'=', 1) for entry in
+                           Path(f'/proc/{server}/environ').read_bytes().split(b'\0') if b'=' in entry)
+        self.assertEqual({name for name in login if name.encode() in environment}, set())
+        self.assertTrue(Path(os.fsdecode(environment[b'XDG_RUNTIME_DIR'])).is_relative_to(self.directory))
+
     def test_runtime_reload_keeps_sessions_status_and_capability_counts(self):
         self.start()
         self.tmux('set-option', '-g', '@cctab_window_strip', '🔵')
@@ -564,6 +643,20 @@ class TmuxTests(TmuxFixture):
     def test_reload_does_not_start_a_tmux_server(self):
         self.do_reload()
         self.assertFalse(self.socket.exists())
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Jobs are found through Linux /proc')
+    def test_cleanup_waits_for_background_jobs_before_removing_the_runtime_directory(self):
+        # The hooks' run-shell -b helpers outlive kill-server; removing the
+        # runtime directory under them would send them to the real one.
+        self.start()
+        runtime = Path(self.env['XDG_RUNTIME_DIR'])
+        entry = os.fsencode('XDG_RUNTIME_DIR=' + str(runtime))
+        # Like the hooks' helper, each command is a child of the job's shell.
+        self.tmux('run-shell', '-b', 'sh -c \'sleep 1; touch "$XDG_RUNTIME_DIR/finished"\' || :')
+        self.tmux('run-shell', '-b', 'sleep 60 || :')
+        stop_private_tmux(self.command, self.env, timeout=3)
+        self.assertEqual(processes_with_environment(entry), [])
+        self.assertTrue((runtime / 'finished').exists())
 
 
 class ServerInstallationTests(DisposableSetup):

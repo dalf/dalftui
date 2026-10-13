@@ -61,7 +61,10 @@ Missing tmux, a terminal smaller than 40 columns by 12 rows, or failed pane
 creation falls back to a shell. Other sessions and their panes are unchanged.
 The ops session belongs to its window: tmux's `destroy-unattached` option
 removes it, with its panes, once its client detaches or disconnects, so it never
-affects the normal [session policy](tmux.md#session-policy). Ops sessions left by
+affects the normal [session policy](tmux.md#session-policy). Switching from it
+to a session in use, for example with `choose-tree`, takes that session over
+while `detach-on-destroy` is `on`, tmux's default; the policy describes other
+values. Ops sessions left by
 older versions are ignored by that policy; close them with `tmux kill-session`. Standard tmux pane navigation
 works even without dalftui installed on the server (`Ctrl+B`, then an arrow).
 

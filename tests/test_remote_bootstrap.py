@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from test_install import isolated_environment
 from test_tmux_start import REMOTE, TAKEOVER_MESSAGE, UNLABELLED, Terminal
 import dalftui.linux.setup as setup
 from dalftui.vscode import EditorBridge
@@ -54,10 +55,13 @@ class SshAutoTests(unittest.TestCase):
                               '"${DALFTUI_EDITOR_TOKEN-unset}" > "$TEST_EDITOR_ENV"\n'
                               'exit "${TEST_SHELL_STATUS:-0}"\n')
         self.shell.chmod(0o755)
-        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME='',
-                        PATH=str(self.bin), SHELL=str(self.shell),
-                        TEST_COMMAND_LOG=str(self.log), TEST_EDITOR_ENV=str(self.editor_env),
-                        DALFTUI_EDITOR_SOCKET='stale-endpoint', DALFTUI_EDITOR_TOKEN='stale-token')
+        # Tests that install here and connect over SSH run the real session
+        # helper; it must keep its records in a private runtime directory.
+        self.env = isolated_environment(
+            self.directory, HOME=str(self.home), XDG_CONFIG_HOME='',
+            PATH=str(self.bin), SHELL=str(self.shell),
+            TEST_COMMAND_LOG=str(self.log), TEST_EDITOR_ENV=str(self.editor_env),
+            DALFTUI_EDITOR_SOCKET='stale-endpoint', DALFTUI_EDITOR_TOKEN='stale-token')
         self.real_run = subprocess.run
 
     def install(self, config=None, checkout=ROOT):

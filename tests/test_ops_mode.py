@@ -1,6 +1,5 @@
 """Run generated Debian/Ubuntu programs with fake tools and a private tmux server."""
 import json
-import os
 from pathlib import Path
 import shlex
 import shutil
@@ -12,6 +11,7 @@ import unittest
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_install import isolated_environment
 from test_tmux_start import Terminal
 from dalftui import ssh
 from dalftui.linux import ops, remote_bootstrap
@@ -34,10 +34,11 @@ class OpsProgramsTests(unittest.TestCase):
             if target:
                 (self.bin / name).symlink_to(target)
         self.shell = self.tool('login-shell', 'printf "%s\\n" "$*" >> "$SHELL_LOG"\nexit 0\n')
-        self.env = dict(os.environ, HOME=str(self.home), PATH=str(self.bin), SHELL=str(self.shell),
-                        COMMAND_LOG=str(self.log), SHELL_LOG=str(self.shell_log),
-                        TMUX='stale', TMUX_PANE='%old', DALFTUI_EDITOR_TOKEN='stale',
-                        DALFTUI_EDITOR_SOCKET='stale')
+        self.env = isolated_environment(
+            self.directory, HOME=str(self.home), XDG_CONFIG_HOME='', PATH=str(self.bin),
+            SHELL=str(self.shell), COMMAND_LOG=str(self.log), SHELL_LOG=str(self.shell_log),
+            TMUX='stale', TMUX_PANE='%old', DALFTUI_EDITOR_TOKEN='stale',
+            DALFTUI_EDITOR_SOCKET='stale')
         self.tmux = self.bin / 'tmux'
         self.tmux.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
 with open(os.environ['COMMAND_LOG'], 'a', encoding='utf-8') as log:

@@ -16,7 +16,7 @@ STARTER = ROOT / 'bin/tmux-start.sh'
 # Without an SSH host label the session drops any label an earlier launch left.
 UNLABELLED = [';', 'set-option', '-u', '@dalftui_host']
 REMOTE = '10.8.0.9 50000 10.8.0.1 22'
-TAKEOVER_MESSAGE = "printf '%s\\n' 'Another terminal took over this tmux session.'"
+TAKEOVER_MESSAGE = "printf '%s\\n' 'Another terminal took over this tmux session.'; sleep 3"
 
 # Make the pseudo-terminal the child's controlling terminal, so Ctrl+C sends SIGINT.
 CONTROLLING_TERMINAL = ('import fcntl, os, sys, termios\n'
@@ -34,25 +34,42 @@ if args[0] == 'list-sessions':
 if args[0] == 'list-clients':
     print(os.environ.get('TEST_CLIENT_ROWS', ''), end='')
     sys.exit(0)
+def current(target):
+    """Return a listed session's current client count, or None once it is gone."""
+    if target in os.environ.get('TEST_GONE', '').split():
+        return None
+    for row in rows.splitlines():
+        session, attached = row.split(' ')[:2]
+        if session == target:
+            return os.environ.get('TEST_CURRENT_CLIENTS', attached)
+    return None
+if args[0] == 'has-session':
+    sys.exit(0 if current(args[args.index('-t') + 1]) is not None else 1)
 if args[0] == 'display-message':
     if '-t' not in args:
         print('vm')
         sys.exit(0)
-    target = args[args.index('-t') + 1]
-    if target in os.environ.get('TEST_GONE', '').split():
-        sys.exit(1)
-    for row in rows.splitlines():
-        session, attached = row.split(' ')[:2]
-        if session == target:
-            print(os.environ.get('TEST_CURRENT_CLIENTS', attached))
-            sys.exit(0)
-    sys.exit(1)
+    # Like tmux, a missing target prints nothing and still succeeds.
+    clients = current(args[args.index('-t') + 1])
+    if clients is not None:
+        print(clients)
+    sys.exit(0)
 if args[0] == 'detach-client':
     with open(os.environ['TEST_DETACH_LOG'], 'a', encoding='utf-8') as log:
         log.write(json.dumps(args) + '\\n')
     sys.exit(0)
 with open(os.environ['TEST_COMMAND_LOG'], 'wb') as log:
     log.write(b''.join(os.fsencode(arg) + b'\\n' for arg in args))
+# Stand in for the pane: record what reaches the terminal once tmux starts.
+if 'TEST_PANE_INPUT' in os.environ:
+    import select, time
+    received = b''
+    deadline = time.monotonic() + 0.6
+    while (remaining := deadline - time.monotonic()) > 0:
+        if select.select([0], [], [], remaining)[0]:
+            received += os.read(0, 1024)
+    with open(os.environ['TEST_PANE_INPUT'], 'wb') as log:
+        log.write(received)
 sys.exit(int(os.environ.get('TEST_TMUX_STATUS', '0')))
 '''
 
@@ -80,7 +97,21 @@ class Terminal:
     def stop(self):
         if self.process.poll() is None:
             self.process.kill()
-        self.process.wait(5)
+        self.wait(5)
+
+    def wait(self, timeout):
+        """Wait for the child while reading its output.
+
+        On macOS an exiting session leader waits until its terminal output has
+        been read, so waiting without reading can time out even after SIGKILL.
+        """
+        deadline = time.monotonic() + timeout
+        while (status := self.process.poll()) is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(self.process.args, timeout)
+            self.read(min(remaining, 0.05))
+        return status
 
     def read(self, timeout):
         ready, _, _ = select.select([self.master], [], [], timeout)
@@ -107,7 +138,7 @@ class Terminal:
         os.write(self.master, data.encode() if isinstance(data, str) else data)
 
     def finish(self, timeout=5):
-        status = self.process.wait(timeout)
+        status = self.wait(timeout)
         while self.read(0.1):
             pass
         return status
@@ -306,6 +337,57 @@ class TmuxStartTests(unittest.TestCase):
         terminal.send('1')
         terminal.expect('Session work no longer exists.')
         terminal.expect('Choice [n]: ')
+        terminal.send('q')
+        self.assertEqual(terminal.finish(), 0, terminal.text())
+        self.assert_nothing_started()
+
+    def test_keys_typed_just_after_a_choice_never_reach_the_pane(self):
+        pane = self.directory / 'pane'
+        many = ''.join(f'${number} 0 s{number}\n' for number in range(1, 13))
+        # Each choice is followed by an Enter typed out of habit: at once, in the
+        # same write, or later, as over a slow SSH connection.
+        for rows, keys, expected, delay in (
+                ('$5 0 work\n$9 1 0\n', ['1'], ['attach-session', '-d', '-t', '$5'], 0.1),
+                ('$5 0 work\n$9 1 0\n', ['1'], ['attach-session', '-d', '-t', '$5'], 0.3),
+                ('$5 0 work\n$9 1 0\n', ['1'], ['attach-session', '-d', '-t', '$5'], None),
+                ('$5 0 work\n$9 1 0\n', ['n'], ['new-session'], 0.1),
+                ('$5 0 work\n$9 1 0\n', ['2', 'y'], ['attach-session', '-d', '-t', '$9'], 0.1),
+                ('$5 0 work\n$9 1 0\n', ['2', 'y'], ['attach-session', '-d', '-t', '$9'], 0.3),
+                ('$5 0 work\n$9 1 0\n', ['2', 'y'], ['attach-session', '-d', '-t', '$9'], None),
+                (many, ['12\r'], ['attach-session', '-d', '-t', '$12'], 0.1)):
+            with self.subTest(keys=keys, delay=delay):
+                for path in (self.log, self.detach_log, pane):
+                    path.unlink(missing_ok=True)
+                terminal = self.terminal(rows, SSH_CONNECTION=REMOTE, TEST_PANE_INPUT=str(pane))
+                for prompt, key in zip(('Choice [n]: ', '[y/N] '), keys):
+                    terminal.expect(prompt)
+                    if delay is None:
+                        terminal.send(key + '\r')
+                        continue
+                    terminal.send(key)
+                    time.sleep(delay)
+                    terminal.send('\r')
+                deadline = time.monotonic() + 5
+                while not self.log.exists():
+                    self.assertLess(time.monotonic(), deadline, terminal.text())
+                    terminal.read(0.05)
+                # Later keys belong to the pane.
+                terminal.send('z\r')
+                self.assertEqual(terminal.finish(), 0, terminal.text())
+                self.assertEqual(self.command(), expected + UNLABELLED)
+                self.assertEqual(pane.read_bytes(), b'z\n')
+
+    def test_an_enter_after_declining_does_not_create_a_session(self):
+        terminal = self.terminal('$5 0 work\n$9 1 0\n', SSH_CONNECTION=REMOTE)
+        terminal.expect('Choice [n]: ')
+        terminal.send('2')
+        terminal.expect('[y/N] ')
+        terminal.send('n')
+        time.sleep(0.1)
+        terminal.send('\r')
+        terminal.expect('Choice [n]: ')
+        # A q typed at once would join an unread Enter as one answer.
+        time.sleep(0.5)
         terminal.send('q')
         self.assertEqual(terminal.finish(), 0, terminal.text())
         self.assert_nothing_started()
@@ -549,7 +631,11 @@ class RealTmuxStartTests(unittest.TestCase):
         box.send(number)
         box.expect('Session work has a client. Take it over (its window closes)? [y/N] ')
         box.send('y')
-        self.assertEqual(laptop.finish(), 0, laptop.text())
+        # The message stays on screen for 3 s before the terminal closes.
+        laptop.expect('Another terminal took over this tmux session.', timeout=10)
+        started = time.monotonic()
+        self.assertEqual(laptop.finish(10), 0, laptop.text())
+        self.assertGreater(time.monotonic() - started, 2)
         self.assertIn('Another terminal took over this tmux session.', laptop.text())
         # The policy shell starts the new client as its child.
         self.wait_for(lambda: len(self.clients('work')) == 1 and
@@ -557,6 +643,76 @@ class RealTmuxStartTests(unittest.TestCase):
                       'the new client did not take over')
         self.assertEqual(self.clients('other'), [str(other.process.pid)])
         self.assertIsNone(other.process.poll())
+
+    def menu(self):
+        box = Terminal(self, ['/bin/sh', str(STARTER)],
+                       env=dict(self.env, SSH_CONNECTION='10.8.0.3 52000 10.8.0.1 22'),
+                       cwd=self.directory)
+        box.expect('Choice [n]: ')
+        return box
+
+    @staticmethod
+    def number(box, name):
+        return next(line.split()[0] for line in box.text().splitlines()
+                    if line.split()[1:2] == [name])
+
+    def test_a_session_closed_while_the_menu_waits_returns_to_the_list(self):
+        self.tmux('new-session', '-d', '-s', 'work', 'sleep 600')
+        # A name that work prefixes: the check must not match it instead.
+        self.tmux('new-session', '-d', '-s', 'workshop', 'sleep 600')
+        box = self.menu()
+        number = self.number(box, 'work')
+        self.tmux('kill-session', '-t', '=work')
+        box.send(number)
+        box.expect('Session work no longer exists.')
+        box.expect('workshop')
+        box.expect('Choice [n]: ')
+        self.assertNotIn(' work ', box.text()[box.position:])
+        box.send('q')
+        self.assertEqual(box.finish(), 0, box.text())
+        self.assertEqual(self.clients('workshop'), [])
+
+    def test_a_session_closed_while_the_takeover_question_waits_returns_to_the_list(self):
+        self.tmux('new-session', '-d', '-s', 'work', 'sleep 600')
+        self.tmux('new-session', '-d', '-s', 'other', 'sleep 600')
+        laptop = Terminal(self, [shutil.which('tmux'), '-f', '/dev/null', 'attach-session', '-t', 'work'],
+                          env=self.env, cwd=self.directory)
+        self.wait_for(lambda: self.clients('work'), 'the laptop did not attach')
+        box = self.menu()
+        box.send(self.number(box, 'work'))
+        box.expect('Take it over (its window closes)? [y/N] ')
+        self.tmux('kill-session', '-t', '=work')
+        self.assertEqual(laptop.finish(), 0, laptop.text())
+        box.send('y')
+        box.expect('Session work no longer exists.')
+        box.expect('Choice [n]: ')
+        box.send('q')
+        self.assertEqual(box.finish(), 0, box.text())
+        self.assertNotIn("can't find session", box.text())
+        self.assertEqual(self.clients('other'), [])
+
+    def test_an_enter_typed_after_the_choice_never_reaches_the_pane(self):
+        self.tmux('new-session', '-d', '-s', 'other', 'sleep 600')
+        # 0.3 s is a typing gap plus SSH latency; None sends both keys in one write.
+        for index, delay in enumerate((0.1, 0.3, None)):
+            with self.subTest(delay=delay):
+                session = f'work{index}'
+                typed = self.directory / f'typed-{index}'
+                self.tmux('new-session', '-d', '-s', session, f'cat -v > {typed}')
+                box = self.menu()
+                number = self.number(box, session)
+                if delay is None:
+                    box.send(number + '\r')
+                else:
+                    box.send(number)
+                    time.sleep(delay)
+                    box.send('\r')
+                self.wait_for(lambda session=session: len(self.clients(session)) == 1,
+                              'the session was not attached')
+                box.send('z\r')
+                self.wait_for(lambda typed=typed: typed.exists() and typed.read_bytes().endswith(b'z\n'),
+                              'the pane got no input')
+                self.assertEqual(typed.read_bytes(), b'z\n')
 
     def test_a_lone_detached_session_is_attached_automatically(self):
         self.tmux('new-session', '-d', '-s', 'work', 'sleep 600')

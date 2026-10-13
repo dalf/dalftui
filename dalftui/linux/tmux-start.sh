@@ -61,10 +61,11 @@ attach_session() {
 }
 
 # detach-client -E (tmux 2.4+) replaces each other client with a message, so the
-# closing terminal says why. attach -d detaches any remaining client regardless.
+# closing terminal says why. The pause keeps it readable: the SSH launcher closes
+# a window that exits 0 at once. attach -d detaches any remaining client regardless.
 take_over_session() {
     tmux detach-client -s "$1" -E \
-        "printf '%s\\n' 'Another terminal took over this tmux session.'" >/dev/null 2>&1
+        "printf '%s\\n' 'Another terminal took over this tmux session.'; sleep 3" >/dev/null 2>&1
     attach_session "$1"
 }
 
@@ -240,16 +241,34 @@ menu_cancel() {
     printf '\n'
     exit 0
 }
-# Return Ctrl+C to the normal interrupt status before tmux starts.
-leave_menu() {
-    trap 'exit 130' INT
-}
 trap menu_cancel INT
 
 menu_single_key=
 if command -v stty >/dev/null 2>&1 && command -v dd >/dev/null 2>&1; then
     menu_single_key=1
 fi
+
+# Discard keys typed just after a choice, such as an Enter out of habit, so they
+# never reach the pane or answer the next question. Wait until no key has come
+# for 0.5 s, at most ten times: over SSH, an Enter can follow the key by 0.3 s.
+menu_settle() {
+    if [ -z "$menu_single_key" ] || ! menu_tty=$(stty -g 2>/dev/null) ||
+            [ -z "$menu_tty" ] || ! stty -icanon -echo min 0 time 5 2>/dev/null; then
+        menu_restore
+        return 0
+    fi
+    menu_drained=0
+    while [ "$menu_drained" -lt 10 ] &&
+            [ "$(dd bs=64 count=1 2>/dev/null; printf x)" != x ]; do
+        menu_drained=$((menu_drained + 1))
+    done
+    menu_restore
+}
+
+# Return Ctrl+C to the normal interrupt status before tmux starts.
+leave_menu() {
+    trap 'exit 130' INT
+}
 
 # Set menu_answer; return 1 at end of input. With "key", read one keystroke
 # when possible, without waiting for Enter.
@@ -270,7 +289,15 @@ menu_read() {
                 ;;
             "$menu_newline"|"$menu_return") menu_answer= ;;
         esac
-        [ "$menu_rest" = x ] || menu_answer=$menu_answer${menu_rest%x}
+        # An Enter that arrived with the key, typed out of habit, ends the answer.
+        menu_rest=${menu_rest%x}
+        while :; do
+            case $menu_rest in
+                *"$menu_newline"|*"$menu_return") menu_rest=${menu_rest%?} ;;
+                *) break ;;
+            esac
+        done
+        menu_answer=$menu_answer$menu_rest
         case $menu_answer in
             [[:print:]]) printf '%s\n' "$menu_answer" ;;
             *) printf '\n' ;;
@@ -279,6 +306,20 @@ menu_read() {
     fi
     menu_restore
     read -r menu_answer
+}
+
+# Print the picked session's client count, or report that it has gone and fail.
+# display-message prints nothing for a missing session, yet succeeds.
+current_clients() {
+    if tmux has-session -t "$picked_id" 2>/dev/null; then
+        picked_count=$(tmux display-message -p -t "$picked_id" '#{session_attached}' 2>/dev/null)
+        if [ -n "$picked_count" ]; then
+            printf '%s\n' "$picked_count"
+            return 0
+        fi
+    fi
+    printf 'Session %s no longer exists.\n' "${picked_name:-$picked_id}" >&2
+    return 1
 }
 
 not_a_choice() {
@@ -302,6 +343,7 @@ while :; do
     esac
     printf '%s[n] new session (default)   [q] cancel\nChoice [n]: ' "$range"
     menu_read "$menu_mode" || exit 1
+    menu_settle
     case $menu_answer in
         ''|n|N)
             leave_menu
@@ -334,11 +376,8 @@ while :; do
         continue
     fi
     # Use the session's current state: another terminal may have changed it.
-    picked_clients=$(tmux display-message -p -t "$picked_id" '#{session_attached}' 2>/dev/null) || {
-        printf 'Session %s no longer exists.\n' "${picked_name:-$picked_id}" >&2
-        continue
-    }
-    case $picked_clients in ''|*[!0-9]*) picked_clients=0 ;; esac
+    picked_clients=$(current_clients) || continue
+    case $picked_clients in *[!0-9]*) picked_clients=0 ;; esac
     if [ "$picked_clients" -eq 0 ]; then
         leave_menu
         attach_session "$picked_id"
@@ -351,8 +390,11 @@ while :; do
             "${picked_name:-$picked_id}" "$picked_clients"
     fi
     menu_read key || exit 1
+    menu_settle
     case $menu_answer in
         y|Y)
+            # The session may have closed while the question waited.
+            current_clients >/dev/null || continue
             leave_menu
             take_over_session "$picked_id"
             ;;
