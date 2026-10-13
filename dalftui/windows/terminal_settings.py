@@ -1,6 +1,7 @@
 """Add the Ctrl+Shift+F2 SSH tab and set the Terminal defaults, VS Code font and PowerShell 7
 profiles, preserving other settings."""
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -26,8 +27,21 @@ WINDOWS_VSCODE_SETTINGS = {**VSCODE_SETTINGS, 'terminal.integrated.fontFamily': 
 # The values uninstall treats as dalftui's, including the earlier Windows font.
 WINDOWS_VSCODE_VALUES = {'terminal.integrated.fontFamily': (WINDOWS_FONT, PROMPT_FONT),
                          'terminal.integrated.fontSize': (12,)}
-TERMINAL_DEFAULTS = {'font': {'face': WINDOWS_FONT}, 'cursorShape': 'bar',
-                     'padding': '8, 8, 8, 8', 'bellStyle': 'none'}
+# The profiles.defaults values that setup manages, by key path: (value, revision). Each
+# settings file's record keeps the value setup wrote for each key and the value it replaced.
+# To change a value, edit it: reruns move it only where the user kept the value setup wrote.
+# Add a key with revision 1. Reruns and uninstall restore a dropped key, or remove it, where it
+# still holds the value setup wrote. Incrementing a revision also replaces a value the user
+# chose for that key, once, keeping the recorded value to restore.
+DEFAULT_VALUES = {('font', 'face'): (WINDOWS_FONT, 1), ('cursorShape',): ('bar', 1),
+                  ('padding',): ('8, 8, 8, 8', 1), ('bellStyle',): ('none', 1)}
+# Values that installs before records set, used only while a settings file has no record.
+PRE_RECORD_VALUES = {('font', 'face'): (WINDOWS_FONT, PROMPT_FONT), ('cursorShape',): ('bar',),
+                     ('padding',): ('8, 8, 8, 8',), ('bellStyle',): ('none',)}
+# What setup did to each Terminal settings file's defaults, kept next to it for reruns and uninstall.
+RECORD_SUFFIX = '.dalftui-defaults.json'
+RECORD_VERSION = 2
+MISSING = object()
 # Windows Terminal's own PowerShell 7 profile, and a dalftui-owned elevated copy.
 PWSH_GUID = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
 PWSH_SOURCE = 'Windows.Terminal.PowershellCore'
@@ -104,16 +118,17 @@ class ShortcutSkipped(ValueError):
     """The Ctrl+Shift+F2 action was not added; the rest of Terminal setup still applies."""
 
 
-def updated_settings(text, commandline, pwsh=None, skipped=None):
+def updated_settings(text, commandline, pwsh=None, skipped=None, record=None):
     """Return the updated settings. When the shortcut cannot be added, the reason is appended
-    to skipped (a list) and the other settings are still updated."""
+    to skipped (a list) and the other settings are still updated. record is the
+    default_settings record of this file, updated in place; None means a first run."""
     text = removed_actions(text)
     try:
         text = shortcut_settings(text, commandline)
     except ShortcutSkipped as reason:
         if skipped is not None:
             skipped.append(str(reason))
-    text = default_settings(text)
+    text = default_settings(text, record)
     return profile_settings(removed_gist_profiles(text), pwsh) if pwsh else text
 
 
@@ -310,19 +325,112 @@ def profile_settings(text, pwsh):
     return text
 
 
-def default_settings(text):
-    """Set dalftui's profiles.defaults values, replacing other values of the same keys."""
+def defaults_value(settings, key):
+    """Return the profiles.defaults value at the key path, or MISSING."""
+    value = settings.get('profiles') if isinstance(settings, dict) else None
+    for part in ('defaults', *key):
+        if not isinstance(value, dict) or part not in value:
+            return MISSING
+        value = value[part]
+    return value
+
+
+def with_defaults(text, values):
+    """Return text with the profiles.defaults values given by key path."""
+    wanted = {}
+    for key, value in values.items():
+        target = wanted.setdefault('profiles', {}).setdefault('defaults', {})
+        for part in key[:-1]:
+            target = target.setdefault(part, {})
+        target[key[-1]] = value
     clean = clean_jsonc(text)
-    json.loads(clean, object_pairs_hook=unique_object)
     root_items, root_end = members(clean, skip_space(clean, 0), object_mode=True)
     edits = []
-    newline = '\r\n' if '\r\n' in text else '\n'
-    nested_edits(text, clean, (root_items, root_end), {'profiles': {'defaults': TERMINAL_DEFAULTS}},
-                 newline, edits)
+    nested_edits(text, clean, (root_items, root_end), wanted, '\r\n' if '\r\n' in text else '\n', edits)
     for begin, end, replacement in sorted(edits, reverse=True):
         text = text[:begin] + replacement + text[end:]
     # Validate the result before creating a backup or changing anything.
     json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    return text
+
+
+def recorded_keys(record, settings):
+    """Return the record's entries by dotted key path, converting the first format in place.
+
+    That format listed the keys set ('applied') and the values they replaced ('previous'),
+    but not the values written: the current value counts when it is dalftui's.
+    """
+    if 'keys' not in record:
+        previous = record.get('previous', {})
+        keys = {}
+        for name in record.get('applied', []):
+            key = tuple(name.split('.'))
+            known = (*DEFAULT_VALUES.get(key, ())[:1], *PRE_RECORD_VALUES.get(key, ()))
+            if not known:
+                continue
+            current = defaults_value(settings, key)
+            keys[name] = {'written': current if current in known else known[0], 'revision': 1}
+            if name in previous:
+                keys[name]['previous'] = previous[name]
+        record.clear()
+        record.update(version=RECORD_VERSION, keys=keys)
+    return record['keys']
+
+
+def restored_defaults(text, settings, entries):
+    """Restore the value each recorded key replaced, or remove the key, while it holds the
+    value setup wrote."""
+    for name, entry in entries.items():
+        key = tuple(name.split('.'))
+        if defaults_value(settings, key) != entry['written']:
+            continue  # Changed by the user.
+        previous = entry.get('previous', MISSING)
+        if previous is MISSING or isinstance(previous, dict):  # with_defaults merges objects.
+            text = removed_default(text, key)
+        if previous is not MISSING:
+            text = with_defaults(text, {key: previous})
+    return text
+
+
+def removed_default(text, key):
+    """Remove the profiles.defaults member at the key path, keeping its parent objects."""
+    return remove_matching(text, ('profiles', 'defaults', *key[:-1]), lambda item: item[0] == key[-1])
+
+
+def default_settings(text, record=None):
+    """Set dalftui's profiles.defaults values, keeping the values the user chose.
+
+    record, updated in place, holds for each key the value setup wrote ('written'), the value
+    it replaced, if any ('previous'), and the DEFAULT_VALUES revision ('revision'). A key that
+    still holds the written value follows DEFAULT_VALUES; a missing key is set again; a value
+    the user chose is kept unless the revision has increased since.
+    """
+    record = {} if record is None else record
+    pre_record = not record
+    settings = json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    entries = recorded_keys(record, settings)
+    dropped = {name: entries.pop(name) for name in list(entries) if tuple(name.split('.')) not in DEFAULT_VALUES}
+    text = restored_defaults(text, settings, dropped)
+    wanted, pending = {}, {}
+    for key, (value, revision) in DEFAULT_VALUES.items():
+        name = '.'.join(key)
+        current = defaults_value(settings, key)
+        entry = entries.get(name)
+        if entry is None:
+            entry = {}
+            # Once records exist, a key without one was dropped or never set: the value is the user's.
+            if current not in (MISSING, value, *(PRE_RECORD_VALUES.get(key, ()) if pre_record else ())):
+                entry['previous'] = current
+        elif current not in (MISSING, value, entry['written']) and revision <= entry['revision']:
+            continue  # Changed by the user.
+        pending[name] = {**entry, 'written': value, 'revision': revision}
+        if current != value:
+            wanted[key] = value
+    text = with_defaults(text, wanted)
+    # Under a profiles, defaults or font that is not an object, nothing was set: record only what was.
+    updated = json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    entries.update((name, entry) for name, entry in pending.items()
+                   if defaults_value(updated, tuple(name.split('.'))) == entry['written'])
     return text
 
 
@@ -459,8 +567,21 @@ def removed_actions(text, ids=(EDITOR_ACTION_ID,)):
     return text
 
 
-def removed_settings(text):
-    """Remove what setup added to Terminal settings, while it still holds dalftui's values."""
+def removed_settings(text, record=None):
+    """Remove what setup added to Terminal settings, while it still holds dalftui's values.
+
+    Defaults that setup replaced, as listed in the default_settings record, are restored
+    instead of removed. Without a record, a default is removed while it holds the current
+    value or one that installs before records set.
+    """
+    settings = json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
+    entries = recorded_keys(copy.deepcopy(record or {}), settings)
+    text = restored_defaults(text, settings, entries)
+    # Once records exist, a key without one was dropped or never set: the value is the user's.
+    for key in () if record else dict.fromkeys([*DEFAULT_VALUES, *PRE_RECORD_VALUES]):
+        owned = (*DEFAULT_VALUES.get(key, ())[:1], *PRE_RECORD_VALUES.get(key, ()))
+        if defaults_value(settings, key) in owned:
+            text = removed_default(text, key)
     text = removed_actions(text, (ACTION_ID, EDITOR_ACTION_ID))
     profiles = ('profiles', 'list')
     text = remove_matching(text, profiles, lambda item: has_guid(item, ADMIN_GUID))
@@ -472,11 +593,6 @@ def removed_settings(text):
         if has_guid(item, PWSH_GUID):
             text = remove_matching(text, (*profiles, number),
                                    lambda member: member[0] == 'antialiasingMode' and member[1] == 'cleartype')
-    # Earlier Windows versions set PROMPT_FONT.
-    text = remove_matching(text, ('profiles', 'defaults', 'font'),
-                           lambda item: item[0] == 'face' and item[1] in (WINDOWS_FONT, PROMPT_FONT))
-    text = remove_matching(text, ('profiles', 'defaults'), lambda item: item[0] != 'font' and
-                           item[0] in TERMINAL_DEFAULTS and item[1] == TERMINAL_DEFAULTS[item[0]])
     json.loads(clean_jsonc(text), object_pairs_hook=unique_object)
     return text
 
@@ -532,11 +648,53 @@ def uninstall(paths, vscode, dry_run):
               'For a portable installation use -TerminalSettingsPath PATH.')
     for path in dict.fromkeys(paths):
         try:
-            unconfigure(path, 'Terminal', removed_settings, dry_run)
+            record = read_record(path)
+            unconfigure(path, 'Terminal', lambda text, record=record: removed_settings(text, record), dry_run)
+            if not dry_run:
+                record_path(path).unlink(missing_ok=True)
         except (OSError, UnicodeError, ValueError) as error:
             print(f'Terminal settings were not changed: {error}', file=sys.stderr)
             status = 1
     return status
+
+
+def record_path(path):
+    return path.with_name(path.name + RECORD_SUFFIX)
+
+
+def read_record(path):
+    """Return the default_settings record kept for a Terminal settings file; {} when there is none."""
+    try:
+        record = json.loads(record_path(path).read_text(encoding='utf-8-sig'))
+    except FileNotFoundError:
+        return {}
+    except ValueError:
+        record = None
+    if isinstance(record, dict) and 'version' in record:
+        entries = record.get('keys')
+        valid = (record['version'] == RECORD_VERSION and isinstance(entries, dict) and all(
+            isinstance(entry, dict) and 'written' in entry and isinstance(entry.get('revision'), int)
+            for entry in entries.values()))
+    else:  # The first format, without a version.
+        valid = (isinstance(record, dict) and isinstance(record.get('previous', {}), dict)
+                 and isinstance(record.get('applied', []), list)
+                 and all(isinstance(name, str) for name in record.get('applied', [])))
+    if not valid:
+        print(f'Ignoring an unreadable {record_path(path).name}; earlier Terminal defaults are '
+              f'in {path.name}.dalftui-*.bak backups.', file=sys.stderr)
+        return {}
+    return record
+
+
+def write_record(path, record):
+    """Replace the record in one step, so that a failed write keeps the earlier one."""
+    target = record_path(path)
+    pending = target.with_name(target.name + '.tmp')
+    try:
+        pending.write_text(json.dumps(record, indent=4, ensure_ascii=False) + '\n', encoding='utf-8')
+        os.replace(pending, target)
+    finally:
+        pending.unlink(missing_ok=True)
 
 
 def save(path, original, updated, label):
@@ -552,18 +710,32 @@ def save(path, original, updated, label):
 
 
 def configure(path, commandline, pwsh=None):
-    """Configure one Terminal settings file; return whether the Ctrl+Shift+F2 action is set."""
+    """Configure one Terminal settings file.
+
+    A Ctrl+Shift+F2 binding of the user's own is reported and kept, without failing setup:
+    it would otherwise fail on every rerun while the user keeps that binding.
+    """
     original = path.read_bytes()
     text = original.decode('utf-8-sig')
     skipped = []
-    updated = updated_settings(text, commandline, pwsh, skipped)
+    record = read_record(path)
+    recorded = copy.deepcopy(record)
+    updated = updated_settings(text, commandline, pwsh, skipped, record)
     for reason in skipped:
         print(f'Ctrl+Shift+F2 was not added to {path}: {reason}', file=sys.stderr)
     if updated == text:
+        if record != recorded:
+            write_record(path, record)
         print(f'Terminal already configured: {path}')
-        return not skipped
+        return
     gist = gist_profiles(json.loads(clean_jsonc(text), object_pairs_hook=unique_object)) if pwsh else []
     backup = save(path, original, updated, 'Terminal')
+    try:
+        write_record(path, record)
+    except OSError:
+        # Without the record, the next run would take the values setup wrote for the user's own.
+        path.write_bytes(original)
+        raise
     print(f'Terminal backup: {backup}')
     print(f'Terminal configured: {path}')
     if not skipped:
@@ -573,7 +745,6 @@ def configure(path, commandline, pwsh=None):
         print(f'PowerShell 7 uses ClearType; elevated copy: {ADMIN_NAME}')
     for entry in gist:
         print(f'Removed profile from an old setup: {entry["name"]}')
-    return not skipped
 
 
 def vscode_settings(text, settings=None):
@@ -654,9 +825,12 @@ def main():
         except (OSError, UnicodeError, ValueError) as error:
             print(f'VS Code font setup failed: {error}', file=sys.stderr)
             status = 1
-    # Terminal starts this command line itself; cmd.exe never parses it.
+    # Terminal starts this command line itself; cmd.exe never parses it. Like install.cmd,
+    # the bypass applies only to this process, so the tab starts under the default
+    # Restricted policy too.
     commandline = subprocess.list2cmdline([
-        args.shell, '-NoLogo', '-NoProfile', '-File', str(CHECKOUT_ROOT / 'bin/ssh-tab.ps1')])
+        args.shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', str(CHECKOUT_ROOT / 'bin/ssh-tab.ps1')])
     pwsh = subprocess.list2cmdline([args.pwsh]) if args.pwsh else None
     if not pwsh:
         print('PowerShell 7 not found; Windows Terminal PowerShell 7 profiles were not added.')
@@ -667,8 +841,7 @@ def main():
     # A problem in one installation, such as Terminal Preview, must not block the others.
     for path in dict.fromkeys(paths):
         try:
-            if not configure(path, commandline, pwsh):
-                status = 1
+            configure(path, commandline, pwsh)
         except (OSError, UnicodeError, ValueError) as error:
             print(f'Terminal setup failed: {path}: {error}', file=sys.stderr)
             status = 1

@@ -460,8 +460,11 @@ PowerShell 7 profile, the default `FiraCode Nerd Font Mono` face (or the `Hack N
 face of earlier versions), the bar cursor, padding and bell style defaults, and VS Code's
 `terminal.integrated.fontFamily` (`FiraCode Nerd Font Mono`, or the earlier `Hack Nerd Font`)
 and `terminal.integrated.fontSize` (`12`), in each case while they still hold the values
-setup wrote. The old setup gist's profiles that setup removed are not restored, nor is
-Terminal's PowerShell 7 profile hidden again; the Terminal backups keep the earlier settings.
+setup wrote. Terminal defaults that setup replaced, as recorded in
+`settings.json.dalftui-defaults.json`, are restored instead of removed, including
+defaults that later versions no longer set, and the record is deleted. The old setup
+gist's profiles that setup removed are not restored, nor is Terminal's PowerShell 7
+profile hidden again; the Terminal backups keep the earlier settings.
 `-TerminalSettingsPath`, `-VSCodePath` and `-SkipTerminal` work as for setup;
 `-VSCodePath` may name a directory whose `Code.exe` was removed.
 Each changed file is first copied to `<file>.dalftui-<id>.bak`, where earlier
@@ -543,8 +546,15 @@ The profile draws the prompt with Oh My Posh and `config/oh-my-posh.omp.json`.
 Setup installs FiraCode Nerd Font for the current user when it is missing; Hack
 Nerd Font, which earlier versions installed, is kept. In Windows Terminal's
 `profiles.defaults`, setup sets the font face to `FiraCode Nerd Font Mono`, a bar
-cursor (`cursorShape`), `padding` of 8 on each side and no bell (`bellStyle`),
-replacing other values there on each run. A profile with its own value keeps it.
+cursor (`cursorShape`), `padding` of 8 on each side and no bell (`bellStyle`).
+The first run replaces other values there, recording each value it writes and the one it
+replaces in `settings.json.dalftui-defaults.json` next to the settings. Later runs keep
+the values you change in Terminal and set again the ones you remove. Values you have not
+changed follow dalftui: a new version may change them, or stop setting one and restore the
+value it replaced. Rarely, a new version replaces a value you chose, once, to fix a broken
+one. The `Hack Nerd Font` face of earlier versions is replaced. A profile with its own value
+keeps it. If you reset Terminal's settings, delete the record too: it would otherwise
+restore values from the earlier settings on uninstall.
 It also sets `terminal.integrated.fontFamily` to FiraCode Nerd Font Mono and
 `terminal.integrated.fontSize` to 12 in the configured VS Code's `settings.json`
 (in `data\user-data` for a portable installation), creating the file when needed.
@@ -567,7 +577,9 @@ plain shell. Terminal handles the key before the program in the current tab, so 
 works while that tab runs SSH, tmux, `mc` or another program. It uses Terminal's
 [new-tab action](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/actions#new-tab)
 and keeps your default profile and appearance. The tab runs `bin/ssh-tab.ps1` with
-the PowerShell version that ran setup, without your personal profile; it loads
+the PowerShell version that ran setup, without your personal profile and with a
+process-scoped `-ExecutionPolicy Bypass` like `install.cmd`, so it also starts under
+Windows' default Restricted policy; it loads
 `bin/profile.ps1` and runs `dssh`, which starts the picker with `uv.exe` (never a
 batch shim such as mise's `uv.cmd`). Esc in the picker closes the new tab.
 
@@ -595,9 +607,10 @@ It backs up each changed `settings.json`, preserves comments and other settings,
 and adds no duplicates on repeated runs; rerunning it after moving the checkout
 updates the Ctrl+Shift+F2 action. Keys, comments and other values you add to
 dalftui's action or key binding are kept. A Ctrl+Shift+F2 binding of your own is
-preserved: setup reports the conflict and skips only that action, so you can remove
-the binding and rerun; the other Terminal settings and installations are still
-configured. Setup removes the Ctrl+Shift+F3 action installed by earlier versions.
+preserved: setup reports the conflict and skips only that action without failing,
+so you can remove the binding and rerun; the other Terminal settings and
+installations are still configured. Setup removes the Ctrl+Shift+F3 action
+installed by earlier versions.
 When PowerShell 7 is installed, setup turns on ClearType in Terminal's own PowerShell
 profile and adds **Windows PowerShell 7 (Admin)**, which opens it as administrator
 (Terminal 1.13+). Profiles you already have, or later edit, are kept, except the

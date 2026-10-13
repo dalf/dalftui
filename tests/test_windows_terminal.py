@@ -1,4 +1,5 @@
 """Terminal settings tests, runnable on Linux and native Windows."""
+import io
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dalftui.windows import terminal_settings as terminal
 
-LAUNCHER = 'powershell.exe -NoLogo -NoProfile -File "C:\\dalftui\\bin\\ssh-tab.ps1"'
+LAUNCHER = 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "C:\\dalftui\\bin\\ssh-tab.ps1"'
 SHELL = ('--shell', 'pwsh.exe')
 # The Ctrl+Shift+F2/F3 entries that earlier versions installed, in the modern form.
 # Setup keeps the Ctrl+Shift+F2 action (or restores it) and removes the F3 one.
@@ -27,6 +28,8 @@ LEGACY_ACTIONS = [
 ]
 LEGACY_KEYBINDINGS = [{'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'},
                       {'id': terminal.EDITOR_ACTION_ID, 'keys': 'ctrl+shift+f3'}]
+TERMINAL_DEFAULTS = {'font': {'face': terminal.WINDOWS_FONT}, 'cursorShape': 'bar',
+                     'padding': '8, 8, 8, 8', 'bellStyle': 'none'}
 
 
 class TerminalSetupTests(unittest.TestCase):
@@ -103,6 +106,150 @@ class TerminalSetupTests(unittest.TestCase):
                     self.assertNotIn('\n', updated.replace('\r\n', ''))
                 self.assertEqual(terminal.updated_settings(updated, LAUNCHER), updated)
         self.assertEqual(self.settings(terminal.updated_settings('{}', LAUNCHER))['profiles'], {'defaults': expected})
+
+    def rerun(self, defaults, record):
+        """Run default_settings on settings whose profiles.defaults are defaults; return the new ones."""
+        text = json.dumps({'profiles': {'defaults': defaults}})
+        return self.settings(terminal.default_settings(text, record))['profiles']['defaults']
+
+    def installed_defaults(self):
+        """Return profiles.defaults and the record after a first run over personal values."""
+        record = {}
+        defaults = self.rerun({'cursorShape': 'filledBox', 'padding': '0', 'opacity': 90}, record)
+        return defaults, record
+
+    def test_profile_defaults_record_what_setup_wrote_and_replaced(self):
+        defaults, record = self.installed_defaults()
+        self.assertEqual(defaults, {**TERMINAL_DEFAULTS, 'opacity': 90})
+        self.assertEqual(record, {'version': 2, 'keys': {
+            'font.face': {'written': terminal.WINDOWS_FONT, 'revision': 1},
+            'cursorShape': {'written': 'bar', 'previous': 'filledBox', 'revision': 1},
+            'padding': {'written': '8, 8, 8, 8', 'previous': '0', 'revision': 1},
+            'bellStyle': {'written': 'none', 'revision': 1}}})
+        # A value that installs before records set is dalftui's, not one to restore.
+        record = {}
+        self.assertEqual(self.rerun({'font': {'face': terminal.PROMPT_FONT}, 'bellStyle': 'none'}, record),
+                         TERMINAL_DEFAULTS)
+        self.assertEqual([name for name, entry in record['keys'].items() if 'previous' in entry], [])
+
+    def test_profile_defaults_keep_values_changed_after_setup(self):
+        defaults, record = self.installed_defaults()
+        recorded = json.loads(json.dumps(record))
+        # Changed in Terminal after setup: kept. Removed: set again.
+        defaults.update(cursorShape='vintage', bellStyle='audible')
+        del defaults['padding']
+        self.assertEqual(self.rerun(defaults, record), {**TERMINAL_DEFAULTS, 'cursorShape': 'vintage',
+                                                        'bellStyle': 'audible', 'opacity': 90})
+        self.assertEqual(record, recorded)
+
+    def test_profile_defaults_follow_dalftui_changes_to_untouched_values(self):
+        defaults, record = self.installed_defaults()
+        defaults['padding'] = '2'
+        values = {**terminal.DEFAULT_VALUES, ('cursorShape',): ('vintage', 1), ('padding',): ('4', 1),
+                  ('opacity',): (95, 1), ('useAcrylic',): (True, 1)}
+        with patch.object(terminal, 'DEFAULT_VALUES', values):
+            rerun = self.rerun(defaults, record)
+            self.assertEqual(self.rerun(rerun, record), rerun)
+        # The cursor still had dalftui's value; the user had chosen the padding. New keys are set.
+        self.assertEqual(rerun, {**TERMINAL_DEFAULTS, 'cursorShape': 'vintage', 'padding': '2',
+                                 'opacity': 95, 'useAcrylic': True})
+        keys = record['keys']
+        self.assertEqual(keys['cursorShape'], {'written': 'vintage', 'previous': 'filledBox', 'revision': 1})
+        self.assertEqual(keys['padding'], {'written': '8, 8, 8, 8', 'previous': '0', 'revision': 1})
+        self.assertEqual(keys['opacity'], {'written': 95, 'previous': 90, 'revision': 1})
+        self.assertEqual(keys['useAcrylic'], {'written': True, 'revision': 1})
+
+    def test_dropped_profile_defaults_are_restored_or_removed(self):
+        defaults, record = self.installed_defaults()
+        defaults['padding'] = '2'
+        values = {('font', 'face'): terminal.DEFAULT_VALUES[('font', 'face')]}
+        with patch.object(terminal, 'DEFAULT_VALUES', values):
+            rerun = self.rerun(defaults, record)
+        # Restored where setup's value remains; the user's padding is kept. bellStyle had no value.
+        self.assertEqual(rerun, {'font': {'face': terminal.WINDOWS_FONT}, 'cursorShape': 'filledBox',
+                                 'padding': '2', 'opacity': 90})
+        self.assertEqual(list(record['keys']), ['font.face'])
+
+    def test_uninstall_restores_or_removes_defaults_that_setup_no_longer_manages(self):
+        defaults, record = self.installed_defaults()
+        values = {**terminal.DEFAULT_VALUES, ('opacity',): (95, 1), ('useAcrylic',): (True, 1),
+                  ('tabTitle',): ('dalftui', 1)}
+        with patch.object(terminal, 'DEFAULT_VALUES', values):
+            defaults = self.rerun(defaults, record)
+        defaults['tabTitle'] = 'mine'
+        removed = self.settings(terminal.removed_settings(json.dumps({'profiles': {'defaults': defaults}}),
+                                                          record))['profiles']['defaults']
+        self.assertEqual(removed, {'font': {}, 'cursorShape': 'filledBox', 'padding': '0', 'opacity': 90,
+                                   'tabTitle': 'mine'})
+
+    def test_increased_revision_replaces_the_user_value_once(self):
+        defaults, record = self.installed_defaults()
+        defaults['cursorShape'] = 'vintage'
+        values = {**terminal.DEFAULT_VALUES, ('cursorShape',): ('bar', 2)}
+        with patch.object(terminal, 'DEFAULT_VALUES', values):
+            defaults = self.rerun(defaults, record)
+            self.assertEqual(defaults['cursorShape'], 'bar')
+            self.assertEqual(record['keys']['cursorShape'], {'written': 'bar', 'previous': 'filledBox', 'revision': 2})
+            defaults['cursorShape'] = 'vintage'
+            self.assertEqual(self.rerun(defaults, record)['cursorShape'], 'vintage')
+        removed = self.settings(terminal.removed_settings(json.dumps({'profiles': {'defaults': defaults}}),
+                                                          record))['profiles']['defaults']
+        self.assertEqual(removed['cursorShape'], 'vintage')
+
+    def test_first_record_format_is_migrated(self):
+        def first_record():
+            return {'applied': ['font.face', 'cursorShape', 'padding', 'bellStyle'],
+                    'previous': {'cursorShape': 'filledBox', 'padding': '0'}}
+        defaults = {'font': {'face': terminal.PROMPT_FONT}, 'cursorShape': 'vintage', 'bellStyle': 'none'}
+        record = first_record()
+        # The earlier dalftui font was setup's: it moves. The user's cursor stays; padding is set again.
+        self.assertEqual(self.rerun(defaults, record), {**TERMINAL_DEFAULTS, 'cursorShape': 'vintage'})
+        self.assertEqual(record, {'version': 2, 'keys': {
+            'font.face': {'written': terminal.WINDOWS_FONT, 'revision': 1},
+            'cursorShape': {'written': 'bar', 'previous': 'filledBox', 'revision': 1},
+            'padding': {'written': '8, 8, 8, 8', 'previous': '0', 'revision': 1},
+            'bellStyle': {'written': 'none', 'revision': 1}}})
+        defaults.update(cursorShape='bar', padding='4')
+        removed = self.settings(terminal.removed_settings(json.dumps({'profiles': {'defaults': defaults}}),
+                                                          first_record()))['profiles']['defaults']
+        self.assertEqual(removed, {'font': {}, 'cursorShape': 'filledBox', 'padding': '4'})
+
+    def test_dropped_defaults_the_user_chose_are_kept_even_with_earlier_dalftui_values(self):
+        record = {}
+        defaults = self.rerun({}, record)
+        with patch.object(terminal, 'DEFAULT_VALUES', {**terminal.DEFAULT_VALUES, ('cursorShape',): ('filledBox', 1)}):
+            defaults = self.rerun(defaults, record)
+        defaults.update(cursorShape='bar', font={'face': terminal.PROMPT_FONT})
+        values = {key: value for key, value in terminal.DEFAULT_VALUES.items() if key == ('padding',)}
+        with patch.object(terminal, 'DEFAULT_VALUES', values):
+            defaults = self.rerun(defaults, record)
+            self.assertEqual(list(record['keys']), ['padding'])
+            removed = self.settings(terminal.removed_settings(json.dumps({'profiles': {'defaults': defaults}}),
+                                                              record))['profiles']['defaults']
+        # bellStyle, dropped while it held setup's value, was removed by the rerun.
+        self.assertEqual(removed, {'font': {'face': terminal.PROMPT_FONT}, 'cursorShape': 'bar'})
+        # Managed again, the value is the user's: setup records it to restore.
+        self.assertEqual(self.rerun(defaults, record)['cursorShape'], 'bar')
+        self.assertEqual(record['keys']['cursorShape'], {'written': 'bar', 'revision': 1})
+        self.assertEqual(record['keys']['font.face'],
+                         {'written': terminal.WINDOWS_FONT, 'previous': terminal.PROMPT_FONT, 'revision': 1})
+
+    def test_defaults_that_cannot_be_set_are_not_recorded(self):
+        for profiles in ({'defaults': None}, []):  # The legacy profiles array.
+            with self.subTest(profiles=profiles):
+                record = {}
+                text = json.dumps({'profiles': profiles})
+                self.assertEqual(terminal.default_settings(text, record), text)
+                self.assertEqual(record, {'version': 2, 'keys': {}})
+        record = {}
+        defaults = self.rerun({'font': 'Consolas'}, record)
+        self.assertEqual(defaults['font'], 'Consolas')
+        self.assertEqual(list(record['keys']), ['cursorShape', 'padding', 'bellStyle'])
+        # Fixed later, the font is set and the user's face recorded to restore.
+        defaults = self.rerun({**defaults, 'font': {'face': 'Consolas'}}, record)
+        self.assertEqual(defaults['font'], {'face': terminal.WINDOWS_FONT})
+        self.assertEqual(record['keys']['font.face'],
+                         {'written': terminal.WINDOWS_FONT, 'previous': 'Consolas', 'revision': 1})
 
     def test_added_entries_follow_sibling_indentation(self):
         personal = ('{\n    "profiles": \n    {\n        "defaults": \n        {\n            "font": \n'
@@ -268,7 +415,7 @@ class TerminalSetupTests(unittest.TestCase):
         personal = json.dumps({'actions': actions, 'keybindings': [
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+shift+f2'},
             {'id': terminal.ACTION_ID, 'keys': 'ctrl+alt+s'},
-        ], 'profiles': {'defaults': terminal.TERMINAL_DEFAULTS}})
+        ], 'profiles': {'defaults': TERMINAL_DEFAULTS}})
         self.assertEqual(terminal.updated_settings(personal, LAUNCHER), personal)
 
     def test_user_edits_to_dalftui_entries_are_kept(self):
@@ -315,7 +462,7 @@ class TerminalSetupTests(unittest.TestCase):
                         result = self.settings(terminal.updated_settings(personal, LAUNCHER, None, skipped))
                         self.assertEqual(result[array], [{'id': owner, 'keys': key}])
                         self.assertEqual(len(result), 2)
-                        self.assertEqual(result['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+                        self.assertEqual(result['profiles']['defaults'], TERMINAL_DEFAULTS)
                         self.assertEqual(len(skipped), 1)
         # Even next to dalftui's own entries from an earlier setup. Another Terminal installation,
         # such as Preview, is still configured.
@@ -327,13 +474,14 @@ class TerminalSetupTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(ROOT / 'bin/terminal_settings.py'), *SHELL,
                                  '--settings', str(self.path), '--settings', str(preview)],
                                 capture_output=True, text=True)
-        self.assertEqual(result.returncode, 1)
+        # Only reported: setup would otherwise fail on every rerun while the binding stays.
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f'Ctrl+Shift+F2 was not added to {self.path}: Ctrl+Shift+F2 already has a binding',
                       result.stderr)
         stable = self.settings(self.path.read_text(encoding='utf-8'))
         # The earlier F3 entries are still removed.
         self.assertEqual(stable['keybindings'], [LEGACY_KEYBINDINGS[0], {'id': 'Personal.Action', 'keys': 'ctrl+shift+f2'}])
-        self.assertEqual(stable['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+        self.assertEqual(stable['profiles']['defaults'], TERMINAL_DEFAULTS)
         self.assertEqual(self.settings(preview.read_text(encoding='utf-8'))['actions'][0]['keys'], 'ctrl+shift+f2')
         self.assertEqual(len(list(self.root.glob('*.bak'))), 2)
 
@@ -364,11 +512,13 @@ class TerminalSetupTests(unittest.TestCase):
                 skipped = []
                 result = self.settings(terminal.updated_settings(personal, LAUNCHER, None, skipped))
                 self.assertEqual(len(skipped), 1)
-                self.assertEqual(result['profiles']['defaults'], terminal.TERMINAL_DEFAULTS)
+                self.assertEqual(result['profiles']['defaults'], TERMINAL_DEFAULTS)
                 self.assertEqual({key: value for key, value in result.items() if key != 'profiles'},
                                  json.loads(personal))
                 self.path.write_text(personal, encoding='utf-8')
-                self.assertFalse(terminal.configure(self.path, LAUNCHER))
+                terminal.configure(self.path, LAUNCHER)
+                self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['profiles']['defaults'],
+                                 TERMINAL_DEFAULTS)
 
     def test_cli_requires_shell_except_to_uninstall(self):
         self.path.write_text('{}', encoding='utf-8')
@@ -387,7 +537,7 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertIn('Ctrl+Shift+F2 opens the SSH picker (dssh) in a new tab.', result.stdout)
         command = self.settings(self.path.read_text(encoding='utf-8'))['actions'][0]['command']
         self.assertEqual(command['commandline'], subprocess.list2cmdline([
-            shell, '-NoLogo', '-NoProfile', '-File', str(ROOT / 'bin/ssh-tab.ps1')]))
+            shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(ROOT / 'bin/ssh-tab.ps1')]))
         self.assertEqual(command['startingDirectory'], '%USERPROFILE%')
 
     def test_malformed_or_ambiguous_settings_remain_untouched(self):
@@ -521,7 +671,8 @@ class TerminalSetupTests(unittest.TestCase):
         self.assertEqual(result['keybindings'], [LEGACY_KEYBINDINGS[0]])
         # Windows temp paths may use an 8.3 alias; the launcher resolves it.
         self.assertEqual(result['actions'][0]['command']['commandline'], subprocess.list2cmdline([
-            shell, '-NoLogo', '-NoProfile', '-File', str(checkout.resolve() / 'bin/ssh-tab.ps1')]))
+            shell, '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            str(checkout.resolve() / 'bin/ssh-tab.ps1')]))
         self.assertEqual(result['profiles']['defaults']['font']['face'], terminal.WINDOWS_FONT)
 
         result = subprocess.run(command, cwd=unrelated, env=environment, capture_output=True)
@@ -720,6 +871,76 @@ class TerminalSetupTests(unittest.TestCase):
         removed = self.settings(terminal.removed_settings(json.dumps(installed)))['profiles']['defaults']
         self.assertEqual(removed, {'opacity': 90, 'font': {}, 'cursorShape': 'vintage', 'padding': '0',
                                    'bellStyle': 'all'})
+
+    def test_uninstall_restores_defaults_that_setup_replaced(self):
+        record = {}
+        personal = ('{"profiles": {"defaults": {"font": {"face": "Cascadia Code", "size": 11},'
+                    ' "cursorShape": "filledBox", "padding": "0", "opacity": 90}}}')
+        settings = self.settings(terminal.default_settings(personal, record))
+        settings['profiles']['defaults']['padding'] = '4'  # Changed after setup: kept.
+        removed = self.settings(terminal.removed_settings(json.dumps(settings), record))['profiles']['defaults']
+        self.assertEqual(removed, {'font': {'face': 'Cascadia Code', 'size': 11}, 'cursorShape': 'filledBox',
+                                   'padding': '4', 'opacity': 90})
+
+    def test_rerun_and_uninstall_use_the_record_next_to_the_settings(self):
+        self.path.write_text('{"profiles": {"defaults": {"cursorShape": "filledBox"}}}', encoding='utf-8')
+        record = self.root / ('settings.json' + terminal.RECORD_SUFFIX)
+        terminal.configure(self.path, LAUNCHER)
+        self.assertEqual(json.loads(record.read_text(encoding='utf-8'))['keys']['cursorShape'],
+                         {'written': 'bar', 'previous': 'filledBox', 'revision': 1})
+        settings = self.settings(self.path.read_text(encoding='utf-8'))
+        settings['profiles']['defaults']['bellStyle'] = 'audible'
+        self.path.write_text(json.dumps(settings), encoding='utf-8')
+        terminal.configure(self.path, LAUNCHER)
+        self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['profiles']['defaults']['bellStyle'],
+                         'audible')
+        command = [sys.executable, str(ROOT / 'bin/terminal_settings.py'), '--uninstall', '--settings', str(self.path)]
+        result = subprocess.run([*command, '--dry-run'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(record.exists())
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.settings(self.path.read_text(encoding='utf-8'))['profiles']['defaults'],
+                         {'cursorShape': 'filledBox', 'bellStyle': 'audible', 'font': {}})
+        self.assertFalse(record.exists())
+        # Settings configured before the record existed: the values are dalftui's from now on.
+        # Only the record changes, and it is still written.
+        self.path.write_text(terminal.updated_settings('{}', LAUNCHER), encoding='utf-8')
+        terminal.configure(self.path, LAUNCHER)
+        installed = {'version': 2, 'keys': {'.'.join(key): {'written': value, 'revision': revision}
+                                            for key, (value, revision) in terminal.DEFAULT_VALUES.items()}}
+        self.assertEqual(json.loads(record.read_text(encoding='utf-8')), installed)
+        for broken in ('{broken', '{"version": 3, "keys": {}}', '{"version": 2, "keys": {"padding": {}}}',
+                       '{"applied": "padding"}'):
+            with self.subTest(broken=broken):
+                record.write_text(broken, encoding='utf-8')
+                with patch('sys.stderr', new_callable=io.StringIO) as stderr:
+                    terminal.configure(self.path, LAUNCHER)
+                self.assertIn(f'Ignoring an unreadable {record.name}', stderr.getvalue())
+                self.assertEqual(json.loads(record.read_text(encoding='utf-8')), installed)
+
+    def test_settings_are_kept_unchanged_when_the_record_cannot_be_written(self):
+        record = self.root / ('settings.json' + terminal.RECORD_SUFFIX)
+        self.path.write_text('{"profiles": {"defaults": {"cursorShape": "filledBox"}}}', encoding='utf-8')
+        terminal.configure(self.path, LAUNCHER)
+        recorded = record.read_bytes()
+        settings = self.settings(self.path.read_text(encoding='utf-8'))
+        settings['profiles']['defaults'].update(padding='0')
+        del settings['profiles']['defaults']['bellStyle']
+        original = json.dumps(settings).encode()
+        self.path.write_bytes(original)
+        with patch.object(terminal.os, 'replace', side_effect=PermissionError('locked')):
+            with self.assertRaises(PermissionError):
+                terminal.configure(self.path, LAUNCHER)
+        # The next run starts again from the same settings and record.
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(record.read_bytes(), recorded)
+        self.assertEqual(list(self.root.glob('*.tmp')), [])
+
+    def test_record_saved_with_a_byte_order_mark_is_read(self):
+        record = {'version': 2, 'keys': {'cursorShape': {'written': 'bar', 'previous': 'filledBox', 'revision': 1}}}
+        terminal.record_path(self.path).write_bytes(b'\xef\xbb\xbf' + json.dumps(record).encode())
+        self.assertEqual(terminal.read_record(self.path), record)
 
     def test_uninstall_keeps_replaced_gist_profiles_removed(self):
         installed = terminal.updated_settings(self.gist_settings('Windows PowerShell 7'), LAUNCHER, 'pwsh.exe')
