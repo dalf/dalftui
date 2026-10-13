@@ -148,7 +148,12 @@ class Terminal:
 
     def line_mode_restored(self):
         import termios
-        flags = termios.tcgetattr(self.slave)[3]
+        try:
+            flags = termios.tcgetattr(self.slave)[3]
+        except termios.error:
+            # macOS revokes the slave once its session leader exits; there the
+            # master shares the slave's settings (on Linux it has its own).
+            flags = termios.tcgetattr(self.master)[3]
         return bool(flags & termios.ICANON and flags & termios.ECHO)
 
 
@@ -694,11 +699,12 @@ class RealTmuxStartTests(unittest.TestCase):
     def test_an_enter_typed_after_the_choice_never_reaches_the_pane(self):
         self.tmux('new-session', '-d', '-s', 'other', 'sleep 600')
         # 0.3 s is a typing gap plus SSH latency; None sends both keys in one write.
+        # Plain cat writes each line at once; BSD cat -v buffers its output to a file.
         for index, delay in enumerate((0.1, 0.3, None)):
             with self.subTest(delay=delay):
                 session = f'work{index}'
                 typed = self.directory / f'typed-{index}'
-                self.tmux('new-session', '-d', '-s', session, f'cat -v > {typed}')
+                self.tmux('new-session', '-d', '-s', session, f'cat > {typed}')
                 box = self.menu()
                 number = self.number(box, session)
                 if delay is None:
