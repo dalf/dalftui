@@ -468,9 +468,9 @@ profile hidden again; the Terminal backups keep the earlier settings.
 `-TerminalSettingsPath`, `-VSCodePath` and `-SkipTerminal` work as for setup;
 `-VSCodePath` may name a directory whose `Code.exe` was removed.
 Each changed file is first copied to `<file>.dalftui-<id>.bak`, where earlier
-values can be found. `%LOCALAPPDATA%\dalftui\config.json`, the font, and the
-checkout are kept. PowerShell sessions that are already open keep `dssh` until
-you open a new one.
+values can be found. `config.json` and the tab's `python-path.txt` in
+`%LOCALAPPDATA%\dalftui`, the font, and the checkout are kept. PowerShell sessions
+that are already open keep `dssh` until you open a new one.
 
 Running uninstall again reports that nothing is left to remove, and installing
 again afterwards works as a fresh installation.
@@ -579,9 +579,15 @@ works while that tab runs SSH, tmux, `mc` or another program. It uses Terminal's
 and keeps your default profile and appearance. The tab runs `bin/ssh-tab.ps1` with
 the PowerShell version that ran setup, without your personal profile and with a
 process-scoped `-ExecutionPolicy Bypass` like `install.cmd`, so it also starts under
-Windows' default Restricted policy; it loads
-`bin/profile.ps1` and runs `dssh`, which starts the picker with `uv.exe` (never a
-batch shim such as mise's `uv.cmd`). Esc in the picker closes the new tab.
+Windows' default Restricted policy. The tab never shows a prompt, so it skips
+`bin/profile.ps1` and starts the picker directly with `uv.exe` (never a batch shim
+such as mise's `uv.cmd`). It remembers the Python uv found in
+`%LOCALAPPDATA%\dalftui\python-path.txt` and later runs that Python directly,
+without uv; when it is gone, the tab asks uv again. Delete the file to make the tab
+pick up a newer Python. When mise is installed, the tab first loads `mise env`, so
+mise's tools, Python and `[env]` variables such as `SSH_AUTH_SOCK` reach the picker
+and SSH as they do after the profile's `mise activate`. Esc in the picker closes the
+new tab.
 
 At a local PowerShell prompt, **Ctrl+B, then F2** runs `dssh` in the current tab to
 pick a host and connect, keeping the typed line; it does nothing while another

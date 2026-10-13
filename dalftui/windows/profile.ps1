@@ -5,12 +5,7 @@ param(
 
 # Loaded by the PowerShell profile; the implementation follows this checkout.
 $dalftuiPickerPath = Join-Path $Checkout 'bin/ssh_picker.py'
-# A batch shim such as mise's uv.cmd passes arguments through cmd.exe, which
-# reads >=3.11 as a redirection; only uv.exe receives them intact.
-$dalftuiFindUv = {
-    Get-Command uv -CommandType Application -All -ErrorAction SilentlyContinue |
-        Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
-}
+. (Join-Path $PSScriptRoot 'find-uv.ps1')
 $dalftuiCommand = {
     [CmdletBinding()]
     param([Parameter(Position = 0)][ValidateNotNullOrEmpty()][string]$HostName)
