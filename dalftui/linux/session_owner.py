@@ -6,7 +6,8 @@ switches into a session, when a client detaches, and when a session closes:
 - The client that joined a session takes it over: the session's other clients
   are detached. Clients of other sessions are never touched. A client that tmux
   itself moved because its own session closed (detach-on-destroy off) is not a
-  newcomer: it leaves, and the session keeps its client.
+  newcomer: it leaves, and the session keeps its client. Only a positive record
+  of such a move makes a client leave; without one, the newest arrival wins.
 - A session started by the SSH launcher on an installed host has a private
   alias path, recorded in its ``@dalftui_agent_alias`` option. Its shells use
   ``SSH_AUTH_SOCK=<alias>`` from startup: the launcher creates the alias for its
@@ -35,18 +36,21 @@ import time
 
 HOOKS_OPTION = '@dalftui_agent_hooks'
 ALIAS_OPTION = '@dalftui_agent_alias'
-# Set synchronously by the hooks (config/tmux.conf), in tmux's event order:
-# the newest client to arrive in the session, and the newest to attach to it.
+# Set synchronously by the hooks (config/tmux.conf), in tmux's event order: the
+# newest client to arrive in the session, and globally "<session ID> <client>"
+# for an arrival that a session closure followed at once, as tmux's moves are.
 JOINED_OPTION = '@dalftui_joined'
-ATTACHED_OPTION = '@dalftui_attached'
+MOVED_OPTION = '@dalftui_moved'
 AGENT = 'SSH_AUTH_SOCK'
 KEY = re.compile(r'[0-9a-f]{32}\Z')
 # Alias paths are passed through tmux commands and shells as plain words.
 SAFE_PATH = re.compile(r'/[-A-Za-z0-9/._]*\Z')
 SESSION_ID = re.compile(r'\\?(\$[0-9]+)\Z')
-TAKEOVER = "printf '%s\\n' 'Another terminal took over this tmux session.'"
+# The pause keeps the message readable: the SSH launcher closes a window that
+# exits 0 at once. The launcher's own takeover shows the same message and pause.
+TAKEOVER = "printf '%s\\n' 'Another terminal took over this tmux session.'; sleep 3"
 DISPLACED = ("printf '%s\\n' 'Your tmux session closed, and the session tmux moved you to"
-             " is in use by another terminal.'")
+             " is in use by another terminal.'; sleep 3")
 # client_last_session is set by a switch, never by a first attach, and tmux
 # clears it when it moves a client out of a closing session. It is a name,
 # such as "0", which #{?...} would read as false.
@@ -87,6 +91,10 @@ def candidate_directories(env=None):
     bases = []
     runtime = env.get('XDG_RUNTIME_DIR', '')
     if runtime.startswith('/'):
+        # A runtime directory that is gone (logind removed it, or a test's
+        # was cleaned up) means aliases are off, never another user's place.
+        if not os.path.lexists(runtime):
+            return []
         bases.append(os.path.normpath(runtime))
     bases.append(f'/run/user/{uid}')
     candidates = []
@@ -128,12 +136,21 @@ def ensure_directory(env=None):
     return None
 
 
-def alias_parts(alias):
-    """Return (directory, key) for a well-formed alias in a private directory."""
+def alias_parts(alias, restore=False):
+    """Return (directory, key) for a well-formed alias in a private directory.
+
+    With restore, recreate its directory when it is one of the candidates and
+    has gone, so a session keeps its alias path once the directory is back.
+    """
     if not alias or not SAFE_PATH.match(alias) or os.path.normpath(alias) != alias:
         return None
     directory, key = os.path.split(alias)
-    if not KEY.match(key) or not private_directory(directory):
+    if not KEY.match(key):
+        return None
+    if restore and directory in candidate_directories():
+        with contextlib.suppress(OSError):
+            os.mkdir(directory, 0o700)
+    if not private_directory(directory):
         return None
     return directory, key
 
@@ -242,13 +259,22 @@ def list_clients():
 
 
 def list_sessions():
-    """Map each session ID to its alias option, empty when it has none."""
+    """Map each session ID to its alias option, empty when it has none.
+
+    Also return whether tmux may move clients when one of them closes: some
+    session's detach-on-destroy (which inherits the global value) is not on.
+    no-detached counts: before tmux 3.6 it can move clients into attached sessions.
+    """
     sessions = {}
-    for line in tmux('list-sessions', '-F', '#{session_id} #{' + ALIAS_OPTION + '}').splitlines():
-        session, _, alias = line.partition(' ')
+    movable = False
+    for line in tmux('list-sessions', '-F',
+                     '#{session_id} #{detach-on-destroy} #{' + ALIAS_OPTION + '}').splitlines():
+        session, _, rest = line.partition(' ')
+        detach, _, alias = rest.partition(' ')
         if session:
             sessions[session] = alias
-    return sessions
+            movable = movable or detach != 'on'
+    return sessions, movable
 
 
 def process_environment(pid):
@@ -338,7 +364,12 @@ def session_option(session, name):
     return tmux('show-options', '-t', session, '-qv', name, check=False).strip()
 
 
-def enforce(session, hook_client, members):
+def moved_arrival():
+    # Some tmux versions escape "$" when showing an option.
+    return tmux('show-options', '-gqv', MOVED_OPTION, check=False).strip().replace('\\$', '$')
+
+
+def enforce(session, hook_client, members, movable):
     """Leave one client in a session: its newest arrival, unless tmux moved it there.
 
     Background syncs take the lock in any order, so the newest arrival comes
@@ -351,10 +382,15 @@ def enforce(session, hook_client, members):
         newest = next((client for client in members if name and client.name == name), None)
         if newest is not None:
             break
-    # Attaching and switching are choices. A client that arrives with neither
-    # was moved by tmux out of a session that closed (detach-on-destroy off).
-    if newest is not None and (newest.switched or
-                               newest.name == session_option(session, ATTACHED_OPTION)):
+    # tmux moves the clients of a closing session (detach-on-destroy off) just
+    # before announcing the closure; the hooks record an arrival followed at once
+    # by a closure. A switch out of a session that closes at that moment, such
+    # as an ops session, looks the same, so the record counts only where
+    # detach-on-destroy lets tmux move clients. Without a record, the newcomer
+    # chose to come: attaching and switching take over.
+    moved = (newest is not None and movable and not newest.switched
+             and moved_arrival() == f'{session} {newest.name}')
+    if newest is not None and not moved:
         keeper, displaced = newest, None
     else:
         # Without hook_client (tmux before 3.3), keep the most recently active client.
@@ -403,7 +439,12 @@ def update_alias(alias, session, members, server, directories):
 
 
 def collect(server, live, directories):
-    """Remove aliases of closed sessions and of tmux servers that have exited."""
+    """Remove aliases of closed sessions and of tmux servers that have exited.
+
+    Without live (no server, or not run from a hook), only aliases of exited
+    servers and unclaimed launcher aliases go. Return how many were removed.
+    """
+    removed = 0
     for directory in directories:
         try:
             names = os.listdir(directory)
@@ -428,6 +469,8 @@ def collect(server, live, directories):
                 remove_alias(alias)
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(record_path(alias))
+                removed += 1
+    return removed
 
 
 def updated_variables():
@@ -444,8 +487,9 @@ def sync(session=None, hook_client=None, server=None):
     with locked(directory):
         directories = [directory] if directory else []
         try:
-            sessions = list_sessions()
-            clients = list_clients()
+            sessions, movable = list_sessions()
+            # The last session's closure: list-clients has no target left.
+            clients = list_clients() if sessions else []
         except TmuxError:
             # The server is gone or busy: only remove what belongs to dead servers.
             collect(server, None, directories)
@@ -454,12 +498,12 @@ def sync(session=None, hook_client=None, server=None):
         for client in clients:
             members.setdefault(client.session, []).append(client)
         if session in sessions:
-            members[session] = enforce(session, hook_client, members.get(session, []))
+            members[session] = enforce(session, hook_client, members.get(session, []), movable)
         live = set()
         pins = []
         variables = None
         for session_id, alias in sessions.items():
-            parts = alias_parts(alias)
+            parts = alias_parts(alias, restore=True)
             if parts is None:
                 continue
             live.add((session_id, alias))
@@ -496,8 +540,10 @@ def note_error(error):
 
 def last_error():
     directory = ensure_directory()
+    if directory is None:
+        return None
     try:
-        with open(os.path.join(directory or '', ERROR_FILE), encoding='utf-8') as source:
+        with open(os.path.join(directory, ERROR_FILE), encoding='utf-8') as source:
             return source.read().strip()
     except OSError:
         return None
@@ -539,6 +585,8 @@ def new_alias():
     if not alias_parts(alias):
         return None
     with locked(directory):
+        # kill-server runs no hooks: every login removes what exited servers left.
+        collect(None, None, [directory])
         target = agent_socket(dict(os.environb), alias, {directory})
         write_record(alias, {'version': RECORD_VERSION, 'pending': int(time.time()),
                              'server': None, 'session': None, 'owner': None,
@@ -560,7 +608,9 @@ def pane_session():
 
 
 def session_alias(session):
-    return tmux('show-options', '-t', session, '-qv', ALIAS_OPTION, check=False).strip()
+    # show-options -t ignores a missing session; has-session reports it.
+    tmux('has-session', '-t', session)
+    return tmux('show-options', '-t', session, '-qv', ALIAS_OPTION).strip()
 
 
 def session_server(session):
@@ -576,11 +626,13 @@ def session_server(session):
 def enable(session):
     """Give an existing session an alias, for shells started before this feature."""
     # Outside tmux, $TMUX does not name the server; ask the one holding the session.
+    alias = session_alias(session)
     server = current_server() or session_server(session)
     if server is None:
         raise TmuxError(f'Could not find the tmux server of session {session}.')
-    alias = session_alias(session)
-    if not alias_parts(alias):
+    # Keep the recorded alias, which existing shells use, even when its
+    # directory has gone with the runtime directory and has not been recreated.
+    if not alias_parts(alias, restore=True):
         if not os.path.exists('/proc/self/environ'):
             raise TmuxError('Agent aliases need Linux /proc.')
         if tmux('show-options', '-gqv', HOOKS_OPTION, check=False).strip() != 'on':
@@ -615,6 +667,12 @@ def status(session):
     error = last_error()
     if error:
         print(f'Last hook error: {error}')
+    directory = ensure_directory()
+    if directory:
+        with locked(directory):
+            removed = collect(None, None, [directory])
+        if removed:
+            print(f'Removed {removed} alias(es) left by tmux servers that have exited.')
     if not alias_parts(alias):
         print('Agent alias:  none; panes keep the socket tmux copied when they started')
         print(f'This shell:   SSH_AUTH_SOCK={shell or "(unset)"}')

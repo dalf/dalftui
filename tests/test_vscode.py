@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from test_install import DisposableSetup, TmuxFixture
+from test_install import DisposableSetup, TmuxFixture, isolated_environment, stop_private_tmux
 from test_tmux_start import UNLABELLED, Terminal
 from dalftui import vscode
 from dalftui.linux import tmux_editor
@@ -144,8 +144,11 @@ class EditorTests(DisposableSetup):
         code.write_text(f'#!{sys.executable}\nimport json, os, pathlib, sys\n'
                         'pathlib.Path(os.environ["EDITOR_TEST_LOG"]).write_text(json.dumps(sys.argv[1:]))\n')
         code.chmod(0o755)
-        self.editor_env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
-                               EDITOR_TEST_LOG=str(self.log))
+        # The remote session policy runs the launcher, which must not find the
+        # real installation's session helper.
+        self.editor_env = isolated_environment(
+            self.directory, PATH=str(self.bin) + ':' + os.environ['PATH'],
+            EDITOR_TEST_LOG=str(self.log), HOME=str(self.paths.home_dir), XDG_CONFIG_HOME='')
 
     def test_local_folder_names_are_passed_as_one_encoded_uri(self):
         folder = "/tmp/project.with.dot 'quoted' $cash #?é"
@@ -388,9 +391,17 @@ class RemoteCredentialsTests(unittest.TestCase):
                         'if os.environ.get("TEST_WAIT_SIGNAL"): time.sleep(30)\n'
                         'sys.exit(int(os.environ.get("TEST_TMUX_STATUS", "0")))\n')
         tmux.chmod(0o755)
-        self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
-                        TEST_ATTACH=str(self.directory / 'attachment.json'))
+        self.home = self.directory / 'home'
+        self.home.mkdir()
+        self.env = self.environment()
         self.real_run = subprocess.run
+
+    def environment(self):
+        # A private home: from an SSH login, a new session would otherwise run
+        # the real installation's session helper.
+        return isolated_environment(self.directory, PATH=str(self.bin) + ':' + os.environ['PATH'],
+                                    TEST_ATTACH=str(self.directory / 'attachment.json'),
+                                    HOME=str(self.home), XDG_CONFIG_HOME='')
 
     def bridge(self, transport='unix'):
         bridge = vscode.EditorBridge('server', transport=transport)
@@ -426,6 +437,41 @@ class RemoteCredentialsTests(unittest.TestCase):
         return self.real_run(shlex.split(picker.ssh_command('server', bridge=bridge)[-1]),
                              env=dict(self.env, TEST_TOKEN_FILE=bridge.remote_token_file, **env),
                              capture_output=True, timeout=5)
+
+    @unittest.skipUnless(Path('/proc/self/environ').exists(), 'Agent aliases need Linux /proc')
+    def test_ssh_login_environment_never_reaches_the_real_session_helper(self):
+        # Run from an SSH login, a new session runs the installed session
+        # helper. A recording helper stands in for the real installation; only
+        # the private home's helper may run, with the private runtime directory.
+        login = self.directory / 'login'
+        record = self.directory / 'helper-calls'
+        for home in (login, self.home):
+            helper = home / '.config/dalftui/bin/session_owner.py'
+            helper.parent.mkdir(parents=True)
+            helper.write_text('import json, os, sys\n'
+                              f'with open({str(record)!r}, "a", encoding="utf-8") as log:\n'
+                              '    log.write(json.dumps([os.environ["HOME"], sys.argv[1:],\n'
+                              '                          os.environ.get("XDG_RUNTIME_DIR")]) + "\\n")\n'
+                              'sys.exit(1)\n', encoding='utf-8')
+        login_runtime = login / 'run'
+        login_runtime.mkdir(mode=0o700)
+        with patch.dict(os.environ, HOME=str(login), XDG_RUNTIME_DIR=str(login_runtime),
+                        SSH_CONNECTION='10.8.0.2 51000 10.8.0.1 22', SSH_CLIENT='10.8.0.2 51000 22',
+                        SSH_TTY='/dev/pts/9', SSH_AUTH_SOCK='/tmp/ssh-login/agent.1'):
+            self.env = self.environment()
+        for name in ('SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY', 'SSH_AUTH_SOCK'):
+            self.assertNotIn(name, self.env)
+        # The inherited login is gone; an explicit SSH client uses the private helper.
+        for client in ({}, {'SSH_CONNECTION': '10.8.0.2 51000 10.8.0.1 22'}):
+            with self.subTest(client=client):
+                bridge = self.bridge()
+                self.prepare(bridge)
+                result = self.attach(bridge, **client)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(Path(bridge.remote_directory).exists())
+        calls = [json.loads(line) for line in record.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(calls, [[str(self.home), ['new'], self.env['XDG_RUNTIME_DIR']]])
+        self.assertEqual(list(login_runtime.iterdir()), [])
 
     def test_both_transports_deliver_private_credentials_on_stdin_before_forwarding(self):
         for transport in ('unix', 'tcp'):
@@ -721,7 +767,7 @@ class EditorTmuxTests(TmuxFixture):
         subprocess.run(['tmux', '-S', str(self.socket), '-f', str(self.paths.tmux),
                         'new-session', '-d', '-s', 'verify', f'env > {pane_env}; sleep 600'],
                        env=env, check=True, timeout=15)
-        self.addCleanup(subprocess.run, [*self.command, 'kill-server'], capture_output=True, env=self.env)
+        self.addCleanup(stop_private_tmux, self.command, self.env)
         def bridge_lines(text):
             return [line.split('=')[0] for line in text.splitlines() if line.startswith('DALFTUI_EDITOR_')]
         self.assertEqual(bridge_lines(self.tmux('show-environment', '-g')), [])

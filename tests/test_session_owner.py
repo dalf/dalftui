@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import signal
@@ -32,6 +33,23 @@ from dalftui.linux.setup import MARKER, tmux_quote
 STARTER = ROOT / 'bin/tmux-start.sh'
 HELPER = ROOT / 'bin/session_owner.py'
 TAKEOVER_MESSAGE = 'Another terminal took over this tmux session.'
+DISPLACED_MESSAGE = 'is in use by another terminal.'
+HAS_PROC = Path('/proc/self/environ').exists()
+
+
+def tmux_version():
+    """(major, minor) of the tmux on PATH; development builds count as newest."""
+    try:
+        output = subprocess.run(['tmux', '-V'], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return (0, 0)
+    match = re.search(r'(\d+)\.(\d+)', output)
+    return (int(match[1]), int(match[2])) if match else (99, 0)
+
+
+# tmux 3.2 does not tell hooks which client arrived (hook_client).
+needs_hook_client = unittest.skipUnless(
+    shutil.which('tmux') and tmux_version() >= (3, 3), 'tmux 3.3 or newer names the hook client')
 
 # Make the pseudo-terminal the child's controlling terminal, like an SSH login.
 CONTROLLING_TERMINAL = ('import fcntl, os, sys, termios\n'
@@ -208,6 +226,44 @@ class AliasPathTests(unittest.TestCase):
             self.assertIn('$TMUX is not set', error.getvalue())
             self.assertIn('$TMUX is not set', session_owner.last_error())
 
+    def test_last_error_never_reads_the_current_directory(self):
+        # Without a private directory there is no hook error to report.
+        Path(self.runtime, session_owner.ERROR_FILE).write_text('planted\n', encoding='utf-8')
+        previous = os.getcwd()
+        os.chdir(self.runtime)
+        self.addCleanup(os.chdir, previous)
+        with patch.object(session_owner, 'ensure_directory', return_value=None):
+            self.assertIsNone(session_owner.last_error())
+
+    def test_a_missing_runtime_directory_never_falls_back_elsewhere(self):
+        # logind removed it, or a test's runtime directory has been cleaned up
+        # while a hook's helper still runs: aliases are off, not moved to the
+        # login's real runtime directory or /tmp.
+        env = {'XDG_RUNTIME_DIR': str(self.runtime / 'gone')}
+        self.assertEqual(session_owner.candidate_directories(env), [])
+        self.assertIsNone(session_owner.ensure_directory(env))
+        self.assertFalse((self.runtime / 'gone').exists())
+
+    @unittest.skipUnless(HAS_PROC, 'new_alias needs /proc for client environments')
+    def test_new_alias_collects_aliases_of_servers_that_have_exited(self):
+        # kill-server runs no hooks; the next launch removes what it left.
+        directory = session_owner.ensure_directory(self.env)
+        agent = FakeAgent(self, self.runtime, 'laptop')
+        exited = subprocess.Popen(['true'])
+        exited.wait()
+        stale, alive = f'{directory}/{"d" * 32}', f'{directory}/{"e" * 32}'
+        for alias, pid in ((stale, exited.pid), (alive, os.getppid())):
+            session_owner.write_record(alias, {'server': {'socket': '/tmp/tmux-test/default', 'pid': pid},
+                                               'session': '$0'})
+            os.symlink(agent.path, alias)
+        with patch.dict(os.environ, self.env), \
+                patch.object(session_owner, 'hooks_installed', return_value=True), \
+                patch.object(session_owner, 'server_alive', lambda pid: pid == os.getppid()):
+            self.assertIsNotNone(session_owner.new_alias())
+        self.assertFalse(os.path.lexists(stale) or os.path.exists(stale + '.json'))
+        self.assertEqual(os.readlink(alive), agent.path)
+
+    @unittest.skipUnless(HAS_PROC, 'new_alias needs /proc for client environments')
     def test_new_alias_reaches_the_launchers_agent_before_its_session_exists(self):
         # The launcher's tmux client inherits its environment, so the first
         # shell's agent works at once; an alias whose session never started is
@@ -257,7 +313,7 @@ class AliasPathTests(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == 'win32', 'Agent aliases are for Linux tmux servers')
 @unittest.skipUnless(shutil.which('tmux'), 'tmux is required')
-@unittest.skipUnless(Path('/proc/self/environ').exists(), 'Client environments are read from /proc')
+@unittest.skipUnless(HAS_PROC, 'Client environments are read from /proc')
 class SessionOwnerTests(unittest.TestCase):
     """Drive the installed hooks on a disposable server with real clients."""
     def setUp(self):
@@ -282,7 +338,10 @@ class SessionOwnerTests(unittest.TestCase):
         for name in ('TMUX', 'TMUX_PANE', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_AUTH_SOCK',
                      'XDG_CONFIG_HOME', 'dalftui_host_label'):
             self.env.pop(name, None)
-        self.addCleanup(self.tmux, 'kill-server')
+        # The hooks' background helpers outlive kill-server; they finish before
+        # the private runtime directory, registered first, is removed.
+        from test_install import stop_private_tmux
+        self.addCleanup(stop_private_tmux, ['tmux'], self.env)
         self.laptop_agent = FakeAgent(self, self.directory, 'laptop')
         self.box_agent = FakeAgent(self, self.directory, 'box')
         self.reports = 0
@@ -459,11 +518,30 @@ class SessionOwnerTests(unittest.TestCase):
         newer = self.attach('10.8.0.3', None, 'work')
         self.wait_for(lambda: len(self.clients('work')) == 2, 'second client missing')
         fcntl.flock(descriptor, fcntl.LOCK_UN)
-        older.process.wait(10)
-        self.assertIn(TAKEOVER_MESSAGE, older.text())
+        self.assert_left_with(older, TAKEOVER_MESSAGE)
         self.wait_for(lambda: self.owned_by('work', newer), 'the newer client did not keep the session')
         self.assertIsNone(newer.process.poll())
 
+    def assert_left_with(self, client, message):
+        """The detached client shows its message for 3 s, so the window stays readable."""
+        self.wait_for(lambda: message in client.text(), f'{message!r} was not shown')
+        time.sleep(1.5)
+        self.assertIsNone(client.process.poll(), 'the window closed at once')
+        client.process.wait(10)
+
+    def client_name(self, session):
+        return self.wait_for(lambda: self.tmux('list-clients', '-t', session, '-F',
+                                               '#{client_name}').strip(), f'no client in {session}')
+
+    def assert_moved_client_left(self, mover, user, session):
+        self.assert_left_with(mover, DISPLACED_MESSAGE)
+        self.assertNotIn(TAKEOVER_MESSAGE, mover.text())
+        time.sleep(0.5)
+        self.assertTrue(self.owned_by(session, user))
+        self.assertIsNone(user.process.poll())
+        self.assertNotIn(TAKEOVER_MESSAGE, user.text())
+
+    @needs_hook_client
     def test_a_client_moved_out_of_a_closed_session_never_takes_over(self):
         # With detach-on-destroy off, tmux moves the clients of a closing session
         # into another one; that is not a choice to take it over.
@@ -471,22 +549,87 @@ class SessionOwnerTests(unittest.TestCase):
             self.tmux('new-session', '-d', '-s', name)
         self.tmux('set-option', '-g', 'detach-on-destroy', 'off')
         mover = self.attach('10.8.0.2', None, 'zero')
-        self.wait_for(lambda: self.clients('zero'), 'first client missing')
         # A client that switched before still arrives without a choice.
-        mover_name = self.tmux('list-clients', '-t', 'zero', '-F', '#{client_name}').strip()
-        self.tmux('switch-client', '-c', mover_name, '-t', 'one')
+        self.tmux('switch-client', '-c', self.client_name('zero'), '-t', 'one')
         self.wait_for(lambda: self.clients('one'), 'the client did not switch')
         self.tmux('kill-session', '-t', 'zero')
         user = self.attach('10.8.0.3', None, 'two')
         self.wait_for(lambda: self.owned_by('two', user), 'second client missing')
         self.tmux('kill-session', '-t', 'one')
-        mover.process.wait(10)
-        self.assertIn('is in use by another terminal.', mover.text())
-        self.assertNotIn(TAKEOVER_MESSAGE, mover.text())
-        time.sleep(0.5)
-        self.assertTrue(self.owned_by('two', user))
-        self.assertIsNone(user.process.poll())
-        self.assertNotIn(TAKEOVER_MESSAGE, user.text())
+        self.assert_moved_client_left(mover, user, 'two')
+
+    @needs_hook_client
+    def test_an_earlier_attach_never_makes_a_move_a_takeover(self):
+        # The mover attached to "work" before it switched away; another client
+        # came to "work" in between. Only the latest arrival counts, and pty
+        # names are reused, so that old attach does not let the move take over.
+        for name in ('work', 'scratch', 'side'):
+            self.tmux('new-session', '-d', '-s', name)
+        self.tmux('set-option', '-g', 'detach-on-destroy', 'off')
+        mover = self.attach('10.8.0.2', None, 'work')
+        self.tmux('switch-client', '-c', self.client_name('work'), '-t', 'scratch')
+        self.wait_for(lambda: self.clients('scratch') and not self.clients('work'),
+                      'the client did not switch')
+        user = self.attach('10.8.0.3', None, 'side')
+        self.tmux('switch-client', '-c', self.client_name('side'), '-t', 'work')
+        self.wait_for(lambda: self.owned_by('work', user), 'the user did not switch')
+        self.tmux('kill-session', '-t', 'side')
+        # "work" is the only other session: tmux moves the mover there.
+        self.tmux('kill-session', '-t', 'scratch')
+        self.assert_moved_client_left(mover, user, 'work')
+
+    @needs_hook_client
+    def test_switching_out_of_a_closing_session_takes_over(self):
+        # With the default detach-on-destroy, tmux never moves clients. Leaving a
+        # session that closes at once, such as an ops session (destroy-unattached)
+        # left through choose-tree, or "switch-client ; kill-session", is a switch.
+        self.tmux('new-session', '-d', '-s', 'work')
+        for variant in ('destroy-unattached', 'kill-session'):
+            with self.subTest(variant=variant):
+                holder = self.attach('10.8.0.2', None, 'work')
+                self.wait_for(lambda holder=holder: self.owned_by('work', holder), 'no holder')
+                self.tmux('new-session', '-d', '-s', 'ops')
+                switcher = self.attach('10.8.0.3', None, 'ops')
+                name = self.client_name('ops')
+                if variant == 'destroy-unattached':
+                    self.tmux('set-option', '-t', 'ops', 'destroy-unattached', 'on')
+                    self.tmux('switch-client', '-c', name, '-t', 'work')
+                else:
+                    self.tmux('switch-client', '-c', name, '-t', 'work', ';', 'kill-session', '-t', 'ops')
+                holder.process.wait(10)
+                self.assertIn(TAKEOVER_MESSAGE, holder.text())
+                self.wait_for(lambda switcher=switcher: self.owned_by('work', switcher),
+                              'the switching client did not keep the session')
+                self.assertNotIn('ops', self.tmux('list-sessions', '-F', '#{session_name}').split())
+                time.sleep(0.5)
+                self.assertIsNone(switcher.process.poll())
+                self.assertNotIn(DISPLACED_MESSAGE, switcher.text())
+                switcher.stop()
+                self.wait_for(lambda: not self.clients('work'), 'the stopped client stayed')
+
+    @needs_hook_client
+    def test_newcomers_take_over_when_other_configuration_shadows_the_attach_hook(self):
+        # local.conf is sourced after dalftui's configuration: an unindexed
+        # set-hook replaces the whole global array, and a session's own array
+        # (claude-tabstatus installs one) shadows it. A plain attach, without
+        # -d, still takes over.
+        self.tmux('new-session', '-d', '-s', 'work')
+        self.tmux('new-session', '-d', '-s', 'side')
+        self.tmux('set-hook', '-g', 'client-attached', 'set-option -g @local_hook ran')
+        self.tmux('set-hook', '-t', 'side', 'client-attached[1971]', 'set-option -g @session_hook ran')
+        for session in ('work', 'side'):
+            with self.subTest(session=session):
+                older = self.attach('10.8.0.2', None, session)
+                self.wait_for(lambda session=session: len(self.clients(session)) == 1, 'first client missing')
+                newer = self.attach('10.8.0.3', None, session)
+                older.process.wait(10)
+                self.assertIn(TAKEOVER_MESSAGE, older.text())
+                self.wait_for(lambda session=session, newer=newer: self.owned_by(session, newer),
+                              'the newcomer did not keep the session')
+                self.assertIsNone(newer.process.poll())
+        # The shadowing hooks ran instead of dalftui's.
+        self.assertEqual(self.tmux('show-options', '-gqv', '@local_hook').strip(), 'ran')
+        self.assertEqual(self.tmux('show-options', '-gqv', '@session_hook').strip(), 'ran')
 
     def test_detach_and_missing_forwarding_leave_the_alias_absent(self):
         laptop, alias = self.start_laptop()
@@ -544,6 +687,7 @@ class SessionOwnerTests(unittest.TestCase):
         socket_path, pid = self.tmux('display-message', '-p', '#{socket_path} #{pid}').split()
         return f'{socket_path},{pid},0'
 
+    @needs_hook_client
     def test_switching_moves_ownership_and_leaves_other_sessions_alone(self):
         laptop, alias = self.start_laptop()
         # A second aliased session, owned by the box.
@@ -573,22 +717,49 @@ class SessionOwnerTests(unittest.TestCase):
 
     def test_session_close_and_server_restart_never_reuse_an_alias(self):
         laptop, alias = self.start_laptop()
+        server = int(self.tmux('display-message', '-p', '#{pid}'))
         self.tmux('kill-session', '-t', '$0')
         laptop.process.wait(10)
-        # Killing the last session ends the server before its hook can run;
-        # the next server's first sync removes what the dead server left.
-        self.wait_for(lambda: not self.tmux('list-sessions'), 'the server kept sessions')
+        # The server waits for the last session's helper before it exits.
+        self.wait_for(lambda: not session_owner.server_alive(server), 'the server did not exit')
+        self.assertFalse(os.path.lexists(alias) or os.path.exists(alias + '.json'))
         laptop, second = self.start_laptop()
         self.assertNotEqual(second, alias)
-        self.wait_for(lambda: not os.path.lexists(alias) and not os.path.exists(alias + '.json'),
-                      'the old alias was not collected')
+        # kill-server runs no hooks; the next launch removes what it left.
+        server = int(self.tmux('display-message', '-p', '#{pid}'))
+        self.tmux('kill-server')
+        laptop.process.wait(10)
+        self.wait_for(lambda: not session_owner.server_alive(server), 'the server did not exit')
+        self.assertEqual(self.target(second), self.laptop_agent.path)
+        laptop, alias = self.start_laptop()
+        self.assertFalse(os.path.lexists(second) or os.path.exists(second + '.json'))
         # Closing one of several sessions removes its alias and record at once.
         self.tmux('new-session', '-d', '-s', 'spare')
         self.tmux('kill-session', '-t', '$0')
         laptop.process.wait(10)
-        self.wait_for(lambda: not os.path.lexists(second) and not os.path.exists(second + '.json'),
+        self.wait_for(lambda: not os.path.lexists(alias) and not os.path.exists(alias + '.json'),
                       'closing the session left its alias')
         self.assertEqual(sorted(os.listdir(self.alias_directory)), ['lock'])
+
+    def test_closing_one_of_several_sessions_never_holds_up_later_hooks(self):
+        # Only the last session's closure waits for the helper; the others run it
+        # in the background. A foreground helper would hold tmux's hook queue
+        # while it waits for the lock.
+        self.tmux('new-session', '-d', '-s', 'work')
+        self.tmux('new-session', '-d', '-s', 'spare')
+        self.tmux('set-hook', '-g', 'session-created[1971]', 'set-option -g @created yes')
+        self.alias_directory.mkdir(mode=0o700, exist_ok=True)
+        import fcntl
+        descriptor = os.open(self.alias_directory / 'lock', os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, descriptor)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            self.tmux('kill-session', '-t', 'spare')
+            self.tmux('new-session', '-d', '-s', 'next')
+            self.wait_for(lambda: self.tmux('show-options', '-gqv', '@created').strip() == 'yes',
+                          "a later hook waited for the closed session's helper", timeout=2)
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
 
     def test_status_shows_the_alias_and_owner_and_enable_migrates_old_sessions(self):
         laptop, alias = self.start_laptop()
@@ -632,6 +803,35 @@ class SessionOwnerTests(unittest.TestCase):
                 box.stop()
         self.assertIsNone(laptop.process.poll())
 
+    def helper(self, *args, env=None):
+        return subprocess.run([sys.executable, str(HELPER), *args], env=env or self.env,
+                              capture_output=True, text=True, timeout=10)
+
+    def test_enable_keeps_the_alias_of_shells_when_its_directory_has_gone(self):
+        # logind can remove the runtime directory while tmux keeps running;
+        # existing shells still use the recorded alias path.
+        _, alias = self.start_laptop()
+        shutil.rmtree(self.alias_directory)
+        result = self.helper('enable', '--session=$0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.alias(), alias)
+        self.assertIn(f'export SSH_AUTH_SOCK={alias}', result.stdout)
+        self.assertEqual(stat.S_IMODE(os.lstat(self.alias_directory).st_mode), 0o700)
+        self.assertEqual(self.target(alias), self.laptop_agent.path)
+
+    def test_status_and_enable_report_a_missing_session_or_server(self):
+        self.tmux('new-session', '-d', '-s', 'work')
+        nowhere = self.directory / 'no-server'
+        nowhere.mkdir()
+        for env, error in ((self.env, "can't find session"),
+                           (dict(self.env, TMUX_TMPDIR=str(nowhere)), 'no server running|error connecting')):
+            for command in ('status', 'enable'):
+                with self.subTest(command=command, error=error):
+                    result = self.helper(command, '--session=$9', env=env)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertRegex(result.stderr, error)
+                    self.assertNotIn('Run "session_owner.py enable"', result.stdout)
+
     def test_takeover_keeps_the_recorded_arrival_or_else_the_most_recent_one(self):
         # Without the hooks, two plain attaches mirror one session; then run the
         # helper as the hooks would, with and without tmux 3.3's hook_client.
@@ -644,6 +844,18 @@ class SessionOwnerTests(unittest.TestCase):
         time.sleep(1.1)  # tmux records activity in whole seconds.
         newer = self.attach('10.8.0.3', None, 'work')
         self.wait_for(lambda: len(self.clients('work')) == 2, 'second client missing')
+
+        def newer_is_most_recent():
+            # A late terminal reply can make the older client active again;
+            # a key from the newer one makes it the most recent.
+            activity = dict(line.split() for line in self.tmux(
+                'list-clients', '-t', 'work', '-F', '#{client_pid} #{client_activity}').splitlines())
+            if int(activity[str(newer.process.pid)]) > int(activity[str(older.process.pid)]):
+                return True
+            newer.send(' ')
+            return False
+
+        self.wait_for(newer_is_most_recent, 'the newer client never became the most recent')
         session = self.tmux('display-message', '-p', '-t', 'work', '#{session_id}').strip().lstrip('\\')
         hook_env = dict(self.env, TMUX=self.server_variable())
 
@@ -663,11 +875,22 @@ class SessionOwnerTests(unittest.TestCase):
                      self.tmux('list-clients', '-F', '#{client_pid} #{client_name}').splitlines())
         # tmux 3.3+: the hooks record the newest arrival before any helper runs,
         # so a helper run for an earlier client still keeps the newest one.
-        for option in ('@dalftui_joined', '@dalftui_attached'):
-            self.tmux('set-option', '-t', 'work', option, names[str(newer.process.pid)])
+        self.tmux('set-option', '-t', 'work', '@dalftui_joined', names[str(newer.process.pid)])
+        # A move record counts only where detach-on-destroy lets tmux move clients.
+        self.tmux('set-option', '-g', '@dalftui_moved', f'{session} {names[str(newer.process.pid)]}')
         sync(names[str(older.process.pid)])
         older.process.wait(10)
+        self.assertIn(TAKEOVER_MESSAGE, older.text())
         self.assertEqual(self.clients('work'), [str(newer.process.pid)])
+        self.assertEqual(self.clients('side'), [str(side.process.pid)])
+        # Where it can, the recorded mover leaves and the session keeps its client.
+        older = self.attach('10.8.0.2', None, 'work')
+        self.wait_for(lambda: len(self.clients('work')) == 2, 'client did not return')
+        self.tmux('set-option', '-g', 'detach-on-destroy', 'off')
+        sync(names[str(newer.process.pid)])
+        newer.process.wait(10)
+        self.assertIn(DISPLACED_MESSAGE, newer.text())
+        self.assertEqual(self.clients('work'), [str(older.process.pid)])
         self.assertEqual(self.clients('side'), [str(side.process.pid)])
 
     def test_local_and_unhooked_launches_keep_the_raw_socket(self):

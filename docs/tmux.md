@@ -99,8 +99,14 @@ Session 0 has a client. Take it over (its window closes)? [y/N]
 - **An attached session** asks before a takeover; No (the default) returns to the
   list, so a wrong key never closes a live tab. Yes detaches that session's other
   clients, whose windows show *Another terminal took over this tmux session.*
-  and close, then attaches. Clients of other sessions are not affected.
+  for three seconds and close, then attaches. Clients of other sessions are not
+  affected.
 - **`n` or Enter** creates a new independent session. **`q` or Ctrl+C** cancels.
+- An Enter pressed out of habit after a number, `n` or `y` is ignored: keys typed
+  until no key has come for about 0.5 s are discarded, so it never reaches the
+  attached pane or answers the next question. A session closed while the menu
+  or the takeover question waits is reported as *no longer exists*, and the
+  list is shown again.
 - The tty, source address (from the client's own `SSH_CONNECTION`, or `local`),
   connection time and time since its last key are information only. They never
   choose or suggest a session: tabs from one desktop share an address, and an idle
@@ -116,20 +122,34 @@ The launcher alone cannot enforce one client per session: `choose-tree`,
 attach a second client. On hosts with dalftui's tmux configuration (any
 installation mode, after `./bin/reload`), tmux hooks enforce it: when a client
 attaches to a session or switches into it, that session's other clients are
-detached with the same *Another terminal took over this tmux session.* message.
+detached with the same *Another terminal took over this tmux session.* message,
+which stays for three seconds before the window closes.
 The newcomer always wins, so a dead client that still counts as attached never
 locks you out; when two clients arrive almost together, the later one wins.
 Clients of other sessions are never detached. Read-only clients
 (`attach -r`) are not special: they count, and they take over like any other.
-Only attaching and switching take over. With `detach-on-destroy off` (or
-`previous`/`next`), closing a session makes tmux move its clients into another
-session; a moved client that lands in a session another terminal is using is
-detached instead, with *Your tmux session closed, and the session tmux moved you
-to is in use by another terminal.* `detach-on-destroy no-detached` avoids that
-by moving only into a detached session.
+With `detach-on-destroy off` (or `previous`/`next`), closing a session makes
+tmux move its clients into another session. A moved client that lands in a
+session another terminal is using is detached instead, with *Your tmux session
+closed, and the session tmux moved you to is in use by another terminal.*,
+also for three seconds. `detach-on-destroy no-detached` moves only into a
+detached session from tmux 3.6; tmux 3.4 and 3.5 can still move into an attached
+one, so the hooks treat it like `off`. tmux does not mark a move: the hooks
+treat an arrival that a session closure follows at once as moved, and only while
+some session's `detach-on-destroy` is not `on`. Every other arrival takes over, including when
+other configuration (such as `local.conf` or claude-tabstatus) replaces or
+shadows dalftui's `client-attached` hook. With the default `detach-on-destroy
+on`, tmux never moves clients, so switching out of a session that closes at the
+same moment, such as leaving an [ops session](ops-mode.md#ops-mode) through
+`choose-tree` or running `switch-client \; kill-session`, takes over. With
+`off`, `previous`, `next` or `no-detached`, tmux (3.4 checked) cannot tell such a switch from a
+move, so that client is detached as moved. A `detach-on-destroy` set only on the
+closed session cannot be read once it is gone; the remaining sessions' values,
+which include the global one, decide. When tmux moves several clients into one
+session at once, only the last is recognised as moved.
 On tmux 3.2, which does not tell the hook which client arrived, the most
-recently active client keeps the session. Hosts without dalftui's configuration
-keep tmux's own behaviour.
+recently active client keeps the session, whether it attached, switched or was
+moved. Hosts without dalftui's configuration keep tmux's own behaviour.
 
 Server keepalives make the list rare. With OpenSSH's default
 `ClientAliveInterval 0`, a server keeps a slept laptop's connection, tmux client
@@ -187,7 +207,8 @@ alias points at the forwarded agent of the client attached now:
 | A client takes the session over, attaches or switches into it | Replaced atomically with that client's agent |
 | The attached client detaches, disconnects or switches away | Removed |
 | The attached client has no forwarded agent (`ssh -a`, `ForwardAgent no`) | Absent; never borrowed from another client |
-| The session closes | Removed with its record |
+| The session closes | Removed with its record, also when it was the server's last session |
+| `tmux kill-server`, which runs no hooks | Kept, pointing at the last owner's agent, until the SSH launcher next creates a session, `session_owner.py status` runs, or a hook on any tmux server removes it |
 
 Existing shells and background jobs follow the attached desktop from their next
 agent connection; connections already open keep their agent. While the session
@@ -201,7 +222,11 @@ Details:
   never reuses another session's alias.
 - The directory is `$XDG_RUNTIME_DIR/dalftui-agent`, or `/tmp/dalftui-agent-<uid>`
   without a runtime directory. It must be a real directory that you own with
-  mode 0700; otherwise no alias is used.
+  mode 0700; otherwise no alias is used. If `XDG_RUNTIME_DIR` is set but has
+  gone (for example, logind removed it while tmux kept running), aliases are off
+  until it returns; nothing falls back to `/run/user/<uid>` or `/tmp`. Once it is
+  back, the hooks and `enable` recreate `dalftui-agent` and keep each session's
+  recorded alias.
 - The target is read from the attaching tmux client's own process environment,
   never from the session environment or from helper connections. The global
   `update-environment` keeps tmux's default, which sessions without an alias and
@@ -216,12 +241,15 @@ Details:
   other desktop now uses. Cleanup removes only the alias, never OpenSSH's socket.
 
 Scope: only sessions created by the SSH launcher (the SSH picker, `dssh`, or
-`bin/tmux-start.sh` run over SSH) on hosts with `python3` and `/proc`. Local
-kitty sessions, ops sessions, sessions started with a plain `tmux new`, hosts
-without dalftui, and servers not reloaded since an update keep tmux's usual
-`SSH_AUTH_SOCK`. A window moved or linked into another session keeps the alias
-of the session where its shell started. Outside tmux, a login shell keeps the
-socket that SSH gave it.
+`bin/tmux-start.sh` run over SSH) on hosts with `python3` and `/proc`. Each
+desktop sends its own launcher, so the desktop must be updated as well as the
+server: a session that a desktop without this feature creates gets no alias,
+even on an updated and reloaded server, until `enable` is run in it (see
+**Migration** below). Local kitty sessions, ops sessions, sessions started with a
+plain `tmux new`, hosts without dalftui, and servers not reloaded since an
+update keep tmux's usual `SSH_AUTH_SOCK`. A window moved or linked into another
+session keeps the alias of the session where its shell started. Outside tmux, a
+login shell keeps the socket that SSH gave it.
 
 To see where a session's agent requests go, run in one of its panes:
 
@@ -238,12 +266,17 @@ This shell:   uses the alias
 The alias routes to the attached client; it does not prove which agent or keys answer.
 ```
 
-`ssh-add -l` lists the identities that the agent behind it offers.
+`ssh-add -l` lists the identities that the agent behind it offers. `status`
+also removes aliases left by tmux servers that have exited and says how many.
+With a wrong `--session`, or no reachable tmux server, `status` and `enable`
+print tmux's error and exit with status 1.
 
-**Migration.** After updating dalftui on a server, run `./bin/reload` there.
-Sessions created by the updated launcher need nothing else. A session created
-before has no alias, and its shells still hold the raw socket of the connection
-that started them. In such a session, run once:
+**Migration.** After updating dalftui on a server, run `./bin/reload` there,
+and update every desktop that connects to it: the launcher that creates a
+session comes from the desktop. Sessions created by an updated desktop on an
+updated server need nothing else. A session created before, or by a desktop
+that has not been updated, has no alias, and its shells still hold the raw
+socket of the connection that started them. In such a session, run once:
 
 ```sh
 python3 ~/.config/dalftui/bin/session_owner.py enable

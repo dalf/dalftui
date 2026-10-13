@@ -89,7 +89,10 @@ class BootstrapCompatibilityTests(unittest.TestCase):
         tmux = self.bin / 'tmux'
         tmux.write_text('#!/bin/sh\nexit 0\n')
         tmux.chmod(0o755)
-        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME='', PATH=str(self.bin))
+        # No SSH login variables or real runtime directory reach the session helper.
+        from test_install import isolated_environment
+        self.env = isolated_environment(self.directory, HOME=str(self.home), XDG_CONFIG_HOME='',
+                                        PATH=str(self.bin))
 
     def run_script(self, script, *, token=None):
         return subprocess.run([str(self.bin / 'sh'), '-c', script],
@@ -390,6 +393,7 @@ class HookedServerCompatibilityTests(unittest.TestCase):
         # remaining client's F3 reaches its own historical laptop, never the
         # evicted one's.
         from dalftui.linux.setup import MARKER, tmux_quote
+        from test_install import processes_with_environment, stop_private_tmux
         from test_session_owner import Client
         directory = Path(tempfile.mkdtemp(prefix='dalftui-hooked-', dir='/tmp'))
         self.addCleanup(shutil.rmtree, directory, True)
@@ -403,7 +407,7 @@ class HookedServerCompatibilityTests(unittest.TestCase):
         runtime.mkdir(mode=0o700)
         env = dict(os.environ, HOME=str(home), TMUX_TMPDIR=str(directory), XDG_RUNTIME_DIR=str(runtime),
                    SHELL='/bin/sh', TERM='xterm-256color')
-        for name in ('TMUX', 'TMUX_PANE', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_AUTH_SOCK',
+        for name in ('TMUX', 'TMUX_PANE', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY', 'SSH_AUTH_SOCK',
                      'XDG_CONFIG_HOME', protocol.SOCKET_ENV, protocol.TOKEN_ENV):
             env.pop(name, None)
 
@@ -419,7 +423,9 @@ class HookedServerCompatibilityTests(unittest.TestCase):
                 time.sleep(0.05)
             return value
 
-        self.addCleanup(tmux, 'kill-server')
+        # The hooks' background helpers outlive the server; they finish before
+        # the private runtime directory, registered first, is removed.
+        self.addCleanup(stop_private_tmux, ['tmux'], env)
         folder = directory / 'project.with.dot "quoted" $cash'
         folder.mkdir()
         session = tmux('new-session', '-d', '-s', 'work', '-c', str(folder), '-P', '-F',
@@ -447,6 +453,10 @@ class HookedServerCompatibilityTests(unittest.TestCase):
         self.assertEqual(received['message']['protocol_version'], 1)
         self.assertNotIn('message', evicted)
         self.assertIsNone(clients[1].process.poll())
+        # The hooks' helpers ran with the private runtime directory.
+        self.assertTrue((runtime / 'dalftui-agent').is_dir())
+        self.assertTrue(processes_with_environment(
+            os.fsencode('XDG_RUNTIME_DIR=' + str(runtime))), 'the server is not running')
 
 
 class MemoryConnection:

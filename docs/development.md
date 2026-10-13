@@ -239,8 +239,18 @@ Linux lint checks them normally; other missing-member checks remain enabled on
 both platforms.
 
 Tests use disposable directories, OpenSSH's configuration evaluator, and private
-tmux sockets. They do not open SSH connections or touch your live tmux sessions,
-except `tests/test_vscode_ssh.py`: with `DALFTUI_TEST_SSHD=1` (set by macOS CI), it
+tmux sockets. Tests that run the launcher or dalftui's tmux hooks never inherit
+`SSH_CONNECTION` or `SSH_CLIENT`, and give the hooks their own `XDG_RUNTIME_DIR`
+(`isolated_environment` in `tests/test_install.py` also drops `SSH_TTY` and
+`SSH_AUTH_SOCK`); those that run the launcher also use a private `HOME` or
+`XDG_CONFIG_HOME`. Private servers that load dalftui's configuration through the
+test checkout (`TmuxFixture`) keep your `HOME`, but their hooks run that
+checkout's helper. Run from an SSH login, the tests therefore never call your
+installed `session_owner.py` or write to your runtime directory; tests fake such
+a login to check this. Their
+cleanup (`stop_private_tmux`) stops the private server, then waits for, or
+kills, the hook helpers it started before removing that runtime directory.
+They do not open SSH connections or touch your live tmux sessions, except `tests/test_vscode_ssh.py`: with `DALFTUI_TEST_SSHD=1` (set by macOS CI), it
 starts an unprivileged loopback sshd and opens a remote folder through a real forward.
 `DALFTUI_TEST_MACOS_GUI=1` (also set by macOS CI) lets `tests/test_macos_ssh_window.py`
 open a real Terminal.app window.
@@ -264,8 +274,12 @@ hooks into a disposable server with a private runtime directory and fake agents
 that answer with their own name. It checks the first pane, handover between
 desktops in the same shell, the first shell's startup files, panes created while
 attaching, takeovers, racing arrivals, clients that tmux moves out of a closed
-session, switching, missing forwarding, dead and
-late-detaching clients, session close and server restart.
+session, switching out of a closing session, hooks shadowed by other
+configuration, switching, missing forwarding, dead and late-detaching clients,
+a missing runtime directory, session close and server restart. Tests that need
+the hook client name skip on tmux before 3.3. `tests/test_tmux_start.py` runs
+the launcher menu on a pty, against a fake tmux and a real private server,
+including keys typed just after a choice and sessions closed while it waits.
 System overview tests use fake tools and local files to cover unavailable tools,
 permission failures, timeouts, empty journal matches, overlay roots, disk/inode
 warnings, and degraded software RAID without contacting an SSH server.
