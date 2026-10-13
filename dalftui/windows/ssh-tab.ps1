@@ -25,7 +25,7 @@ try {
     if ($env:LOCALAPPDATA -match '\A(?:[A-Za-z]:[\\/]|[\\/]{2})') {
         $cache = Join-Path $env:LOCALAPPDATA 'dalftui\python-path.txt'
     }
-    $isPython = { param($Path) $Path -match '\A(?:[A-Za-z]:[\\/]|[\\/]{2}).*[\\/]python\.exe\z' -and [IO.File]::Exists($Path) }
+    $isPython = { param($Path) $Path -match '\A(?:[A-Za-z]:[\\/]|[\\/]{2}).*[\\/]python[0-9.]*\.exe\z' -and [IO.File]::Exists($Path) }
     # Exit with the picker's status, or return when this Python cannot start: it is
     # not a program, or a DLL it needs is gone (STATUS_DLL_NOT_FOUND).
     $runPicker = {
