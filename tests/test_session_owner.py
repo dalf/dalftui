@@ -900,7 +900,10 @@ class SessionOwnerTests(unittest.TestCase):
         self.assertEqual(self.alias(), '')
         self.assertEqual(self.probe_pane(self.first_pane())[1:], [self.laptop_agent.path, 'laptop'])
         local.stop()
+        # The next launch must not find the old server still exiting.
+        server = int(self.tmux('display-message', '-p', '#{pid}'))
         self.tmux('kill-server')
+        self.wait_for(lambda: not session_owner.server_alive(server), 'the server did not exit')
         # A server that has not loaded the hooks (not reloaded since an update).
         Path(self.env['HOME'], '.tmux.conf').write_text('', encoding='utf-8')
         self.connect('10.8.0.2', self.laptop_agent)
