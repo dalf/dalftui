@@ -688,7 +688,11 @@ function Invoke-DalftuiWindowsSetup {
             Assert-True ($LASTEXITCODE -eq 17 -and ((ConvertFrom-Json -InputObject $argumentJson).args -join ' ') -eq '--pick') `
                 "The Terminal launcher must find uv.exe through mise: $argumentJson"
             Assert-True ([IO.File]::ReadAllText($tabLog).Trim() -eq 'mise env -s pwsh') 'The Terminal launcher must load only mise env'
-            Assert-True ([IO.File]::ReadAllText($tabCache) -eq $cachedPython) 'The Terminal launcher must remember the Python found through mise'
+            # With less on PATH, uv may find another Python, such as its own on CI runners.
+            $cachedPython = [IO.File]::ReadAllText($tabCache)
+            Assert-True ([IO.File]::Exists($cachedPython) -and
+                         (ConvertFrom-Json -InputObject $argumentJson).python -eq $cachedPython) `
+                "The Terminal launcher must remember the Python found through mise: $cachedPython $argumentJson"
             # A remembered Python needs neither uv nor mise; the picker's status passes through.
             $env:PATH = Join-Path $env:SystemRoot 'System32'
             $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1')
