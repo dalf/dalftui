@@ -43,6 +43,7 @@ needed. Representative layout:
 │       ├── terminal_settings.py
 │       ├── setup.ps1
 │       ├── profile.ps1
+│       ├── find-uv.ps1
 │       └── ssh-tab.ps1
 ├── bridge_protocol.py
 ├── mise.toml

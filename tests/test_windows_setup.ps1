@@ -21,7 +21,8 @@ function Copy-DalftuiWindowsCheckout([string]$Source, [string]$Destination) {
                          'bin/terminal_settings.py', 'dalftui\__init__.py',
                          'dalftui\windows\__init__.py', 'dalftui\windows\setup.ps1',
                          'dalftui\windows\profile.ps1', 'dalftui\windows\ssh-tab.ps1',
-                         'dalftui\windows\terminal_settings.py', 'config\oh-my-posh.omp.json')) {
+                         'dalftui\windows\find-uv.ps1', 'dalftui\windows\terminal_settings.py',
+                         'config\oh-my-posh.omp.json')) {
         $destinationPath = Join-Path $Destination $file
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destinationPath)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $Source $file) -Destination $destinationPath
@@ -38,7 +39,7 @@ try {
     }
     foreach ($file in @('install.ps1', 'bin/profile.ps1', 'bin/ssh-tab.ps1',
                          'dalftui\windows\setup.ps1', 'dalftui\windows\profile.ps1',
-                         'dalftui\windows\ssh-tab.ps1')) {
+                         'dalftui\windows\ssh-tab.ps1', 'dalftui\windows\find-uv.ps1')) {
         $parseErrors = $null
         [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo $file),
             [ref]$null, [ref]$parseErrors) | Out-Null
@@ -640,20 +641,110 @@ function Invoke-DalftuiWindowsSetup {
     $terminalShell = Join-Path $PSHOME $shellName
     # Terminal's Ctrl+Shift+F2 tab runs the bin launcher in a fresh process without a
     # personal PowerShell profile; it must also reach uv.exe past a batch shim.
-    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'), 'import json, sys; print(json.dumps(sys.argv[1:])); sys.exit(17)')
+    [IO.File]::WriteAllText((Join-Path $checkout 'bin/ssh_picker.py'),
+        "import json, os, sys; print(json.dumps({'args': sys.argv[1:], 'mise': os.environ.get('DALFTUI_TAB_MISE'), 'python': sys.executable})); sys.exit(17)")
     $previousPath = $env:PATH
+    # The tab never shows a prompt, so it must not load the interactive profile:
+    # fakes first on PATH record a mise activation or an Oh My Posh init. mise's
+    # environment still applies, as after activation: its [env] variables reach SSH.
+    $tabTools = Join-Path $root 'tab tools'
+    [IO.Directory]::CreateDirectory($tabTools) | Out-Null
+    $tabLog = Join-Path $root 'tab-tools.txt'
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        $env:PATH = $shimBin + [IO.Path]::PathSeparator + $env:PATH
+        [IO.File]::WriteAllLines((Join-Path $tabTools 'oh-my-posh.cmd'), @('@echo off', ('echo oh-my-posh %*>> "' + $tabLog + '"')))
+        [IO.File]::WriteAllLines((Join-Path $tabTools 'mise.cmd'), @('@echo off', ('echo mise %*>> "' + $tabLog + '"'),
+            "echo `$env:DALFTUI_TAB_MISE = 'env'"))
+        $env:PATH = $tabTools + [IO.Path]::PathSeparator + $shimBin + [IO.Path]::PathSeparator + $env:PATH
     }
+    # The tab remembers its Python under LOCALAPPDATA: only a temporary one here.
+    $previousLocalAppData = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = Join-Path $root ("tab app data " + [char]0xe9)
+    $tabCache = Join-Path $env:LOCALAPPDATA 'dalftui\python-path.txt'
     # The tab must also start under Windows' default Restricted policy; the variable
     # sets that policy for the process unless the command line overrides it.
     $previousPolicy = $env:PSExecutionPolicyPreference
     $env:PSExecutionPolicyPreference = 'Restricted'
-    try { $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
-    finally { $env:PATH = $previousPath; $env:PSExecutionPolicyPreference = $previousPolicy }
-    Assert-True ($LASTEXITCODE -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
-    $arguments = ConvertFrom-Json -InputObject $argumentJson
-    Assert-True (($arguments -join ' ') -eq '--pick') "The Terminal launcher must open the picker through uv.exe: $argumentJson"
+    try {
+        $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1')
+        $tabExitCode = $LASTEXITCODE
+        Assert-True ($tabExitCode -eq 17) 'The Terminal launcher must preserve SSH/picker exit status'
+        $tabResult = ConvertFrom-Json -InputObject $argumentJson
+        Assert-True (($tabResult.args -join ' ') -eq '--pick') "The Terminal launcher must open the picker through uv.exe: $argumentJson"
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            Assert-True ([IO.File]::ReadAllText($tabLog).Trim() -eq 'mise env -s pwsh') 'The Terminal launcher must not load the interactive profile'
+            Assert-True ($tabResult.mise -eq 'env') "The Terminal launcher must apply mise's environment with uv.exe on PATH: $argumentJson"
+            # The first tab remembers the Python uv found and runs the picker with it.
+            $cachedPython = [IO.File]::ReadAllText($tabCache)
+            Assert-True ([IO.File]::Exists($cachedPython) -and $cachedPython.EndsWith('\python.exe') -and
+                         $tabResult.python -eq $cachedPython) "The Terminal launcher must remember its Python: $cachedPython $argumentJson"
+            Remove-Item -LiteralPath $tabLog, $tabCache
+            # Without uv.exe on PATH, the tab takes uv.exe from mise's environment.
+            $uvDirectory = Split-Path -Parent (Get-Command uv -CommandType Application -All |
+                Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1).Source
+            [IO.File]::WriteAllLines((Join-Path $tabTools 'mise.cmd'), @('@echo off', ('echo mise %*>> "' + $tabLog + '"'),
+                ('echo $env:PATH = ' + (ConvertTo-DalftuiSingleQuotedLiteral $uvDirectory) + ' + [IO.Path]::PathSeparator + $env:PATH')))
+            $env:PATH = $tabTools + [IO.Path]::PathSeparator + (Join-Path $env:SystemRoot 'System32')
+            $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1')
+            Assert-True ($LASTEXITCODE -eq 17 -and ((ConvertFrom-Json -InputObject $argumentJson).args -join ' ') -eq '--pick') `
+                "The Terminal launcher must find uv.exe through mise: $argumentJson"
+            Assert-True ([IO.File]::ReadAllText($tabLog).Trim() -eq 'mise env -s pwsh') 'The Terminal launcher must load only mise env'
+            Assert-True ([IO.File]::ReadAllText($tabCache) -eq $cachedPython) 'The Terminal launcher must remember the Python found through mise'
+            # A remembered Python needs neither uv nor mise; the picker's status passes through.
+            $env:PATH = Join-Path $env:SystemRoot 'System32'
+            $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1')
+            $tabResult = ConvertFrom-Json -InputObject $argumentJson
+            Assert-True ($LASTEXITCODE -eq 17 -and ($tabResult.args -join ' ') -eq '--pick' -and $tabResult.python -eq $cachedPython) `
+                "The Terminal launcher must run the remembered Python without uv: $argumentJson"
+            # A remembered Python that is gone, unreadable or cannot start is asked of uv again.
+            $brokenPython = Join-Path $root 'broken python\python.exe'
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $brokenPython)) | Out-Null
+            [IO.File]::WriteAllText($brokenPython, 'not a program')
+            $env:PATH = $tabTools + [IO.Path]::PathSeparator + (Join-Path $env:SystemRoot 'System32')
+            foreach ($stale in @((Join-Path $root 'gone\python.exe'), "garbage`0`n", $brokenPython)) {
+                [IO.File]::WriteAllText($tabCache, $stale)
+                $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1')
+                $tabResult = ConvertFrom-Json -InputObject $argumentJson
+                Assert-True ($LASTEXITCODE -eq 17 -and $tabResult.python -eq $cachedPython -and
+                             [IO.File]::ReadAllText($tabCache) -eq $cachedPython) `
+                    "The Terminal launcher must replace a remembered Python that cannot run ($stale): $argumentJson"
+            }
+            # uv uses a .venv in the starting directory; the tab remembers its base Python.
+            $venvStart = Join-Path $root 'venv start'
+            & (Join-Path $uvDirectory 'uv.exe') venv --quiet --python $cachedPython (Join-Path $venvStart '.venv')
+            Assert-True ($LASTEXITCODE -eq 0) 'uv must create the test virtual environment'
+            Remove-Item -LiteralPath $tabCache
+            Push-Location -LiteralPath $venvStart
+            try { $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
+            finally { Pop-Location }
+            # uv run would report the virtual environment's Python: the picker ran the remembered one.
+            Assert-True ($LASTEXITCODE -eq 17 -and [IO.File]::ReadAllText($tabCache) -eq $cachedPython -and
+                         (ConvertFrom-Json -InputObject $argumentJson).python -eq $cachedPython) `
+                "The Terminal launcher must not remember a virtual environment's Python: $argumentJson"
+            # Without a fully qualified LOCALAPPDATA, the tab remembers nothing.
+            $env:LOCALAPPDATA = 'relative app data'
+            Push-Location -LiteralPath $root
+            try { $argumentJson = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') }
+            finally { Pop-Location }
+            Assert-True ($LASTEXITCODE -eq 17 -and -not (Test-Path -LiteralPath (Join-Path $root 'relative app data'))) `
+                "The Terminal launcher must ignore a relative LOCALAPPDATA: $argumentJson"
+            # Without uv.exe, mise or a remembered Python, the tab explains what is missing.
+            $env:LOCALAPPDATA = Split-Path -Parent (Split-Path -Parent $tabCache)
+            [IO.File]::WriteAllText($tabCache, $brokenPython)
+            $previousErrorActionPreference = $ErrorActionPreference
+            $env:PATH = Join-Path $env:SystemRoot 'System32'
+            try {
+                $ErrorActionPreference = 'Continue'
+                $failureOutput = & $terminalShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $checkout 'bin/ssh-tab.ps1') 2>&1
+                $failureExitCode = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $previousErrorActionPreference }
+            Assert-True ($failureExitCode -eq 1 -and ($failureOutput | Out-String).Contains('uv is required')) `
+                "The Terminal launcher must report that uv is missing: $failureOutput"
+        }
+    } finally {
+        $env:PATH = $previousPath
+        $env:PSExecutionPolicyPreference = $previousPolicy
+        $env:LOCALAPPDATA = $previousLocalAppData
+    }
 
     # Unix-like aliases need their tools. Load the profile at global scope in a
     # fresh shell, first without the tools, then with fakes that echo arguments.
