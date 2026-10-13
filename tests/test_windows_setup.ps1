@@ -675,7 +675,7 @@ function Invoke-DalftuiWindowsSetup {
             Assert-True ($tabResult.mise -eq 'env') "The Terminal launcher must apply mise's environment with uv.exe on PATH: $argumentJson"
             # The first tab remembers the Python uv found and runs the picker with it.
             $cachedPython = [IO.File]::ReadAllText($tabCache)
-            Assert-True ([IO.File]::Exists($cachedPython) -and $cachedPython.EndsWith('\python.exe') -and
+            Assert-True ([IO.File]::Exists($cachedPython) -and $cachedPython -match '\\python[0-9.]*\.exe\z' -and
                          $tabResult.python -eq $cachedPython) "The Terminal launcher must remember its Python: $cachedPython $argumentJson"
             Remove-Item -LiteralPath $tabLog, $tabCache
             # Without uv.exe on PATH, the tab takes uv.exe from mise's environment.
